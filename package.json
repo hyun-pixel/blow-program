@@ -1,0 +1,31 @@
+{
+  "name": "blow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build --workspace @blow/automation-core && npm run build --workspace @blow/naver-adapter && npm run dev --workspace @blow/desktop",
+    "build": "npm run build --workspace @blow/automation-core && npm run build --workspace @blow/naver-adapter && npm run build --workspace @blow/desktop",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "poc:mock": "npm run build --workspace @blow/automation-core && npm run build --workspace @blow/naver-adapter && tsx apps/desktop/scripts/run-mock-poc.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

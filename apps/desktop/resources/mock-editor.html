@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BLOW 가짜 블로그 편집기</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --canvas: light-dark(#f4f5f7, #17191d);
+        --surface: light-dark(#ffffff, #202329);
+        --soft: light-dark(#f7f8fa, #272b31);
+        --text: light-dark(#171a1f, #f2f4f7);
+        --muted: light-dark(#626a76, #b9c0cb);
+        --line: light-dark(#d9dde3, #454b55);
+        --control: light-dark(#727b88, #8b95a3);
+        --primary: light-dark(#1e40af, #8da7ff);
+        --primary-hover: light-dark(#18368f, #a9bbff);
+        --primary-ink: light-dark(#ffffff, #10182f);
+        --success: light-dark(#16704a, #7ed3a9);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        font-family:
+          "SUIT Variable",
+          SUIT,
+          Pretendard,
+          "Noto Sans KR",
+          "Segoe UI",
+          sans-serif;
+        font-size: 16px;
+        font-feature-settings: "kern" 1;
+        text-rendering: optimizeLegibility;
+      }
+
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        color: var(--text);
+        background: var(--canvas);
+      }
+
+      button,
+      input,
+      [contenteditable] {
+        font: inherit;
+      }
+
+      button {
+        min-height: 44px;
+        cursor: pointer;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      [contenteditable]:focus-visible {
+        outline: 3px solid var(--primary);
+        outline-offset: 3px;
+      }
+
+      .titlebar {
+        min-height: 52px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 0 24px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+
+      .wordmark {
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .environment {
+        color: var(--muted);
+        font-size: 0.875rem;
+      }
+
+      .page {
+        width: min(920px, calc(100% - 32px));
+        margin: 36px auto;
+      }
+
+      .notice {
+        margin-bottom: 24px;
+        padding: 14px 16px;
+        border-left: 3px solid var(--primary);
+        color: var(--muted);
+        background: var(--surface);
+        line-height: 1.5;
+      }
+
+      .editor {
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--surface);
+      }
+
+      .editor-header {
+        padding: 18px 22px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .editor-header h1 {
+        margin: 0 0 4px;
+        font-size: 1.125rem;
+        line-height: 1.35;
+      }
+
+      .editor-header p {
+        max-width: 65ch;
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.875rem;
+        line-height: 1.5;
+      }
+
+      .field {
+        padding: 22px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .field label,
+      .field-label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 0.875rem;
+        font-weight: 600;
+      }
+
+      #mock-title,
+      #mock-body {
+        width: 100%;
+        border: 1px solid var(--control);
+        border-radius: 6px;
+        color: var(--text);
+        background: var(--surface);
+      }
+
+      #mock-title {
+        min-height: 48px;
+        padding: 10px 12px;
+      }
+
+      #mock-body {
+        min-height: 280px;
+        padding: 18px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+
+      #mock-body:empty::before {
+        color: var(--muted);
+        content: "본문이 입력됩니다.";
+      }
+
+      .actionbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 14px 22px;
+        background: var(--soft);
+      }
+
+      #mock-status {
+        color: var(--muted);
+        font-size: 0.875rem;
+        font-variant-numeric: tabular-nums lining-nums;
+      }
+
+      #mock-status.is-complete {
+        color: var(--success);
+        font-weight: 600;
+      }
+
+      #save-draft {
+        padding: 9px 18px;
+        border: 1px solid var(--primary);
+        border-radius: 6px;
+        color: var(--primary-ink);
+        background: var(--primary);
+        font-weight: 600;
+      }
+
+      #save-draft:hover {
+        border-color: var(--primary-hover);
+        background: var(--primary-hover);
+      }
+
+      #save-draft:disabled {
+        cursor: wait;
+        opacity: 0.72;
+      }
+
+      @media (max-width: 640px) {
+        .titlebar {
+          align-items: flex-start;
+          flex-direction: column;
+          padding-block: 12px;
+        }
+
+        .page {
+          margin-block: 20px;
+        }
+
+        .field {
+          padding: 16px;
+        }
+
+        .actionbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        #save-draft {
+          width: 100%;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="titlebar">
+      <span class="wordmark">BLOW</span>
+      <span class="environment">로컬 가짜 편집기</span>
+    </header>
+
+    <main class="page">
+      <p class="notice">
+        실제 네이버 화면이 아닙니다. 화면 인식, 제목과 본문 입력, 임시저장 확인을 안전하게 검증합니다.
+      </p>
+
+      <article class="editor" data-testid="mock-editor">
+        <header class="editor-header">
+          <h1>블로그 글쓰기</h1>
+          <p>자동 입력 결과는 이 컴퓨터의 테스트 화면에서만 확인합니다.</p>
+        </header>
+
+        <div class="field">
+          <label for="mock-title">제목</label>
+          <input
+            id="mock-title"
+            name="title"
+            type="text"
+            autocomplete="off"
+            placeholder="제목이 입력됩니다."
+          />
+        </div>
+
+        <div class="field">
+          <span class="field-label" id="mock-body-label">본문</span>
+          <div
+            id="mock-body"
+            role="textbox"
+            aria-label="본문"
+            aria-labelledby="mock-body-label"
+            aria-multiline="true"
+            contenteditable="true"
+          ></div>
+        </div>
+
+        <footer class="actionbar">
+          <span id="mock-status" role="status" aria-live="polite">저장 전</span>
+          <button id="save-draft" type="button">임시저장</button>
+        </footer>
+      </article>
+    </main>
+
+    <script>
+      const saveButton = document.getElementById("save-draft");
+      const status = document.getElementById("mock-status");
+
+      saveButton.addEventListener("click", () => {
+        saveButton.disabled = true;
+        saveButton.textContent = "저장 중…";
+        status.textContent = "임시저장 확인 중";
+
+        window.setTimeout(() => {
+          status.textContent = "임시저장 완료";
+          status.classList.add("is-complete");
+          saveButton.textContent = "저장됨";
+          saveButton.disabled = false;
+        }, 280);
+      });
+    </script>
+  </body>
+</html>

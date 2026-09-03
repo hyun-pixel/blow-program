@@ -1,0 +1,22 @@
+node_modules/
+dist/
+out/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+.local/
+playwright-report/
+test-results/
+work/poc-*.png
+*.trace.zip
+*.har
+Thumbs.db
+.DS_Store
+
+# BLOW local-only user data
+ChromeProfile/
+chrome-profile/
+local-data/
+support-bundles/
