@@ -4,6 +4,7 @@ import {
   BrowserWindow,
   ipcMain,
   type IpcMainInvokeEvent,
+  type WebContents,
 } from 'electron';
 
 import {
@@ -11,18 +12,30 @@ import {
   runMockPoc,
   type MockPocResult,
 } from './mock-poc.js';
+import {
+  NaverConnectionRunnerError,
+  NaverConnectionSession,
+} from './naver-connection.js';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
 const ipcChannels = {
-  start: 'poc:start',
-  closeBrowser: 'poc:close-browser',
-  state: 'poc:state',
+  mockStart: 'poc:start',
+  mockCloseBrowser: 'poc:close-browser',
+  mockState: 'poc:state',
+  naverOpen: 'naver:open',
+  naverState: 'naver:state',
+  naverVerify: 'naver:verify',
+  naverOpenWriter: 'naver:open-writer',
+  naverClose: 'naver:close',
+  naverFocus: 'naver:focus',
 } as const;
 
 let mainWindow: BrowserWindow | null = null;
 let activeRun = false;
-let activeResult: MockPocResult | null = null;
+let activeMockResult: MockPocResult | null = null;
+let activeNaverSession: NaverConnectionSession | null = null;
+let naverWatchVersion = 0;
 let quitting = false;
 
 function isTrustedSender(event: IpcMainInvokeEvent): boolean {
@@ -77,46 +90,78 @@ function getPocPaths(): {
   };
 }
 
-async function closePocBrowser(): Promise<void> {
-  const result = activeResult;
-  activeResult = null;
+function requireBlogUrl(input: unknown): string {
+  if (typeof input !== 'string' || input.length > 2_048) {
+    return '';
+  }
+
+  return input;
+}
+
+async function closeMockBrowser(): Promise<void> {
+  const result = activeMockResult;
+  activeMockResult = null;
   await result?.closeBrowser();
 }
 
-function registerIpc(): void {
-  ipcMain.handle(ipcChannels.start, async (event) => {
+async function closeNaverBrowser(): Promise<void> {
+  const session = activeNaverSession;
+  naverWatchVersion += 1;
+  activeNaverSession = null;
+  await session?.close();
+}
+
+async function closeAllBrowsers(): Promise<void> {
+  await Promise.all([
+    closeMockBrowser(),
+    closeNaverBrowser(),
+  ]);
+}
+
+function busyResponse(): {
+  readonly ok: false;
+  readonly error: {
+    readonly code: 'POC_ALREADY_RUNNING';
+    readonly message: string;
+  };
+} {
+  return {
+    ok: false,
+    error: {
+      code: 'POC_ALREADY_RUNNING',
+      message: 'Chrome 확인 작업이 이미 진행 중입니다.',
+    },
+  };
+}
+
+function registerMockIpc(): void {
+  ipcMain.handle(ipcChannels.mockStart, async (event) => {
     requireTrustedSender(event);
 
     if (activeRun) {
-      return {
-        ok: false,
-        error: {
-          code: 'POC_ALREADY_RUNNING',
-          message: '자동 입력 테스트가 이미 진행 중입니다.',
-        },
-      };
+      return busyResponse();
     }
 
     activeRun = true;
-    await closePocBrowser();
+    await closeAllBrowsers();
 
     try {
       const paths = getPocPaths();
-      activeResult = await runMockPoc({
+      activeMockResult = await runMockPoc({
         ...paths,
         headless: false,
         keepBrowserOpen: true,
         onSnapshot: (snapshot) => {
           if (!event.sender.isDestroyed()) {
-            event.sender.send(ipcChannels.state, snapshot);
+            event.sender.send(ipcChannels.mockState, snapshot);
           }
         },
       });
 
       return {
         ok: true,
-        snapshot: activeResult.snapshot,
-        verification: activeResult.verification,
+        snapshot: activeMockResult.snapshot,
+        verification: activeMockResult.verification,
       };
     } catch (error) {
       if (error instanceof MockPocError) {
@@ -139,11 +184,262 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle(ipcChannels.closeBrowser, async (event) => {
+  ipcMain.handle(ipcChannels.mockCloseBrowser, async (event) => {
     requireTrustedSender(event);
-    await closePocBrowser();
+    await closeMockBrowser();
     return { ok: true };
   });
+}
+
+function startNaverAutoVerify(
+  session: NaverConnectionSession,
+  waitForLogin: boolean,
+  sender: WebContents,
+): void {
+  const watchVersion = ++naverWatchVersion;
+
+  setTimeout(() => {
+    if (
+      watchVersion !== naverWatchVersion ||
+      session !== activeNaverSession
+    ) {
+      return;
+    }
+
+    const verification = waitForLogin
+      ? session.waitForLoginAndVerify()
+      : session.verify();
+
+    void verification
+      .then((status) => {
+        if (
+          watchVersion === naverWatchVersion &&
+          session === activeNaverSession &&
+          !sender.isDestroyed()
+        ) {
+          sender.send(ipcChannels.naverState, {
+            ok: true,
+            status,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (
+          watchVersion !== naverWatchVersion ||
+          session !== activeNaverSession ||
+          sender.isDestroyed()
+        ) {
+          return;
+        }
+
+        const failure = error instanceof NaverConnectionRunnerError
+          ? error.failure
+          : {
+              code: 'NAVER_CONNECTION_FAILED',
+              message: '네이버 연결 상태를 자동으로 확인하지 못했습니다. 다시 시도해 주세요.',
+            };
+
+        if (failure.code === 'BROWSER_CLOSED') {
+          activeNaverSession = null;
+        }
+
+        sender.send(ipcChannels.naverState, {
+          ok: false,
+          error: failure,
+        });
+      });
+  }, 0);
+}
+
+function registerNaverIpc(): void {
+  ipcMain.handle(ipcChannels.naverOpen, async (event, input: unknown) => {
+    requireTrustedSender(event);
+
+    if (activeRun) {
+      return busyResponse();
+    }
+
+    activeRun = true;
+    await closeAllBrowsers();
+
+    try {
+      const { profilePath } = getPocPaths();
+      const result = await NaverConnectionSession.create({
+        profilePath,
+        blogUrl: requireBlogUrl(input),
+        headless: false,
+      });
+      activeNaverSession = result.session;
+
+      if (
+        result.status.stage === 'LOGIN_REQUIRED' ||
+        result.status.stage === 'HOME_READY'
+      ) {
+        startNaverAutoVerify(
+          result.session,
+          result.status.stage === 'LOGIN_REQUIRED',
+          event.sender,
+        );
+      }
+
+      return {
+        ok: true,
+        status: result.status,
+      };
+    } catch (error) {
+      if (error instanceof NaverConnectionRunnerError) {
+        if (error.failure.code === 'BROWSER_CLOSED') {
+          activeNaverSession = null;
+        }
+
+        return {
+          ok: false,
+          error: error.failure,
+        };
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: 'NAVER_CONNECTION_FAILED',
+          message: '네이버 연결 상태를 확인하지 못했습니다. 다시 시도해 주세요.',
+        },
+      };
+    } finally {
+      activeRun = false;
+    }
+  });
+
+  ipcMain.handle(ipcChannels.naverVerify, async (event) => {
+    requireTrustedSender(event);
+
+    if (activeRun) {
+      return busyResponse();
+    }
+
+    const session = activeNaverSession;
+
+    if (!session) {
+      return {
+        ok: false,
+        error: {
+          code: 'NAVER_SESSION_NOT_FOUND',
+          message: '전용 Chrome을 먼저 열어 주세요.',
+        },
+      };
+    }
+
+    naverWatchVersion += 1;
+    activeRun = true;
+
+    try {
+      return {
+        ok: true,
+        status: await session.verify(),
+      };
+    } catch (error) {
+      if (error instanceof NaverConnectionRunnerError) {
+        if (error.failure.code === 'BROWSER_CLOSED') {
+          activeNaverSession = null;
+        }
+
+        return {
+          ok: false,
+          error: error.failure,
+        };
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: 'NAVER_CONNECTION_FAILED',
+          message: '네이버 연결 상태를 확인하지 못했습니다. 다시 시도해 주세요.',
+        },
+      };
+    } finally {
+      activeRun = false;
+    }
+  });
+
+  ipcMain.handle(ipcChannels.naverOpenWriter, async (event) => {
+    requireTrustedSender(event);
+
+    if (activeRun) {
+      return busyResponse();
+    }
+
+    const session = activeNaverSession;
+
+    if (!session) {
+      return {
+        ok: false,
+        error: {
+          code: 'NAVER_SESSION_NOT_FOUND',
+          message: '전용 Chrome을 먼저 열어 주세요.',
+        },
+      };
+    }
+
+    naverWatchVersion += 1;
+    activeRun = true;
+
+    try {
+      return {
+        ok: true,
+        status: await session.openWriter(),
+      };
+    } catch (error) {
+      if (error instanceof NaverConnectionRunnerError) {
+        if (error.failure.code === 'BROWSER_CLOSED') {
+          activeNaverSession = null;
+        }
+
+        return {
+          ok: false,
+          error: error.failure,
+        };
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: 'NAVER_CONNECTION_FAILED',
+          message: '글쓰기 화면 진입을 확인하지 못했습니다. 다시 시도해 주세요.',
+        },
+      };
+    } finally {
+      activeRun = false;
+    }
+  });
+
+  ipcMain.handle(ipcChannels.naverFocus, async (event) => {
+    requireTrustedSender(event);
+
+    if (!activeNaverSession) {
+      return {
+        ok: false,
+        error: {
+          code: 'NAVER_SESSION_NOT_FOUND',
+          message: '열려 있는 전용 Chrome이 없습니다.',
+        },
+      };
+    }
+
+    await activeNaverSession.bringToFront();
+
+    return { ok: true };
+  });
+
+  ipcMain.handle(ipcChannels.naverClose, async (event) => {
+    requireTrustedSender(event);
+    await closeNaverBrowser();
+    return { ok: true };
+  });
+}
+
+function registerIpc(): void {
+  registerMockIpc();
+  registerNaverIpc();
 }
 
 function createMainWindow(): BrowserWindow {
@@ -154,10 +450,10 @@ function createMainWindow(): BrowserWindow {
     minHeight: 620,
     show: false,
     backgroundColor: '#f4f5f7',
-    title: 'BLOW 자동 입력 기술검증',
+    title: 'BLOW 개발 작업대',
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -211,14 +507,17 @@ if (!hasInstanceLock) {
 }
 
 app.on('before-quit', (event) => {
-  if (quitting || !activeResult) {
+  if (
+    quitting ||
+    (!activeMockResult && !activeNaverSession)
+  ) {
     return;
   }
 
   event.preventDefault();
   quitting = true;
 
-  void closePocBrowser().finally(() => app.quit());
+  void closeAllBrowsers().finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

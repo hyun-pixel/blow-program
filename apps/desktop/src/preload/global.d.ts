@@ -1,5 +1,8 @@
 import type { PocSnapshot } from '@blow/automation-core';
-import type { DraftVerification } from '@blow/naver-adapter';
+import type {
+  DraftVerification,
+  NaverConnectionStatus,
+} from '@blow/naver-adapter';
 
 interface PocErrorResponse {
   readonly ok: false;
@@ -16,12 +19,41 @@ interface PocSuccessResponse {
   readonly verification: DraftVerification;
 }
 
+interface NaverErrorResponse {
+  readonly ok: false;
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+  };
+}
+
+interface NaverSuccessResponse {
+  readonly ok: true;
+  readonly status: NaverConnectionStatus;
+}
+
+interface BasicSuccessResponse {
+  readonly ok: true;
+}
+
 declare global {
   interface Window {
     readonly blowPoc: {
       start(): Promise<PocErrorResponse | PocSuccessResponse>;
-      closeBrowser(): Promise<{ readonly ok: true }>;
+      closeBrowser(): Promise<BasicSuccessResponse>;
       onState(listener: (snapshot: PocSnapshot) => void): () => void;
+    };
+    readonly blowNaver: {
+      open(blogUrl: string): Promise<NaverErrorResponse | NaverSuccessResponse>;
+      onState(
+        listener: (
+          response: NaverErrorResponse | NaverSuccessResponse,
+        ) => void,
+      ): () => void;
+      verify(): Promise<NaverErrorResponse | NaverSuccessResponse>;
+      openWriter(): Promise<NaverErrorResponse | NaverSuccessResponse>;
+      focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
+      close(): Promise<BasicSuccessResponse>;
     };
   }
 }

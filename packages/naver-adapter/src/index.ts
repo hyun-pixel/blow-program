@@ -4,3 +4,19 @@ export type {
   DraftVerification,
   EditorAdapter,
 } from './contracts.js';
+export {
+  getBlogIdFromNaverUrl,
+  isNaverLoginUrl,
+  isNaverWriterUrl,
+  NaverConnectionAdapter,
+  NaverConnectionError,
+  normalizeWriterHref,
+  parseNaverBlogUrl,
+  selectUniqueWriterHref,
+} from './naver-connection.js';
+export type {
+  NaverBlogProfile,
+  NaverConnectionFailureCode,
+  NaverConnectionStage,
+  NaverConnectionStatus,
+} from './naver-connection.js';

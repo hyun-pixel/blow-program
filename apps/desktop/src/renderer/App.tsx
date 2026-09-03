@@ -1,13 +1,14 @@
 import {
   Check,
   CheckCircle2,
+  Link2,
   PanelsTopLeft,
   Circle,
   FileText,
   LoaderCircle,
   Play,
   ShieldCheck,
-  Square,
+  X,
   XCircle,
 } from 'lucide-react';
 import {
@@ -19,8 +20,9 @@ import type {
   PocSnapshot,
   PocState,
 } from '@blow/automation-core';
+import { ConnectionScreen } from './ConnectionScreen.js';
 
-type Screen = 'automation' | 'safety';
+type Screen = 'connection' | 'automation' | 'safety';
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
 const initialSnapshot: PocSnapshot = {
@@ -194,7 +196,7 @@ function AutomationScreen() {
               type="button"
               onClick={closeBrowser}
             >
-              <Square aria-hidden="true" />
+              <X aria-hidden="true" />
               Chrome 닫기
             </button>
           ) : null}
@@ -422,7 +424,7 @@ function SafetyScreen() {
 }
 
 export function App() {
-  const [screen, setScreen] = useState<Screen>('automation');
+  const [screen, setScreen] = useState<Screen>('connection');
 
   return (
     <div className="app">
@@ -438,7 +440,7 @@ export function App() {
           <span>BLOW</span>
         </div>
         <div className="titlebar-meta">
-          <span>자동 입력 POC</span>
+          <span>네이버 연결 POC</span>
           <strong>로컬 개발 모드</strong>
         </div>
       </header>
@@ -446,6 +448,15 @@ export function App() {
       <div className="shell">
         <aside className="sidebar" aria-label="주요 메뉴">
           <nav>
+            <button
+              className={screen === 'connection' ? 'nav-button is-active' : 'nav-button'}
+              type="button"
+              aria-current={screen === 'connection' ? 'page' : undefined}
+              onClick={() => setScreen('connection')}
+            >
+              <Link2 aria-hidden="true" />
+              네이버 연결
+            </button>
             <button
               className={screen === 'automation' ? 'nav-button is-active' : 'nav-button'}
               type="button"
@@ -473,7 +484,9 @@ export function App() {
         </aside>
 
         <main id="main-content" className="main" tabIndex={-1}>
-          {screen === 'automation' ? (
+          {screen === 'connection' ? (
+            <ConnectionScreen />
+          ) : screen === 'automation' ? (
             <AutomationScreen />
           ) : (
             <SafetyScreen />

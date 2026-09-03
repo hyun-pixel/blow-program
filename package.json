@@ -13,7 +13,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "poc:mock": "npm run build --workspace @blow/automation-core && npm run build --workspace @blow/naver-adapter && tsx apps/desktop/scripts/run-mock-poc.ts"
+    "poc:mock": "npm run build --workspace @blow/automation-core && npm run build --workspace @blow/naver-adapter && tsx apps/desktop/scripts/run-mock-poc.ts",
+    "poc:naver:public": "npm run build --workspace @blow/naver-adapter && tsx apps/desktop/scripts/run-naver-public-smoke.ts"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
