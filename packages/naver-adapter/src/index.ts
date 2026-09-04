@@ -23,6 +23,7 @@ export {
 export type {
   NaverImageAttachmentResult,
   NaverImageFailureCode,
+  NaverImageLayout,
   NaverSelectedImageFile,
 } from './naver-image.js';
 export {

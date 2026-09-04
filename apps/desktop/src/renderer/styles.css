@@ -1325,40 +1325,102 @@ svg {
   border-top: 1px solid var(--line);
 }
 
-.image-layout-choice {
+.image-layout-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.image-layout-fieldset .field-label {
+  margin-bottom: 8px;
+}
+
+.image-layout-options {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.image-layout-option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  align-items: start;
+  gap: 10px;
+  min-height: 96px;
   padding: 14px;
-  border: 1px solid var(--primary);
+  border: 1px solid var(--control);
   border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color 150ms ease-out,
+    background-color 150ms ease-out;
+}
+
+.image-layout-option:hover {
+  border-color: var(--text);
+}
+
+.image-layout-option:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.image-layout-option.is-selected {
+  border-color: var(--primary);
   background: var(--surface-active);
 }
 
-.image-layout-choice > svg {
+.image-layout-option input {
   width: 20px;
   height: 20px;
-  color: var(--primary);
+  margin: 1px 0 0;
+  accent-color: var(--primary);
 }
 
-.image-layout-choice strong {
+.image-layout-option input:focus-visible {
+  outline: 0;
+}
+
+.image-layout-option strong,
+.image-layout-option small {
   display: block;
-  margin-bottom: 2px;
-  font-weight: 650;
 }
 
-.image-layout-choice p {
-  max-width: 65ch;
+.image-layout-option strong {
+  margin-bottom: 4px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.image-layout-option small {
   color: var(--text-muted);
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
 
-.image-layout-choice > span {
+.image-layout-option > svg {
+  width: 18px;
+  height: 18px;
   color: var(--primary);
+}
+
+.image-layout-fieldset:disabled .image-layout-option {
+  cursor: not-allowed;
+}
+
+.layout-selection-help {
+  max-width: 65ch;
+  margin-top: 8px;
+  color: var(--text-muted);
   font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.layout-selection-help.is-error {
+  color: var(--danger);
   font-weight: 600;
-  white-space: nowrap;
 }
 
 .image-attach-button {
@@ -1385,6 +1447,14 @@ svg {
 
   .image-select-row {
     align-items: stretch;
+  }
+
+  .image-layout-options {
+    grid-template-columns: 1fr;
+  }
+
+  .image-layout-option {
+    min-height: 0;
   }
 
   .image-select-row .button,

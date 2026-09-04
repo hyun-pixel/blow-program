@@ -25,6 +25,7 @@ import type {
   NaverConnectionStatus,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
+  NaverImageLayout,
   NaverSelectedImageFile,
 } from '@blow/naver-adapter';
 
@@ -112,6 +113,32 @@ const sampleBody = [
   '빈 줄과 여러 문단이 그대로 유지되는지 확인합니다. 🙂',
 ].join('\n\n');
 
+const imageLayoutOptions: readonly {
+  readonly value: NaverImageLayout;
+  readonly label: string;
+  readonly description: string;
+}[] = [
+  {
+    value: 'individual',
+    label: '개별 사진',
+    description: '각 이미지를 독립된 사진으로 배치합니다.',
+  },
+  {
+    value: 'collage',
+    label: '콜라주',
+    description: '여러 이미지를 하나의 타일 구성으로 묶습니다.',
+  },
+  {
+    value: 'slide',
+    label: '슬라이드',
+    description: '여러 이미지를 넘겨보는 한 묶음으로 배치합니다.',
+  },
+];
+
+function getImageLayoutLabel(layout: NaverImageLayout): string {
+  return imageLayoutOptions.find((option) => option.value === layout)!.label;
+}
+
 function formatFileSize(sizeBytes: number): string {
   if (sizeBytes < 1_024 * 1_024) {
     return `${Math.max(1, Math.round(sizeBytes / 1_024)).toLocaleString('ko-KR')} KB`;
@@ -149,6 +176,8 @@ export function ConnectionScreen() {
   const [selectedImages, setSelectedImages] = useState<
     readonly NaverSelectedImageFile[]
   >([]);
+  const [imageLayout, setImageLayout] =
+    useState<NaverImageLayout>('individual');
   const [imageResult, setImageResult] =
     useState<NaverImageAttachmentResult | null>(null);
   const [activeAction, setActiveAction] = useState<
@@ -219,6 +248,7 @@ export function ConnectionScreen() {
         if (action === 'open' || action === 'writer') {
           setInputResult(null);
           setSelectedImages([]);
+          setImageLayout('individual');
           setImageResult(null);
         }
       } else {
@@ -295,6 +325,7 @@ export function ConnectionScreen() {
       setStatus(null);
       setInputResult(null);
       setSelectedImages([]);
+      setImageLayout('individual');
       setImageResult(null);
       setDraftErrors({ title: '', body: '' });
       setError(null);
@@ -386,6 +417,14 @@ export function ConnectionScreen() {
       return;
     }
 
+    if (imageLayout !== 'individual' && selectedImages.length < 2) {
+      setError({
+        code: 'INVALID_IMAGE_SELECTION',
+        message: `${getImageLayoutLabel(imageLayout)}는 이미지를 2장 이상 선택해야 합니다.`,
+      });
+      return;
+    }
+
     setActiveAction('images');
     setImageResult(null);
     setError(null);
@@ -393,6 +432,7 @@ export function ConnectionScreen() {
     try {
       const response = await window.blowNaver.attachImages(
         selectedImages.map((image) => image.id),
+        imageLayout,
       );
 
       if (response.ok) {
@@ -450,10 +490,23 @@ export function ConnectionScreen() {
         'IMAGE_UPLOAD_FAILED',
         'IMAGE_PARTIAL_UPLOAD',
         'IMAGE_COUNT_MISMATCH',
+        'IMAGE_LAYOUT_CONTROL_NOT_FOUND',
+        'IMAGE_LAYOUT_CONTROL_AMBIGUOUS',
+        'IMAGE_LAYOUT_MISMATCH',
         'CONTENT_INPUT_REQUIRED',
       ].includes(error.code)
     : false;
-  const imageRetryBlocked = error?.code === 'IMAGE_PARTIAL_UPLOAD';
+  const imageRetryBlocked = [
+    'IMAGE_PARTIAL_UPLOAD',
+    'IMAGE_LAYOUT_CONTROL_NOT_FOUND',
+    'IMAGE_LAYOUT_CONTROL_AMBIGUOUS',
+    'IMAGE_LAYOUT_MISMATCH',
+  ].includes(error?.code ?? '');
+  const imageLayoutNeedsMoreImages =
+    imageLayout !== 'individual' &&
+    selectedImages.length > 0 &&
+    selectedImages.length < 2;
+  const selectedImageLayoutLabel = getImageLayoutLabel(imageLayout);
   const editorError = error
     ? [
         'INVALID_DRAFT_CONTENT',
@@ -541,7 +594,7 @@ export function ConnectionScreen() {
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
-            <h2>개별사진 첨부를 확인했습니다</h2>
+            <h2>{getImageLayoutLabel(imageResult.layout)} 첨부를 확인했습니다</h2>
             <p>
               선택한 {imageResult.insertedCount}장의 이미지가 네이버 편집기에 삽입됐습니다.
               임시저장과 최종 발행은 실행하지 않았습니다.
@@ -931,9 +984,9 @@ export function ConnectionScreen() {
         >
           <header className="panel-heading">
             <div>
-              <h2 id="image-test-heading">개별사진 첨부 테스트</h2>
+              <h2 id="image-test-heading">사진 배치 테스트</h2>
               <p>
-                로컬 JPG 또는 PNG 파일을 선택해 네이버 편집기에 한 장씩 첨부합니다.
+                로컬 JPG 또는 PNG 파일과 배치 방식을 선택해 네이버 편집기에 첨부합니다.
               </p>
             </div>
             <span className="document-state">
@@ -995,14 +1048,56 @@ export function ConnectionScreen() {
                 ) : null}
               </div>
 
-              <div className="image-layout-choice" aria-label="이미지 배치 방식">
-                <CheckCircle2 aria-hidden="true" />
-                <div>
-                  <strong>개별사진</strong>
-                  <p>이미지를 한 장씩 첨부하고 실제 삽입 개수를 다시 확인합니다.</p>
+              <fieldset
+                className="image-layout-fieldset"
+                disabled={isRunning || Boolean(imageResult) || imageRetryBlocked}
+                aria-describedby="image-layout-help"
+              >
+                <legend className="field-label">
+                  사진 배치 방식 <span>필수</span>
+                </legend>
+                <div className="image-layout-options">
+                  {imageLayoutOptions.map((option) => (
+                    <label
+                      className={`image-layout-option${
+                        imageLayout === option.value ? ' is-selected' : ''
+                      }`}
+                      key={option.value}
+                    >
+                      <input
+                        type="radio"
+                        name="image-layout"
+                        value={option.value}
+                        checked={imageLayout === option.value}
+                        onChange={() => {
+                          setImageLayout(option.value);
+                          setError(null);
+                        }}
+                      />
+                      <span>
+                        <strong>{option.label}</strong>
+                        <small>{option.description}</small>
+                      </span>
+                      {imageLayout === option.value ? (
+                        <Check aria-hidden="true" />
+                      ) : null}
+                    </label>
+                  ))}
                 </div>
-                <span>이번 단계</span>
-              </div>
+                <p
+                  id="image-layout-help"
+                  className={`layout-selection-help${
+                    imageLayoutNeedsMoreImages ? ' is-error' : ''
+                  }`}
+                  aria-live="polite"
+                >
+                  {imageLayoutNeedsMoreImages
+                    ? `${selectedImageLayoutLabel}는 이미지를 2장 이상 선택해야 합니다.`
+                    : imageLayout === 'individual'
+                      ? '한 장 이상 선택할 수 있습니다.'
+                      : `${selectedImageLayoutLabel}는 선택한 이미지를 하나의 그룹으로 묶습니다.`}
+                </p>
+              </fieldset>
 
               <div className="editor-input-note">
                 <ShieldCheck aria-hidden="true" />
@@ -1028,7 +1123,8 @@ export function ConnectionScreen() {
                   isRunning ||
                   selectedImages.length === 0 ||
                   Boolean(imageResult) ||
-                  imageRetryBlocked
+                  imageRetryBlocked ||
+                  imageLayoutNeedsMoreImages
                 }
                 onClick={() => void attachImages()}
               >
@@ -1043,7 +1139,7 @@ export function ConnectionScreen() {
                   ? '첨부·검증 중…'
                   : imageResult
                     ? '첨부 확인 완료'
-                    : '개별사진 첨부'}
+                    : `${selectedImageLayoutLabel} 첨부`}
               </button>
             </div>
 
@@ -1055,7 +1151,7 @@ export function ConnectionScreen() {
                   <dl className="editor-result-values">
                     <div>
                       <dt>배치</dt>
-                      <dd>개별사진</dd>
+                      <dd>{getImageLayoutLabel(imageResult.layout)}</dd>
                     </div>
                     <div>
                       <dt>선택</dt>
@@ -1069,8 +1165,8 @@ export function ConnectionScreen() {
                 ) : (
                   <ol>
                     <li>JPG·PNG 파일만 안전하게 선택</li>
-                    <li>선택한 순서대로 한 장씩 첨부</li>
-                    <li>각 이미지가 편집기에 추가됐는지 확인</li>
+                    <li>네이버 사진 배치 방식에 선택값 적용</li>
+                    <li>선택한 배치 구성 요소가 추가됐는지 확인</li>
                     <li>최종 삽입 개수와 선택 개수를 비교</li>
                   </ol>
                 )}

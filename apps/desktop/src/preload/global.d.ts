@@ -5,6 +5,7 @@ import type {
   NaverConnectionStatus,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
+  NaverImageLayout,
   NaverSelectedImageFile,
 } from '@blow/naver-adapter';
 
@@ -80,6 +81,7 @@ declare global {
       >;
       attachImages(
         imageIds: readonly string[],
+        layout: NaverImageLayout,
       ): Promise<NaverErrorResponse | NaverImageSuccessResponse>;
       focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
       close(): Promise<BasicSuccessResponse>;

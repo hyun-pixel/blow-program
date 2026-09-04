@@ -10,6 +10,7 @@ import {
 import {
   NaverImageAdapter,
   type NaverImageAttachmentResult,
+  type NaverImageLayout,
 } from './naver-image.js';
 
 const BLOG_HOME_URL =
@@ -588,9 +589,10 @@ export class NaverConnectionAdapter {
     return editor.enterAndVerify(content);
   }
 
-  async attachIndividualImages(
+  async attachImages(
     profile: NaverBlogProfile,
     imagePaths: readonly string[],
+    layout: NaverImageLayout,
   ): Promise<NaverImageAttachmentResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -600,7 +602,7 @@ export class NaverConnectionAdapter {
     }
 
     const imageAdapter = new NaverImageAdapter(this.page);
-    return imageAdapter.attachIndividualImages(imagePaths);
+    return imageAdapter.attachImages(imagePaths, layout);
   }
 
   async bringToFront(): Promise<void> {

@@ -9,6 +9,7 @@ import type {
   NaverConnectionStatus,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
+  NaverImageLayout,
   NaverSelectedImageFile,
 } from '@blow/naver-adapter';
 
@@ -121,8 +122,11 @@ const blowNaverApi = {
     ipcRenderer.invoke(ipcChannels.naverEnterContent, content),
   selectImages: (): Promise<NaverImageSelectionResponse> =>
     ipcRenderer.invoke(ipcChannels.naverSelectImages),
-  attachImages: (imageIds: readonly string[]): Promise<NaverImageResponse> =>
-    ipcRenderer.invoke(ipcChannels.naverAttachImages, imageIds),
+  attachImages: (
+    imageIds: readonly string[],
+    layout: NaverImageLayout,
+  ): Promise<NaverImageResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverAttachImages, { imageIds, layout }),
   focus: () => ipcRenderer.invoke(ipcChannels.naverFocus),
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };

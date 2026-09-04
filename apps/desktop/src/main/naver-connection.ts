@@ -11,6 +11,7 @@ import {
   type NaverConnectionStatus,
   type NaverEditorInputResult,
   type NaverImageAttachmentResult,
+  type NaverImageLayout,
 } from '@blow/naver-adapter';
 import {
   chromium,
@@ -44,6 +45,9 @@ export type NaverRunnerFailureCode =
   | 'IMAGE_UPLOAD_FAILED'
   | 'IMAGE_PARTIAL_UPLOAD'
   | 'IMAGE_COUNT_MISMATCH'
+  | 'IMAGE_LAYOUT_CONTROL_NOT_FOUND'
+  | 'IMAGE_LAYOUT_CONTROL_AMBIGUOUS'
+  | 'IMAGE_LAYOUT_MISMATCH'
   | 'CONTENT_INPUT_REQUIRED'
   | 'NAVER_NETWORK_ERROR'
   | 'NAVER_CONNECTION_FAILED';
@@ -214,8 +218,9 @@ export class NaverConnectionSession {
     }
   }
 
-  async attachIndividualImages(
+  async attachImages(
     imagePaths: readonly string[],
+    layout: NaverImageLayout,
   ): Promise<NaverImageAttachmentResult> {
     if (!this.contentEntered) {
       throw new NaverConnectionRunnerError({
@@ -225,9 +230,10 @@ export class NaverConnectionSession {
     }
 
     try {
-      return await this.adapter.attachIndividualImages(
+      return await this.adapter.attachImages(
         this.profile,
         imagePaths,
+        layout,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {

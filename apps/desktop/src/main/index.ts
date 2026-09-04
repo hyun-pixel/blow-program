@@ -11,7 +11,10 @@ import {
   type WebContents,
 } from 'electron';
 
-import type { DraftContent } from '@blow/naver-adapter';
+import type {
+  DraftContent,
+  NaverImageLayout,
+} from '@blow/naver-adapter';
 import {
   MockPocError,
   runMockPoc,
@@ -145,6 +148,31 @@ function parseSelectedImageIds(input: unknown): readonly string[] | null {
 
   const uniqueIds = new Set(input);
   return uniqueIds.size === input.length ? input : null;
+}
+
+function parseImageAttachmentRequest(input: unknown): {
+  readonly imageIds: readonly string[];
+  readonly layout: NaverImageLayout;
+} | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const candidate = input as {
+    readonly imageIds?: unknown;
+    readonly layout?: unknown;
+  };
+  const imageIds = parseSelectedImageIds(candidate.imageIds);
+  const layout = candidate.layout;
+
+  if (
+    !imageIds ||
+    (layout !== 'individual' && layout !== 'collage' && layout !== 'slide')
+  ) {
+    return null;
+  }
+
+  return { imageIds, layout };
 }
 
 async function closeMockBrowser(): Promise<void> {
@@ -616,7 +644,7 @@ function registerNaverIpc(): void {
       }
 
       const session = activeNaverSession;
-      const imageIds = parseSelectedImageIds(input);
+      const request = parseImageAttachmentRequest(input);
 
       if (!session) {
         return {
@@ -628,7 +656,7 @@ function registerNaverIpc(): void {
         };
       }
 
-      if (!imageIds) {
+      if (!request) {
         return {
           ok: false,
           error: {
@@ -638,7 +666,9 @@ function registerNaverIpc(): void {
         };
       }
 
-      const selectedImages = imageIds.map((id) => selectedNaverImages.get(id));
+      const selectedImages = request.imageIds.map((id) =>
+        selectedNaverImages.get(id),
+      );
 
       if (selectedImages.some((image) => !image)) {
         return {
@@ -653,8 +683,9 @@ function registerNaverIpc(): void {
       activeRun = true;
 
       try {
-        const result = await session.attachIndividualImages(
+        const result = await session.attachImages(
           selectedImages.map((image) => image!.path),
+          request.layout,
         );
         selectedNaverImages.clear();
         return { ok: true, result };
