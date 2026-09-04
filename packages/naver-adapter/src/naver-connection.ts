@@ -2,6 +2,11 @@ import type {
   Locator,
   Page,
 } from 'playwright-core';
+import type { DraftContent } from './contracts.js';
+import {
+  NaverEditorAdapter,
+  type NaverEditorInputResult,
+} from './naver-editor.js';
 
 const BLOG_HOME_URL =
   'https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=1&groupId=0';
@@ -157,13 +162,6 @@ export function isNaverLoginUrl(input: string): boolean {
   }
 }
 
-function isTransientLoginNavigationError(error: unknown): boolean {
-  const detail = error instanceof Error ? error.message : String(error);
-
-  return /navigation.*interrupted|interrupted by another navigation|execution context was destroyed|frame was detached/i.test(
-    detail,
-  );
-}
 
 function waitForDelay(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
@@ -324,24 +322,7 @@ async function getWriterCandidates(page: Page): Promise<WriterCandidate[]> {
 }
 
 export class NaverConnectionAdapter {
-  private verificationPage?: Page;
-
   constructor(private page: Page) {}
-
-  private async getVerificationPage(): Promise<Page> {
-    if (this.verificationPage && !this.verificationPage.isClosed()) {
-      return this.verificationPage;
-    }
-
-    const context = this.page.context();
-    const focusPage = context.pages().find(
-      (page) => !page.isClosed() && isNaverLoginUrl(page.url()),
-    ) ?? this.page;
-    this.verificationPage = await context.newPage();
-    await focusPage.bringToFront().catch(() => undefined);
-
-    return this.verificationPage;
-  }
 
   async openHome(profile: NaverBlogProfile): Promise<NaverConnectionStatus> {
     await this.page.goto(BLOG_HOME_URL, {
@@ -378,21 +359,57 @@ export class NaverConnectionAdapter {
     const timeoutMs = options.timeoutMs ?? 600_000;
     const pollIntervalMs = options.pollIntervalMs ?? 1_500;
     const settleDelayMs = options.settleDelayMs ?? 1_200;
+    const stableDelayMs = Math.max(settleDelayMs, pollIntervalMs);
     const deadline = Date.now() + timeoutMs;
+    let verificationRequested = isNaverLoginUrl(this.page.url());
+    let lastNonLoginUrl = '';
+    let nonLoginUrlStableSince = 0;
+    let transientFailureCount = 0;
 
     await waitForDelay(settleDelayMs);
 
     while (Date.now() < deadline) {
-      try {
-        const status = await this.verifyRegisteredBlog(profile);
+      const currentUrl = this.page.url();
+      let shouldVerify = !verificationRequested;
 
-        if (status.stage !== 'LOGIN_REQUIRED') {
-          return status;
+      if (verificationRequested && isNaverLoginUrl(currentUrl)) {
+        lastNonLoginUrl = '';
+        nonLoginUrlStableSince = 0;
+        transientFailureCount = 0;
+      } else if (verificationRequested && currentUrl !== lastNonLoginUrl) {
+        lastNonLoginUrl = currentUrl;
+        nonLoginUrlStableSince = Date.now();
+      } else if (
+        verificationRequested &&
+        Date.now() - nonLoginUrlStableSince >= stableDelayMs
+      ) {
+        shouldVerify = true;
+      }
+
+      if (shouldVerify) {
+        verificationRequested = true;
+
+        try {
+          const status = await this.verifyRegisteredBlog(profile);
+          transientFailureCount = 0;
+
+          if (status.stage !== 'LOGIN_REQUIRED') {
+            return status;
+          }
+        } catch (error) {
+          transientFailureCount += 1;
+
+          if (
+            error instanceof NaverConnectionError ||
+            this.page.isClosed() ||
+            transientFailureCount >= 5
+          ) {
+            throw error;
+          }
         }
-      } catch (error) {
-        if (!isTransientLoginNavigationError(error)) {
-          throw error;
-        }
+
+        lastNonLoginUrl = '';
+        nonLoginUrlStableSince = 0;
       }
 
       await waitForDelay(pollIntervalMs);
@@ -407,23 +424,21 @@ export class NaverConnectionAdapter {
   async verifyRegisteredBlog(
     profile: NaverBlogProfile,
   ): Promise<NaverConnectionStatus> {
-    const verificationPage = await this.getVerificationPage();
-
-    await verificationPage.goto(MY_BLOG_URL, {
+    await this.page.goto(MY_BLOG_URL, {
       waitUntil: 'domcontentloaded',
       timeout: 30_000,
     });
 
-    if (isNaverLoginUrl(verificationPage.url())) {
+    if (isNaverLoginUrl(this.page.url())) {
       return {
         stage: 'LOGIN_REQUIRED',
         message: '네이버 로그인 완료를 기다리고 있습니다. 완료되면 BLOW가 자동으로 확인합니다.',
         registeredBlogId: profile.blogId,
-        currentUrl: verificationPage.url(),
+        currentUrl: this.page.url(),
       };
     }
 
-    const actualBlogId = getBlogIdFromNaverUrl(verificationPage.url());
+    const actualBlogId = getBlogIdFromNaverUrl(this.page.url());
 
     if (!actualBlogId) {
       throw new NaverConnectionError(
@@ -433,35 +448,32 @@ export class NaverConnectionAdapter {
     }
 
     if (actualBlogId !== profile.blogId) {
-      this.page = verificationPage;
-
       return {
         stage: 'BLOG_MISMATCH',
         message: '로그인된 블로그와 입력한 주소가 다릅니다. 주소 또는 로그인 계정을 확인해 주세요.',
         registeredBlogId: profile.blogId,
         actualBlogId,
-        currentUrl: verificationPage.url(),
+        currentUrl: this.page.url(),
       };
     }
 
-    await verificationPage.goto(BLOG_HOME_URL, {
+    await this.page.goto(BLOG_HOME_URL, {
       waitUntil: 'domcontentloaded',
       timeout: 30_000,
     });
-    await waitForHomeControls(verificationPage);
+    await waitForHomeControls(this.page);
 
-    const candidates = await getWriterCandidates(verificationPage);
+    const candidates = await getWriterCandidates(this.page);
     const writerHref = selectUniqueWriterHref(
       candidates.map((candidate) => candidate.href),
     );
-    this.page = verificationPage;
 
     return {
       stage: 'WRITER_LINK_READY',
       message: '등록 블로그와 글쓰기 이동 경로를 확인했습니다.',
       registeredBlogId: profile.blogId,
       actualBlogId,
-      currentUrl: verificationPage.url(),
+      currentUrl: this.page.url(),
       writerHref,
     };
   }
@@ -547,6 +559,21 @@ export class NaverConnectionAdapter {
       currentUrl: this.page.url(),
       writerHref: safeWriterHref,
     };
+  }
+
+  async enterContent(
+    profile: NaverBlogProfile,
+    content: DraftContent,
+  ): Promise<NaverEditorInputResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 입력을 시작하지 않았습니다.',
+      );
+    }
+
+    const editor = new NaverEditorAdapter(this.page);
+    return editor.enterAndVerify(content);
   }
 
   async bringToFront(): Promise<void> {

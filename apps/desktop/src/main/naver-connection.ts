@@ -3,9 +3,12 @@ import { dirname } from 'node:path';
 import {
   NaverConnectionAdapter,
   NaverConnectionError,
+  NaverEditorError,
   parseNaverBlogUrl,
+  type DraftContent,
   type NaverBlogProfile,
   type NaverConnectionStatus,
+  type NaverEditorInputResult,
 } from '@blow/naver-adapter';
 import {
   chromium,
@@ -28,6 +31,11 @@ export type NaverRunnerFailureCode =
   | 'WRITER_LINK_NOT_FOUND'
   | 'WRITER_LINK_AMBIGUOUS'
   | 'WRITER_NOT_READY'
+  | 'INVALID_DRAFT_CONTENT'
+  | 'EDITOR_NOT_READY'
+  | 'EDITOR_FIELD_AMBIGUOUS'
+  | 'EDITOR_NOT_BLANK'
+  | 'EDITOR_INPUT_MISMATCH'
   | 'NAVER_NETWORK_ERROR'
   | 'NAVER_CONNECTION_FAILED';
 
@@ -47,7 +55,10 @@ export class NaverConnectionRunnerError extends Error {
 }
 
 function classifyFailure(error: unknown): NaverRunnerFailure {
-  if (error instanceof NaverConnectionError) {
+  if (
+    error instanceof NaverConnectionError ||
+    error instanceof NaverEditorError
+  ) {
     return {
       code: error.code,
       message: error.message,
@@ -172,6 +183,16 @@ export class NaverConnectionSession {
 
     try {
       return await this.adapter.openWriter(this.profile, this.writerHref);
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async enterContent(content: DraftContent): Promise<NaverEditorInputResult> {
+    try {
+      return await this.adapter.enterContent(this.profile, content);
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
         cause: error,

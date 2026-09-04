@@ -3,6 +3,8 @@ import {
   CheckCircle2,
   Circle,
   ExternalLink,
+  FileText,
+  Keyboard,
   Link2,
   LoaderCircle,
   LogIn,
@@ -17,7 +19,10 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { NaverConnectionStatus } from '@blow/naver-adapter';
+import type {
+  NaverConnectionStatus,
+  NaverEditorInputResult,
+} from '@blow/naver-adapter';
 
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
@@ -96,13 +101,41 @@ function safeHostLabel(value?: string): string {
   }
 }
 
+const sampleTitle = '[BLOW 입력 테스트] 네이버 편집기 확인';
+const sampleBody = [
+  'BLOW가 제목과 본문 입력을 확인하는 테스트 글입니다.',
+  '한글·English·1234와 문장부호, 특수문자 입력을 확인합니다.',
+  '빈 줄과 여러 문단이 그대로 유지되는지 확인합니다. 🙂',
+].join('\n\n');
+
+function parseDraftParagraphs(value: string): readonly string[] {
+  return value
+    .replace(/\r\n?/g, '\n')
+    .split(/\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0);
+}
+
 export function ConnectionScreen() {
   const [blogUrl, setBlogUrl] = useState('');
   const blogUrlInputRef = useRef<HTMLInputElement>(null);
+  const draftTitleInputRef = useRef<HTMLInputElement>(null);
+  const draftBodyInputRef = useRef<HTMLTextAreaElement>(null);
   const [status, setStatus] = useState<NaverConnectionStatus | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(sampleTitle);
+  const [draftBody, setDraftBody] = useState(sampleBody);
+  const [draftErrors, setDraftErrors] = useState<{
+    readonly title: string;
+    readonly body: string;
+  }>({
+    title: '',
+    body: '',
+  });
+  const [inputResult, setInputResult] =
+    useState<NaverEditorInputResult | null>(null);
   const [activeAction, setActiveAction] = useState<
-    'open' | 'verify' | 'writer' | 'focus' | null
+    'open' | 'verify' | 'writer' | 'input' | 'focus' | null
   >(null);
   const [error, setError] = useState<{
     code: string;
@@ -157,6 +190,10 @@ export function ConnectionScreen() {
 
         if (action === 'open') {
           setBrowserOpen(true);
+        }
+
+        if (action === 'open' || action === 'writer') {
+          setInputResult(null);
         }
       } else {
         setError(response.error);
@@ -230,7 +267,56 @@ export function ConnectionScreen() {
       await window.blowNaver.close();
       setBrowserOpen(false);
       setStatus(null);
+      setInputResult(null);
+      setDraftErrors({ title: '', body: '' });
       setError(null);
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const runEditorInput = async (): Promise<void> => {
+    const title = draftTitle.trim();
+    const paragraphs = parseDraftParagraphs(draftBody);
+    const nextErrors = {
+      title: title ? '' : '테스트할 제목을 입력해 주세요.',
+      body: paragraphs.length > 0
+        ? ''
+        : '테스트할 본문을 입력해 주세요.',
+    };
+
+    setDraftErrors(nextErrors);
+
+    if (nextErrors.title) {
+      draftTitleInputRef.current?.focus();
+      return;
+    }
+
+    if (nextErrors.body) {
+      draftBodyInputRef.current?.focus();
+      return;
+    }
+
+    setActiveAction('input');
+    setInputResult(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.enterContent({
+        title,
+        paragraphs,
+      });
+
+      if (response.ok) {
+        setInputResult(response.result);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'NAVER_CONNECTION_FAILED',
+        message: '제목과 본문 입력을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
     } finally {
       setActiveAction(null);
     }
@@ -266,13 +352,25 @@ export function ConnectionScreen() {
               ? '확인 가능'
               : '시작 전';
 
+  const draftParagraphs = parseDraftParagraphs(draftBody);
+  const draftBodyLength = draftParagraphs.join('\n\n').length;
+  const editorError = error
+    ? [
+        'INVALID_DRAFT_CONTENT',
+        'EDITOR_NOT_READY',
+        'EDITOR_FIELD_AMBIGUOUS',
+        'EDITOR_NOT_BLANK',
+        'EDITOR_INPUT_MISMATCH',
+      ].includes(error.code)
+    : false;
+
   return (
     <>
       <header className="page-head">
         <div>
-          <h1>네이버 연결 확인</h1>
+          <h1>네이버 자동 입력 확인</h1>
           <p>
-            전용 Chrome의 로그인 상태와 등록 블로그를 확인한 뒤 글쓰기 화면까지만 이동합니다.
+            등록 블로그를 연결한 뒤 네이버 편집기에 제목과 본문을 안전하게 입력합니다.
           </p>
         </div>
         {browserOpen ? (
@@ -327,19 +425,33 @@ export function ConnectionScreen() {
         <section className="message error-message" role="alert">
           <XCircle aria-hidden="true" />
           <div>
-            <h2>연결 상태를 확인해 주세요</h2>
+            <h2>
+              {editorError
+                ? '입력 상태를 확인해 주세요'
+                : '연결 상태를 확인해 주세요'}
+            </h2>
             <p>{error.message}</p>
           </div>
         </section>
       ) : null}
 
-      {status?.stage === 'WRITER_READY' ? (
+      {inputResult ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>제목과 본문 입력을 확인했습니다</h2>
+            <p>
+              네이버 Chrome에서 내용을 검토해 주세요. 임시저장과 최종 발행은 실행하지 않았습니다.
+            </p>
+          </div>
+        </section>
+      ) : status?.stage === 'WRITER_READY' ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
             <h2>글쓰기 화면 진입을 확인했습니다</h2>
             <p>
-              내용 입력과 임시저장, 최종 발행은 실행하지 않았습니다.
+              아래 테스트 문안을 확인한 뒤 제목·본문 입력을 시작할 수 있습니다.
             </p>
           </div>
         </section>
@@ -523,6 +635,180 @@ export function ConnectionScreen() {
           </ol>
         </aside>
       </section>
+
+      {status?.stage === 'WRITER_READY' ? (
+        <section
+          className="editor-test-panel"
+          aria-labelledby="editor-test-heading"
+          aria-busy={activeAction === 'input'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="editor-test-heading">제목·본문 입력 테스트</h2>
+              <p>
+                입력할 문안을 먼저 확인한 뒤 빈 네이버 글쓰기 화면에 입력합니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {inputResult ? '입력 확인 완료' : '저장하지 않음'}
+            </span>
+          </header>
+
+          <div className="editor-test-layout">
+            <form
+              className="editor-test-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void runEditorInput();
+              }}
+            >
+              <div className="field-group">
+                <label htmlFor="editor-test-title">
+                  테스트 제목 <span>필수</span>
+                </label>
+                <input
+                  id="editor-test-title"
+                  ref={draftTitleInputRef}
+                  type="text"
+                  maxLength={100}
+                  value={draftTitle}
+                  disabled={Boolean(inputResult)}
+                  aria-invalid={draftErrors.title ? true : undefined}
+                  aria-describedby={
+                    draftErrors.title
+                      ? 'editor-test-title-help editor-test-title-error'
+                      : 'editor-test-title-help'
+                  }
+                  onChange={(event) => {
+                    setDraftTitle(event.target.value);
+
+                    if (draftErrors.title) {
+                      setDraftErrors((current) => ({
+                        ...current,
+                        title: '',
+                      }));
+                    }
+                  }}
+                />
+                <p id="editor-test-title-help" className="field-help">
+                  {draftTitle.trim().length}/100자
+                </p>
+                {draftErrors.title ? (
+                  <p id="editor-test-title-error" className="field-error">
+                    {draftErrors.title}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="field-group">
+                <label htmlFor="editor-test-body">
+                  테스트 본문 <span>필수</span>
+                </label>
+                <textarea
+                  id="editor-test-body"
+                  ref={draftBodyInputRef}
+                  rows={8}
+                  maxLength={10_000}
+                  value={draftBody}
+                  disabled={Boolean(inputResult)}
+                  aria-invalid={draftErrors.body ? true : undefined}
+                  aria-describedby={
+                    draftErrors.body
+                      ? 'editor-test-body-help editor-test-body-error'
+                      : 'editor-test-body-help'
+                  }
+                  onChange={(event) => {
+                    setDraftBody(event.target.value);
+
+                    if (draftErrors.body) {
+                      setDraftErrors((current) => ({
+                        ...current,
+                        body: '',
+                      }));
+                    }
+                  }}
+                />
+                <p id="editor-test-body-help" className="field-help">
+                  줄을 나눈 문장을 각각 한 문단으로 입력합니다. 현재 {draftParagraphs.length}개 문단,
+                  {' '}{draftBodyLength.toLocaleString('ko-KR')}자입니다.
+                </p>
+                {draftErrors.body ? (
+                  <p id="editor-test-body-error" className="field-error">
+                    {draftErrors.body}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  BLOW는 임시저장과 최종 발행을 누르지 않습니다. 입력값은 디스크에 저장하지 않지만,
+                  네이버 편집기가 자동 복구용 내용을 남길 수 있습니다.
+                </p>
+              </div>
+
+              {editorError && error ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>입력을 시작하지 못했습니다</strong>
+                    <p>{error.message}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary editor-input-button"
+                type="submit"
+                disabled={isRunning || Boolean(inputResult)}
+              >
+                {activeAction === 'input' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : inputResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Keyboard aria-hidden="true" />
+                )}
+                {activeAction === 'input'
+                  ? '입력·검증 중…'
+                  : inputResult
+                    ? '입력 확인 완료'
+                    : '제목·본문 입력'}
+              </button>
+            </form>
+
+            <aside className="editor-test-summary" aria-label="입력 테스트 범위">
+              <FileText aria-hidden="true" />
+              <div>
+                <h3>{inputResult ? '검증 결과' : '이번 단계에서 확인할 내용'}</h3>
+                {inputResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>제목</dt>
+                      <dd>{inputResult.titleLength}자</dd>
+                    </div>
+                    <div>
+                      <dt>본문</dt>
+                      <dd>{inputResult.bodyLength.toLocaleString('ko-KR')}자</dd>
+                    </div>
+                    <div>
+                      <dt>문단</dt>
+                      <dd>{inputResult.paragraphCount}개</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>제목과 본문 입력 영역이 각각 한 개인지 확인</li>
+                    <li>기존 내용이 없는 빈 새 글인지 확인</li>
+                    <li>제목과 문단을 순서대로 입력</li>
+                    <li>입력 결과를 원문과 다시 비교</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
     </>
   );
 }

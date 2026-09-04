@@ -4,12 +4,29 @@ import {
   type IpcRendererEvent,
 } from 'electron';
 import type { PocSnapshot } from '@blow/automation-core';
-import type { NaverConnectionStatus } from '@blow/naver-adapter';
+import type {
+  DraftContent,
+  NaverConnectionStatus,
+  NaverEditorInputResult,
+} from '@blow/naver-adapter';
 
 type NaverStateResponse =
   | {
       readonly ok: true;
       readonly status: NaverConnectionStatus;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type NaverInputResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverEditorInputResult;
     }
   | {
       readonly ok: false;
@@ -27,6 +44,7 @@ const ipcChannels = {
   naverState: 'naver:state',
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
+  naverEnterContent: 'naver:enter-content',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -68,6 +86,8 @@ const blowNaverApi = {
   },
   verify: () => ipcRenderer.invoke(ipcChannels.naverVerify),
   openWriter: () => ipcRenderer.invoke(ipcChannels.naverOpenWriter),
+  enterContent: (content: DraftContent): Promise<NaverInputResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverEnterContent, content),
   focus: () => ipcRenderer.invoke(ipcChannels.naverFocus),
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };

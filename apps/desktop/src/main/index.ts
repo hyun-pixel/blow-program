@@ -7,6 +7,7 @@ import {
   type WebContents,
 } from 'electron';
 
+import type { DraftContent } from '@blow/naver-adapter';
 import {
   MockPocError,
   runMockPoc,
@@ -27,6 +28,7 @@ const ipcChannels = {
   naverState: 'naver:state',
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
+  naverEnterContent: 'naver:enter-content',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -96,6 +98,30 @@ function requireBlogUrl(input: unknown): string {
   }
 
   return input;
+}
+
+function parseDraftContent(input: unknown): DraftContent | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const candidate = input as {
+    readonly title?: unknown;
+    readonly paragraphs?: unknown;
+  };
+
+  if (
+    typeof candidate.title !== 'string' ||
+    !Array.isArray(candidate.paragraphs) ||
+    !candidate.paragraphs.every((paragraph) => typeof paragraph === 'string')
+  ) {
+    return null;
+  }
+
+  return {
+    title: candidate.title,
+    paragraphs: candidate.paragraphs,
+  };
 }
 
 async function closeMockBrowser(): Promise<void> {
@@ -411,6 +437,71 @@ function registerNaverIpc(): void {
       activeRun = false;
     }
   });
+
+  ipcMain.handle(
+    ipcChannels.naverEnterContent,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+      const content = parseDraftContent(input);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (!content) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_DRAFT_CONTENT',
+            message: '입력할 제목과 본문 형식을 확인해 주세요.',
+          },
+        };
+      }
+
+      naverWatchVersion += 1;
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.enterContent(content),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_CONNECTION_FAILED',
+            message: '제목과 본문 입력을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
 
   ipcMain.handle(ipcChannels.naverFocus, async (event) => {
     requireTrustedSender(event);

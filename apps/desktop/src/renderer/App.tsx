@@ -440,7 +440,7 @@ export function App() {
           <span>BLOW</span>
         </div>
         <div className="titlebar-meta">
-          <span>네이버 연결 POC</span>
+          <span>네이버 입력 POC</span>
           <strong>로컬 개발 모드</strong>
         </div>
       </header>

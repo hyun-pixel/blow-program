@@ -214,8 +214,9 @@ describe('글쓰기 새 탭 진입', () => {
   });
 });
 describe('로그인 완료 자동 확인', () => {
-  it('로그인 탭을 이동시키지 않고 별도 탭에서 등록 블로그를 검증한다', async () => {
-    let verificationUrl = 'about:blank';
+  it('하나의 탭에서 로그인 화면을 새로고침하지 않고 완료를 기다린다', async () => {
+    let currentUrl = 'https://section.blog.naver.com/BlogHome.naver';
+    let loggedIn = false;
     let myBlogAttempts = 0;
     const writerLink = {
       getAttribute: vi.fn().mockResolvedValue(
@@ -233,42 +234,37 @@ describe('로그인 완료 자동 확인', () => {
         waitFor: vi.fn().mockResolvedValue(undefined),
       }),
     };
-    let loginPage: Page;
-    let verificationPage: Page;
     const context = {
-      pages: vi.fn(() => [loginPage, verificationPage]),
-      newPage: vi.fn(async () => verificationPage),
+      newPage: vi.fn(),
     };
-    loginPage = {
-      bringToFront: vi.fn().mockResolvedValue(undefined),
-      context: vi.fn().mockReturnValue(context),
-      goto: vi.fn(),
-      isClosed: vi.fn().mockReturnValue(false),
-      url: vi.fn().mockReturnValue('https://nid.naver.com/nidlogin.login'),
-    } as unknown as Page;
-    verificationPage = {
+    const goto = vi.fn(async (url: string) => {
+      if (url.includes('MyBlog.naver')) {
+        myBlogAttempts += 1;
+        currentUrl = loggedIn
+          ? 'https://blog.naver.com/green_fork'
+          : 'https://nid.naver.com/nidlogin.login';
+        return;
+      }
+
+      currentUrl = url;
+    });
+    const page = {
       context: vi.fn().mockReturnValue(context),
       frames: vi.fn().mockReturnValue([
         {
           locator: vi.fn().mockReturnValue(writerLinks),
         },
       ]),
-      goto: vi.fn(async (url: string) => {
-        if (url.includes('MyBlog.naver')) {
-          myBlogAttempts += 1;
-          verificationUrl = myBlogAttempts === 1
-            ? 'https://nid.naver.com/nidlogin.login'
-            : 'https://blog.naver.com/green_fork';
-          return;
-        }
-
-        verificationUrl = url;
-      }),
-      isClosed: vi.fn().mockReturnValue(false),
+      goto,
       locator: vi.fn().mockReturnValue(controls),
-      url: vi.fn(() => verificationUrl),
+      url: vi.fn(() => currentUrl),
     } as unknown as Page;
-    const adapter = new NaverConnectionAdapter(loginPage);
+    const adapter = new NaverConnectionAdapter(page);
+
+    setTimeout(() => {
+      loggedIn = true;
+      currentUrl = 'https://blog.naver.com/green_fork';
+    }, 10);
 
     const status = await adapter.waitForLoginAndVerify(
       {
@@ -284,11 +280,10 @@ describe('로그인 완료 자동 확인', () => {
 
     expect(status.stage).toBe('WRITER_LINK_READY');
     expect(status.actualBlogId).toBe('green_fork');
-    expect(context.newPage).toHaveBeenCalledOnce();
-    expect(loginPage.bringToFront).toHaveBeenCalledOnce();
-    expect(loginPage.goto).not.toHaveBeenCalled();
-    expect(verificationPage.goto).toHaveBeenCalledWith(
-      'https://blog.naver.com/MyBlog.naver',
+    expect(context.newPage).not.toHaveBeenCalled();
+    expect(myBlogAttempts).toBe(2);
+    expect(goto).toHaveBeenLastCalledWith(
+      'https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=1&groupId=0',
       {
         waitUntil: 'domcontentloaded',
         timeout: 30_000,
@@ -312,7 +307,9 @@ describe('로그인 직후 이동 충돌 복구', () => {
     const verify = vi
       .spyOn(adapter, 'verifyRegisteredBlog')
       .mockRejectedValueOnce(
-        new Error('page.goto: Navigation was interrupted by another navigation'),
+        new Error(
+          'Protocol error (Runtime.callFunctionOn): Cannot find context with specified id',
+        ),
       )
       .mockResolvedValueOnce({
         stage: 'WRITER_LINK_READY',

@@ -1,7 +1,9 @@
 import type { PocSnapshot } from '@blow/automation-core';
 import type {
+  DraftContent,
   DraftVerification,
   NaverConnectionStatus,
+  NaverEditorInputResult,
 } from '@blow/naver-adapter';
 
 interface PocErrorResponse {
@@ -32,6 +34,11 @@ interface NaverSuccessResponse {
   readonly status: NaverConnectionStatus;
 }
 
+interface NaverInputSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverEditorInputResult;
+}
+
 interface BasicSuccessResponse {
   readonly ok: true;
 }
@@ -52,6 +59,9 @@ declare global {
       ): () => void;
       verify(): Promise<NaverErrorResponse | NaverSuccessResponse>;
       openWriter(): Promise<NaverErrorResponse | NaverSuccessResponse>;
+      enterContent(
+        content: DraftContent,
+      ): Promise<NaverErrorResponse | NaverInputSuccessResponse>;
       focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
       close(): Promise<BasicSuccessResponse>;
     };
