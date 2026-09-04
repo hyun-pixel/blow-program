@@ -8,6 +8,11 @@ import {
   type NaverEditorInputResult,
 } from './naver-editor.js';
 import {
+  NaverDividerAdapter,
+  type NaverDividerInsertionResult,
+  type NaverDividerPosition,
+} from './naver-divider.js';
+import {
   NaverImageAdapter,
   type NaverImageAttachmentResult,
   type NaverImageLayout,
@@ -587,6 +592,27 @@ export class NaverConnectionAdapter {
 
     const editor = new NaverEditorAdapter(this.page);
     return editor.enterAndVerify(content);
+  }
+
+  async insertDivider(
+    profile: NaverBlogProfile,
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverDividerPosition,
+  ): Promise<NaverDividerInsertionResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 구분선 삽입을 시작하지 않았습니다.',
+      );
+    }
+
+    const dividerAdapter = new NaverDividerAdapter(this.page);
+    return dividerAdapter.insertDivider(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
   }
 
   async attachImages(

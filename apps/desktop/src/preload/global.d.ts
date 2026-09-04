@@ -3,6 +3,8 @@ import type {
   DraftContent,
   DraftVerification,
   NaverConnectionStatus,
+  NaverDividerInsertionResult,
+  NaverDividerPosition,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -42,6 +44,11 @@ interface NaverInputSuccessResponse {
   readonly result: NaverEditorInputResult;
 }
 
+interface NaverDividerSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverDividerInsertionResult;
+}
+
 interface NaverImageSelectionSuccessResponse {
   readonly ok: true;
   readonly canceled: boolean;
@@ -76,6 +83,10 @@ declare global {
       enterContent(
         content: DraftContent,
       ): Promise<NaverErrorResponse | NaverInputSuccessResponse>;
+      insertDivider(
+        paragraphNumber: number,
+        position: NaverDividerPosition,
+      ): Promise<NaverErrorResponse | NaverDividerSuccessResponse>;
       selectImages(): Promise<
         NaverErrorResponse | NaverImageSelectionSuccessResponse
       >;

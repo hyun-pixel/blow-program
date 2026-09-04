@@ -16,6 +16,16 @@ export type {
   NaverEditorInputResult,
 } from './naver-editor.js';
 export {
+  NaverDividerAdapter,
+  NaverDividerError,
+  validateDividerRequest,
+} from './naver-divider.js';
+export type {
+  NaverDividerFailureCode,
+  NaverDividerInsertionResult,
+  NaverDividerPosition,
+} from './naver-divider.js';
+export {
   NaverImageAdapter,
   NaverImageError,
   validateImagePaths,

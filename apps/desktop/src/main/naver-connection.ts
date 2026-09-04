@@ -3,12 +3,16 @@ import { dirname } from 'node:path';
 import {
   NaverConnectionAdapter,
   NaverConnectionError,
+  NaverDividerError,
   NaverEditorError,
   NaverImageError,
   parseNaverBlogUrl,
+  validateDraftContent,
   type DraftContent,
   type NaverBlogProfile,
   type NaverConnectionStatus,
+  type NaverDividerInsertionResult,
+  type NaverDividerPosition,
   type NaverEditorInputResult,
   type NaverImageAttachmentResult,
   type NaverImageLayout,
@@ -39,6 +43,14 @@ export type NaverRunnerFailureCode =
   | 'EDITOR_FIELD_AMBIGUOUS'
   | 'EDITOR_NOT_BLANK'
   | 'EDITOR_INPUT_MISMATCH'
+  | 'INVALID_DIVIDER_REQUEST'
+  | 'DIVIDER_ANCHOR_NOT_FOUND'
+  | 'DIVIDER_ANCHOR_MISMATCH'
+  | 'DIVIDER_SELECTION_FAILED'
+  | 'DIVIDER_CONTROL_NOT_FOUND'
+  | 'DIVIDER_CONTROL_AMBIGUOUS'
+  | 'DIVIDER_INSERT_UNCONFIRMED'
+  | 'DIVIDER_POSITION_MISMATCH'
   | 'INVALID_IMAGE_SELECTION'
   | 'IMAGE_INPUT_NOT_FOUND'
   | 'IMAGE_INPUT_AMBIGUOUS'
@@ -70,6 +82,7 @@ export class NaverConnectionRunnerError extends Error {
 function classifyFailure(error: unknown): NaverRunnerFailure {
   if (
     error instanceof NaverConnectionError ||
+    error instanceof NaverDividerError ||
     error instanceof NaverEditorError ||
     error instanceof NaverImageError
   ) {
@@ -120,7 +133,7 @@ function classifyFailure(error: unknown): NaverRunnerFailure {
 }
 
 export class NaverConnectionSession {
-  private contentEntered = false;
+  private enteredContent: DraftContent | null = null;
 
   private constructor(
     private context: BrowserContext | undefined,
@@ -208,9 +221,40 @@ export class NaverConnectionSession {
 
   async enterContent(content: DraftContent): Promise<NaverEditorInputResult> {
     try {
-      const result = await this.adapter.enterContent(this.profile, content);
-      this.contentEntered = true;
+      const normalizedContent = validateDraftContent(content);
+      const result = await this.adapter.enterContent(
+        this.profile,
+        normalizedContent,
+      );
+      this.enteredContent = normalizedContent;
       return result;
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async insertDivider(
+    paragraphNumber: number,
+    position: NaverDividerPosition,
+  ): Promise<NaverDividerInsertionResult> {
+    const content = this.enteredContent;
+
+    if (!content) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.insertDivider(
+        this.profile,
+        content.paragraphs,
+        paragraphNumber,
+        position,
+      );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
         cause: error,
@@ -222,7 +266,7 @@ export class NaverConnectionSession {
     imagePaths: readonly string[],
     layout: NaverImageLayout,
   ): Promise<NaverImageAttachmentResult> {
-    if (!this.contentEntered) {
+    if (!this.enteredContent) {
       throw new NaverConnectionRunnerError({
         code: 'CONTENT_INPUT_REQUIRED',
         message: '먼저 제목과 본문 입력을 완료해 주세요.',

@@ -13,6 +13,7 @@ import {
 
 import type {
   DraftContent,
+  NaverDividerPosition,
   NaverImageLayout,
 } from '@blow/naver-adapter';
 import {
@@ -36,6 +37,7 @@ const ipcChannels = {
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
+  naverInsertDivider: 'naver:insert-divider',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
   naverClose: 'naver:close',
@@ -134,6 +136,34 @@ function parseDraftContent(input: unknown): DraftContent | null {
   return {
     title: candidate.title,
     paragraphs: candidate.paragraphs,
+  };
+}
+
+function parseDividerRequest(input: unknown): {
+  readonly paragraphNumber: number;
+  readonly position: NaverDividerPosition;
+} | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const candidate = input as {
+    readonly paragraphNumber?: unknown;
+    readonly position?: unknown;
+  };
+
+  if (
+    !Number.isInteger(candidate.paragraphNumber) ||
+    (candidate.paragraphNumber as number) < 1 ||
+    (candidate.paragraphNumber as number) > 100 ||
+    (candidate.position !== 'before' && candidate.position !== 'after')
+  ) {
+    return null;
+  }
+
+  return {
+    paragraphNumber: candidate.paragraphNumber as number,
+    position: candidate.position,
   };
 }
 
@@ -540,6 +570,73 @@ function registerNaverIpc(): void {
           error: {
             code: 'NAVER_CONNECTION_FAILED',
             message: '제목과 본문 입력을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverInsertDivider,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+      const request = parseDividerRequest(input);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (!request) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_DIVIDER_REQUEST',
+            message: '구분선을 넣을 문단과 위치를 다시 선택해 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.insertDivider(
+            request.paragraphNumber,
+            request.position,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'DIVIDER_INSERT_UNCONFIRMED',
+            message: '구분선 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
           },
         };
       } finally {

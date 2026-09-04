@@ -7,6 +7,8 @@ import type { PocSnapshot } from '@blow/automation-core';
 import type {
   DraftContent,
   NaverConnectionStatus,
+  NaverDividerInsertionResult,
+  NaverDividerPosition,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -30,6 +32,19 @@ type NaverInputResponse =
   | {
       readonly ok: true;
       readonly result: NaverEditorInputResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type NaverDividerResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverDividerInsertionResult;
     }
   | {
       readonly ok: false;
@@ -75,6 +90,7 @@ const ipcChannels = {
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
+  naverInsertDivider: 'naver:insert-divider',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
   naverClose: 'naver:close',
@@ -120,6 +136,14 @@ const blowNaverApi = {
   openWriter: () => ipcRenderer.invoke(ipcChannels.naverOpenWriter),
   enterContent: (content: DraftContent): Promise<NaverInputResponse> =>
     ipcRenderer.invoke(ipcChannels.naverEnterContent, content),
+  insertDivider: (
+    paragraphNumber: number,
+    position: NaverDividerPosition,
+  ): Promise<NaverDividerResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverInsertDivider, {
+      paragraphNumber,
+      position,
+    }),
   selectImages: (): Promise<NaverImageSelectionResponse> =>
     ipcRenderer.invoke(ipcChannels.naverSelectImages),
   attachImages: (

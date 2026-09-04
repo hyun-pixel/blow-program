@@ -10,6 +10,7 @@ import {
   Link2,
   LoaderCircle,
   LogIn,
+  Minus,
   MousePointerClick,
   PanelsTopLeft,
   ShieldCheck,
@@ -23,6 +24,8 @@ import {
 } from 'react';
 import type {
   NaverConnectionStatus,
+  NaverDividerInsertionResult,
+  NaverDividerPosition,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -139,6 +142,29 @@ function getImageLayoutLabel(layout: NaverImageLayout): string {
   return imageLayoutOptions.find((option) => option.value === layout)!.label;
 }
 
+const dividerPositionOptions: readonly {
+  readonly value: NaverDividerPosition;
+  readonly label: string;
+  readonly description: string;
+}[] = [
+  {
+    value: 'before',
+    label: '문단 앞',
+    description: '선택한 문단이 시작되기 전에 넣습니다.',
+  },
+  {
+    value: 'after',
+    label: '문단 뒤',
+    description: '선택한 문단이 끝난 다음에 넣습니다.',
+  },
+];
+
+function getDividerPositionLabel(position: NaverDividerPosition): string {
+  return dividerPositionOptions.find(
+    (option) => option.value === position,
+  )!.label;
+}
+
 function formatFileSize(sizeBytes: number): string {
   if (sizeBytes < 1_024 * 1_024) {
     return `${Math.max(1, Math.round(sizeBytes / 1_024)).toLocaleString('ko-KR')} KB`;
@@ -173,6 +199,11 @@ export function ConnectionScreen() {
   });
   const [inputResult, setInputResult] =
     useState<NaverEditorInputResult | null>(null);
+  const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
+  const [dividerPosition, setDividerPosition] =
+    useState<NaverDividerPosition>('after');
+  const [dividerResult, setDividerResult] =
+    useState<NaverDividerInsertionResult | null>(null);
   const [selectedImages, setSelectedImages] = useState<
     readonly NaverSelectedImageFile[]
   >([]);
@@ -185,6 +216,7 @@ export function ConnectionScreen() {
     | 'verify'
     | 'writer'
     | 'input'
+    | 'divider'
     | 'select-images'
     | 'images'
     | 'focus'
@@ -247,6 +279,9 @@ export function ConnectionScreen() {
 
         if (action === 'open' || action === 'writer') {
           setInputResult(null);
+          setDividerParagraphNumber(1);
+          setDividerPosition('after');
+          setDividerResult(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -324,6 +359,9 @@ export function ConnectionScreen() {
       setBrowserOpen(false);
       setStatus(null);
       setInputResult(null);
+      setDividerParagraphNumber(1);
+      setDividerPosition('after');
+      setDividerResult(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -358,6 +396,7 @@ export function ConnectionScreen() {
 
     setActiveAction('input');
     setInputResult(null);
+    setDividerResult(null);
     setError(null);
 
     try {
@@ -368,6 +407,9 @@ export function ConnectionScreen() {
 
       if (response.ok) {
         setInputResult(response.result);
+        setDividerParagraphNumber(1);
+        setDividerPosition('after');
+        setDividerResult(null);
         setSelectedImages([]);
         setImageResult(null);
       } else {
@@ -437,6 +479,7 @@ export function ConnectionScreen() {
 
       if (response.ok) {
         setImageResult(response.result);
+        setDividerResult(null);
       } else {
         setError(response.error);
       }
@@ -444,6 +487,43 @@ export function ConnectionScreen() {
       setError({
         code: 'IMAGE_UPLOAD_FAILED',
         message: '이미지 첨부를 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const insertDivider = async (): Promise<void> => {
+    if (
+      dividerParagraphNumber < 1 ||
+      dividerParagraphNumber > draftParagraphs.length
+    ) {
+      setError({
+        code: 'INVALID_DIVIDER_REQUEST',
+        message: '구분선을 넣을 문단과 위치를 다시 선택해 주세요.',
+      });
+      return;
+    }
+
+    setActiveAction('divider');
+    setDividerResult(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.insertDivider(
+        dividerParagraphNumber,
+        dividerPosition,
+      );
+
+      if (response.ok) {
+        setDividerResult(response.result);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'DIVIDER_INSERT_UNCONFIRMED',
+        message: '구분선 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
       setActiveAction(null);
@@ -482,6 +562,24 @@ export function ConnectionScreen() {
 
   const draftParagraphs = parseDraftParagraphs(draftBody);
   const draftBodyLength = draftParagraphs.join('\n\n').length;
+  const dividerError = error
+    ? [
+        'INVALID_DIVIDER_REQUEST',
+        'DIVIDER_ANCHOR_NOT_FOUND',
+        'DIVIDER_ANCHOR_MISMATCH',
+        'DIVIDER_SELECTION_FAILED',
+        'DIVIDER_CONTROL_NOT_FOUND',
+        'DIVIDER_CONTROL_AMBIGUOUS',
+        'DIVIDER_INSERT_UNCONFIRMED',
+        'DIVIDER_POSITION_MISMATCH',
+      ].includes(error.code)
+    : false;
+  const dividerRetryBlocked = [
+    'DIVIDER_INSERT_UNCONFIRMED',
+    'DIVIDER_POSITION_MISMATCH',
+  ].includes(error?.code ?? '');
+  const selectedDividerPositionLabel =
+    getDividerPositionLabel(dividerPosition);
   const imageError = error
     ? [
         'INVALID_IMAGE_SELECTION',
@@ -523,7 +621,7 @@ export function ConnectionScreen() {
         <div>
           <h1>네이버 자동 입력 확인</h1>
           <p>
-            등록 블로그를 연결한 뒤 네이버 편집기에 제목, 본문과 이미지를 안전하게 입력합니다.
+            등록 블로그를 연결한 뒤 네이버 편집기에 제목, 본문, 이미지와 서식을 안전하게 입력합니다.
           </p>
         </div>
         {browserOpen ? (
@@ -579,9 +677,11 @@ export function ConnectionScreen() {
           <XCircle aria-hidden="true" />
           <div>
             <h2>
-              {imageError
-                ? '이미지 상태를 확인해 주세요'
-                : editorError
+              {dividerError
+                ? '구분선 상태를 확인해 주세요'
+                : imageError
+                  ? '이미지 상태를 확인해 주세요'
+                  : editorError
                   ? '입력 상태를 확인해 주세요'
                   : '연결 상태를 확인해 주세요'}
             </h2>
@@ -590,7 +690,19 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
-      {imageResult ? (
+      {dividerResult ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>구분선 위치를 확인했습니다</h2>
+            <p>
+              {dividerResult.paragraphNumber}번째 문단의{' '}
+              {getDividerPositionLabel(dividerResult.position)}에 구분선이 삽입됐습니다.
+              임시저장과 최종 발행은 실행하지 않았습니다.
+            </p>
+          </div>
+        </section>
+      ) : imageResult ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
@@ -1168,6 +1280,187 @@ export function ConnectionScreen() {
                     <li>네이버 사진 배치 방식에 선택값 적용</li>
                     <li>선택한 배치 구성 요소가 추가됐는지 확인</li>
                     <li>최종 삽입 개수와 선택 개수를 비교</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+
+      {imageResult ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="divider-test-heading"
+          aria-busy={activeAction === 'divider'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="divider-test-heading">구분선 위치 테스트</h2>
+              <p>
+                본문 문단과 앞·뒤 위치를 하나씩 선택해 네이버 편집기에 구분선을 넣습니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {dividerResult ? '삽입 확인 완료' : '저장하지 않음'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="divider-location-grid">
+                <div className="field-group">
+                  <label htmlFor="divider-paragraph">
+                    기준 문단 <span>필수</span>
+                  </label>
+                  <select
+                    id="divider-paragraph"
+                    value={dividerParagraphNumber}
+                    disabled={
+                      isRunning ||
+                      Boolean(dividerResult) ||
+                      dividerRetryBlocked
+                    }
+                    aria-describedby="divider-paragraph-help"
+                    onChange={(event) => {
+                      setDividerParagraphNumber(Number(event.target.value));
+                      setError(null);
+                    }}
+                  >
+                    {draftParagraphs.map((paragraph, index) => (
+                      <option value={index + 1} key={index}>
+                        {index + 1}번째 문단 ·{' '}
+                        {paragraph.length > 30
+                          ? `${paragraph.slice(0, 30)}…`
+                          : paragraph}
+                      </option>
+                    ))}
+                  </select>
+                  <p id="divider-paragraph-help" className="field-help">
+                    이번 기술검증에서는 입력이 확인된 본문 문단만 위치 기준으로 사용합니다.
+                  </p>
+                </div>
+
+                <fieldset
+                  className="divider-position-fieldset"
+                  disabled={
+                    isRunning ||
+                    Boolean(dividerResult) ||
+                    dividerRetryBlocked
+                  }
+                  aria-describedby="divider-position-help"
+                >
+                  <legend className="field-label">
+                    삽입 위치 <span>필수</span>
+                  </legend>
+                  <div className="divider-position-options">
+                    {dividerPositionOptions.map((option) => (
+                      <label
+                        className={`divider-position-option${
+                          dividerPosition === option.value
+                            ? ' is-selected'
+                            : ''
+                        }`}
+                        key={option.value}
+                      >
+                        <input
+                          type="radio"
+                          name="divider-position"
+                          value={option.value}
+                          checked={dividerPosition === option.value}
+                          onChange={() => {
+                            setDividerPosition(option.value);
+                            setError(null);
+                          }}
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>{option.description}</small>
+                        </span>
+                        {dividerPosition === option.value ? (
+                          <Check aria-hidden="true" />
+                        ) : null}
+                      </label>
+                    ))}
+                  </div>
+                  <p id="divider-position-help" className="layout-selection-help">
+                    선택한 문단의 시작 전 또는 끝난 다음 위치에 구분선 한 개를 넣습니다.
+                  </p>
+                </fieldset>
+              </div>
+
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  문단 원문, 구분선 개수와 실제 순서를 다시 확인합니다. 위치를 확정하지 못하면 중복 삽입 없이 작업을 멈춥니다.
+                </p>
+              </div>
+
+              {dividerError && error ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>구분선을 삽입하지 못했습니다</strong>
+                    <p>{error.message}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={
+                  isRunning ||
+                  Boolean(dividerResult) ||
+                  dividerRetryBlocked
+                }
+                onClick={() => void insertDivider()}
+              >
+                {activeAction === 'divider' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : dividerResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Minus aria-hidden="true" />
+                )}
+                {activeAction === 'divider'
+                  ? '삽입·검증 중…'
+                  : dividerResult
+                    ? '삽입 확인 완료'
+                    : '구분선 삽입'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="구분선 위치 테스트 범위"
+            >
+              <Minus aria-hidden="true" />
+              <div>
+                <h3>
+                  {dividerResult ? '검증 결과' : '이번 단계에서 확인할 내용'}
+                </h3>
+                {dividerResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>기준</dt>
+                      <dd>{dividerResult.paragraphNumber}번째 문단</dd>
+                    </div>
+                    <div>
+                      <dt>위치</dt>
+                      <dd>{getDividerPositionLabel(dividerResult.position)}</dd>
+                    </div>
+                    <div>
+                      <dt>구분선</dt>
+                      <dd>{dividerResult.dividerCount}개</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>본문 문단이 입력 원문과 같은지 확인</li>
+                    <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
+                    <li>정확히 한 개인 구분선 버튼만 조작</li>
+                    <li>삽입 개수와 문단 앞·뒤 순서를 재확인</li>
                   </ol>
                 )}
               </div>
