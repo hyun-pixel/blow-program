@@ -4,11 +4,13 @@ import {
   NaverConnectionAdapter,
   NaverConnectionError,
   NaverEditorError,
+  NaverImageError,
   parseNaverBlogUrl,
   type DraftContent,
   type NaverBlogProfile,
   type NaverConnectionStatus,
   type NaverEditorInputResult,
+  type NaverImageAttachmentResult,
 } from '@blow/naver-adapter';
 import {
   chromium,
@@ -36,6 +38,13 @@ export type NaverRunnerFailureCode =
   | 'EDITOR_FIELD_AMBIGUOUS'
   | 'EDITOR_NOT_BLANK'
   | 'EDITOR_INPUT_MISMATCH'
+  | 'INVALID_IMAGE_SELECTION'
+  | 'IMAGE_INPUT_NOT_FOUND'
+  | 'IMAGE_INPUT_AMBIGUOUS'
+  | 'IMAGE_UPLOAD_FAILED'
+  | 'IMAGE_PARTIAL_UPLOAD'
+  | 'IMAGE_COUNT_MISMATCH'
+  | 'CONTENT_INPUT_REQUIRED'
   | 'NAVER_NETWORK_ERROR'
   | 'NAVER_CONNECTION_FAILED';
 
@@ -57,7 +66,8 @@ export class NaverConnectionRunnerError extends Error {
 function classifyFailure(error: unknown): NaverRunnerFailure {
   if (
     error instanceof NaverConnectionError ||
-    error instanceof NaverEditorError
+    error instanceof NaverEditorError ||
+    error instanceof NaverImageError
   ) {
     return {
       code: error.code,
@@ -106,6 +116,8 @@ function classifyFailure(error: unknown): NaverRunnerFailure {
 }
 
 export class NaverConnectionSession {
+  private contentEntered = false;
+
   private constructor(
     private context: BrowserContext | undefined,
     readonly profile: NaverBlogProfile,
@@ -163,7 +175,7 @@ export class NaverConnectionSession {
 
   async verify(): Promise<NaverConnectionStatus> {
     try {
-      const status = await this.adapter.verifyRegisteredBlog(this.profile);
+      const status = await this.adapter.waitForLoginAndVerify(this.profile);
       this.writerHref = status.writerHref;
       return status;
     } catch (error) {
@@ -192,7 +204,31 @@ export class NaverConnectionSession {
 
   async enterContent(content: DraftContent): Promise<NaverEditorInputResult> {
     try {
-      return await this.adapter.enterContent(this.profile, content);
+      const result = await this.adapter.enterContent(this.profile, content);
+      this.contentEntered = true;
+      return result;
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async attachIndividualImages(
+    imagePaths: readonly string[],
+  ): Promise<NaverImageAttachmentResult> {
+    if (!this.contentEntered) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.attachIndividualImages(
+        this.profile,
+        imagePaths,
+      );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
         cause: error,

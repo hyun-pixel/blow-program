@@ -7,6 +7,10 @@ import {
   NaverEditorAdapter,
   type NaverEditorInputResult,
 } from './naver-editor.js';
+import {
+  NaverImageAdapter,
+  type NaverImageAttachmentResult,
+} from './naver-image.js';
 
 const BLOG_HOME_URL =
   'https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=1&groupId=0';
@@ -167,6 +171,13 @@ function waitForDelay(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
+}
+
+function isRetryableVerificationError(error: unknown): boolean {
+  return (
+    error instanceof NaverConnectionError &&
+    ['NAVER_PAGE_UNKNOWN', 'WRITER_LINK_NOT_FOUND'].includes(error.code)
+  );
 }
 
 export function normalizeWriterHref(input: string): string | null {
@@ -400,9 +411,10 @@ export class NaverConnectionAdapter {
           transientFailureCount += 1;
 
           if (
-            error instanceof NaverConnectionError ||
             this.page.isClosed() ||
-            transientFailureCount >= 5
+            transientFailureCount >= 5 ||
+            (error instanceof NaverConnectionError &&
+              !isRetryableVerificationError(error))
           ) {
             throw error;
           }
@@ -574,6 +586,21 @@ export class NaverConnectionAdapter {
 
     const editor = new NaverEditorAdapter(this.page);
     return editor.enterAndVerify(content);
+  }
+
+  async attachIndividualImages(
+    profile: NaverBlogProfile,
+    imagePaths: readonly string[],
+  ): Promise<NaverImageAttachmentResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 이미지 첨부를 시작하지 않았습니다.',
+      );
+    }
+
+    const imageAdapter = new NaverImageAdapter(this.page);
+    return imageAdapter.attachIndividualImages(imagePaths);
   }
 
   async bringToFront(): Promise<void> {

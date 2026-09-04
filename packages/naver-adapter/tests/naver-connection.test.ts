@@ -290,6 +290,47 @@ describe('로그인 완료 자동 확인', () => {
       },
     );
   });
+
+  it('이미 로그인된 홈에서 확인 이동이 겹쳐도 다시 확인한다', async () => {
+    const page = {
+      isClosed: vi.fn().mockReturnValue(false),
+      url: vi.fn().mockReturnValue(
+        'https://section.blog.naver.com/BlogHome.naver',
+      ),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(page);
+    const verify = vi
+      .spyOn(adapter, 'verifyRegisteredBlog')
+      .mockRejectedValueOnce(
+        new NaverConnectionError(
+          'NAVER_PAGE_UNKNOWN',
+          '로그인 직후 이동 중입니다.',
+        ),
+      )
+      .mockResolvedValueOnce({
+        stage: 'WRITER_LINK_READY',
+        message: '등록 블로그와 글쓰기 이동 경로를 확인했습니다.',
+        registeredBlogId: 'green_fork',
+        actualBlogId: 'green_fork',
+        currentUrl: 'https://section.blog.naver.com/BlogHome.naver',
+        writerHref: 'https://blog.naver.com/GoBlogWrite.naver',
+      });
+
+    const status = await adapter.waitForLoginAndVerify(
+      {
+        blogId: 'green_fork',
+        canonicalUrl: 'https://blog.naver.com/green_fork',
+      },
+      {
+        timeoutMs: 100,
+        pollIntervalMs: 1,
+        settleDelayMs: 0,
+      },
+    );
+
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(status.stage).toBe('WRITER_LINK_READY');
+  });
 });
 describe('로그인 직후 이동 충돌 복구', () => {
   it('네이버의 마지막 이동과 검증 이동이 겹치면 자동으로 다시 확인한다', async () => {

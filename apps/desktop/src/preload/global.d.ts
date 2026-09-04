@@ -4,6 +4,8 @@ import type {
   DraftVerification,
   NaverConnectionStatus,
   NaverEditorInputResult,
+  NaverImageAttachmentResult,
+  NaverSelectedImageFile,
 } from '@blow/naver-adapter';
 
 interface PocErrorResponse {
@@ -39,6 +41,17 @@ interface NaverInputSuccessResponse {
   readonly result: NaverEditorInputResult;
 }
 
+interface NaverImageSelectionSuccessResponse {
+  readonly ok: true;
+  readonly canceled: boolean;
+  readonly files: readonly NaverSelectedImageFile[];
+}
+
+interface NaverImageSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverImageAttachmentResult;
+}
+
 interface BasicSuccessResponse {
   readonly ok: true;
 }
@@ -62,6 +75,12 @@ declare global {
       enterContent(
         content: DraftContent,
       ): Promise<NaverErrorResponse | NaverInputSuccessResponse>;
+      selectImages(): Promise<
+        NaverErrorResponse | NaverImageSelectionSuccessResponse
+      >;
+      attachImages(
+        imageIds: readonly string[],
+      ): Promise<NaverErrorResponse | NaverImageSuccessResponse>;
       focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
       close(): Promise<BasicSuccessResponse>;
     };

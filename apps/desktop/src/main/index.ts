@@ -1,9 +1,13 @@
-import { join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { basename, extname, join, resolve } from 'node:path';
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   type IpcMainInvokeEvent,
+  type OpenDialogOptions,
   type WebContents,
 } from 'electron';
 
@@ -29,6 +33,8 @@ const ipcChannels = {
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
+  naverSelectImages: 'naver:select-images',
+  naverAttachImages: 'naver:attach-images',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -37,6 +43,10 @@ let mainWindow: BrowserWindow | null = null;
 let activeRun = false;
 let activeMockResult: MockPocResult | null = null;
 let activeNaverSession: NaverConnectionSession | null = null;
+const selectedNaverImages = new Map<
+  string,
+  { readonly path: string; readonly name: string; readonly sizeBytes: number }
+>();
 let naverWatchVersion = 0;
 let quitting = false;
 
@@ -124,6 +134,19 @@ function parseDraftContent(input: unknown): DraftContent | null {
   };
 }
 
+function parseSelectedImageIds(input: unknown): readonly string[] | null {
+  if (
+    !Array.isArray(input) ||
+    input.length === 0 ||
+    !input.every((id) => typeof id === 'string' && id.length <= 64)
+  ) {
+    return null;
+  }
+
+  const uniqueIds = new Set(input);
+  return uniqueIds.size === input.length ? input : null;
+}
+
 async function closeMockBrowser(): Promise<void> {
   const result = activeMockResult;
   activeMockResult = null;
@@ -134,6 +157,7 @@ async function closeNaverBrowser(): Promise<void> {
   const session = activeNaverSession;
   naverWatchVersion += 1;
   activeNaverSession = null;
+  selectedNaverImages.clear();
   await session?.close();
 }
 
@@ -219,7 +243,6 @@ function registerMockIpc(): void {
 
 function startNaverAutoVerify(
   session: NaverConnectionSession,
-  waitForLogin: boolean,
   sender: WebContents,
 ): void {
   const watchVersion = ++naverWatchVersion;
@@ -232,9 +255,7 @@ function startNaverAutoVerify(
       return;
     }
 
-    const verification = waitForLogin
-      ? session.waitForLoginAndVerify()
-      : session.verify();
+    const verification = session.waitForLoginAndVerify();
 
     void verification
       .then((status) => {
@@ -301,11 +322,7 @@ function registerNaverIpc(): void {
         result.status.stage === 'LOGIN_REQUIRED' ||
         result.status.stage === 'HOME_READY'
       ) {
-        startNaverAutoVerify(
-          result.session,
-          result.status.stage === 'LOGIN_REQUIRED',
-          event.sender,
-        );
+        startNaverAutoVerify(result.session, event.sender);
       }
 
       return {
@@ -495,6 +512,169 @@ function registerNaverIpc(): void {
           error: {
             code: 'NAVER_CONNECTION_FAILED',
             message: '제목과 본문 입력을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(ipcChannels.naverSelectImages, async (event) => {
+    requireTrustedSender(event);
+
+    if (!activeNaverSession) {
+      return {
+        ok: false,
+        error: {
+          code: 'NAVER_SESSION_NOT_FOUND',
+          message: '전용 Chrome을 먼저 열어 주세요.',
+        },
+      };
+    }
+
+    const options: OpenDialogOptions = {
+      title: '네이버 블로그에 첨부할 이미지 선택',
+      buttonLabel: '이미지 선택',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        {
+          name: '이미지 파일',
+          extensions: ['jpg', 'jpeg', 'png'],
+        },
+      ],
+    };
+    const selection = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    if (selection.canceled) {
+      return { ok: true, canceled: true, files: [] };
+    }
+
+    try {
+      const nextImages = await Promise.all(
+        selection.filePaths.map(async (filePath) => {
+          const extension = extname(filePath).toLowerCase();
+
+          if (!['.jpg', '.jpeg', '.png'].includes(extension)) {
+            throw new Error('UNSUPPORTED_IMAGE_FORMAT');
+          }
+
+          const fileStat = await stat(filePath);
+
+          if (!fileStat.isFile()) {
+            throw new Error('IMAGE_FILE_NOT_FOUND');
+          }
+
+          return {
+            id: randomUUID(),
+            path: filePath,
+            name: basename(filePath),
+            sizeBytes: fileStat.size,
+          };
+        }),
+      );
+
+      selectedNaverImages.clear();
+
+      for (const image of nextImages) {
+        selectedNaverImages.set(image.id, {
+          path: image.path,
+          name: image.name,
+          sizeBytes: image.sizeBytes,
+        });
+      }
+
+      return {
+        ok: true,
+        canceled: false,
+        files: nextImages.map(({ id, name, sizeBytes }) => ({
+          id,
+          name,
+          sizeBytes,
+        })),
+      };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'INVALID_IMAGE_SELECTION',
+          message: 'JPG 또는 PNG 이미지 파일을 다시 선택해 주세요.',
+        },
+      };
+    }
+  });
+
+  ipcMain.handle(
+    ipcChannels.naverAttachImages,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+      const imageIds = parseSelectedImageIds(input);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (!imageIds) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_IMAGE_SELECTION',
+            message: '첨부할 이미지를 다시 선택해 주세요.',
+          },
+        };
+      }
+
+      const selectedImages = imageIds.map((id) => selectedNaverImages.get(id));
+
+      if (selectedImages.some((image) => !image)) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_IMAGE_SELECTION',
+            message: '선택한 이미지 정보를 확인할 수 없습니다. 다시 선택해 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        const result = await session.attachIndividualImages(
+          selectedImages.map((image) => image!.path),
+        );
+        selectedNaverImages.clear();
+        return { ok: true, result };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'IMAGE_UPLOAD_FAILED',
+            message: '이미지 첨부를 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
           },
         };
       } finally {

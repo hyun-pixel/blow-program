@@ -8,6 +8,8 @@ import type {
   DraftContent,
   NaverConnectionStatus,
   NaverEditorInputResult,
+  NaverImageAttachmentResult,
+  NaverSelectedImageFile,
 } from '@blow/naver-adapter';
 
 type NaverStateResponse =
@@ -36,6 +38,33 @@ type NaverInputResponse =
       };
     };
 
+type NaverImageSelectionResponse =
+  | {
+      readonly ok: true;
+      readonly canceled: boolean;
+      readonly files: readonly NaverSelectedImageFile[];
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type NaverImageResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverImageAttachmentResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 const ipcChannels = {
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
@@ -45,6 +74,8 @@ const ipcChannels = {
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
+  naverSelectImages: 'naver:select-images',
+  naverAttachImages: 'naver:attach-images',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -88,6 +119,10 @@ const blowNaverApi = {
   openWriter: () => ipcRenderer.invoke(ipcChannels.naverOpenWriter),
   enterContent: (content: DraftContent): Promise<NaverInputResponse> =>
     ipcRenderer.invoke(ipcChannels.naverEnterContent, content),
+  selectImages: (): Promise<NaverImageSelectionResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverSelectImages),
+  attachImages: (imageIds: readonly string[]): Promise<NaverImageResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverAttachImages, imageIds),
   focus: () => ipcRenderer.invoke(ipcChannels.naverFocus),
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };

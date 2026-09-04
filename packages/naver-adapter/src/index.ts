@@ -16,6 +16,16 @@ export type {
   NaverEditorInputResult,
 } from './naver-editor.js';
 export {
+  NaverImageAdapter,
+  NaverImageError,
+  validateImagePaths,
+} from './naver-image.js';
+export type {
+  NaverImageAttachmentResult,
+  NaverImageFailureCode,
+  NaverSelectedImageFile,
+} from './naver-image.js';
+export {
   getBlogIdFromNaverUrl,
   isNaverLoginUrl,
   isNaverWriterUrl,

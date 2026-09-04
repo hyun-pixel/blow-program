@@ -4,6 +4,8 @@ import {
   Circle,
   ExternalLink,
   FileText,
+  ImagePlus,
+  Images,
   Keyboard,
   Link2,
   LoaderCircle,
@@ -22,6 +24,8 @@ import {
 import type {
   NaverConnectionStatus,
   NaverEditorInputResult,
+  NaverImageAttachmentResult,
+  NaverSelectedImageFile,
 } from '@blow/naver-adapter';
 
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
@@ -108,6 +112,14 @@ const sampleBody = [
   '빈 줄과 여러 문단이 그대로 유지되는지 확인합니다. 🙂',
 ].join('\n\n');
 
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1_024 * 1_024) {
+    return `${Math.max(1, Math.round(sizeBytes / 1_024)).toLocaleString('ko-KR')} KB`;
+  }
+
+  return `${(sizeBytes / (1_024 * 1_024)).toFixed(1)} MB`;
+}
+
 function parseDraftParagraphs(value: string): readonly string[] {
   return value
     .replace(/\r\n?/g, '\n')
@@ -134,8 +146,20 @@ export function ConnectionScreen() {
   });
   const [inputResult, setInputResult] =
     useState<NaverEditorInputResult | null>(null);
+  const [selectedImages, setSelectedImages] = useState<
+    readonly NaverSelectedImageFile[]
+  >([]);
+  const [imageResult, setImageResult] =
+    useState<NaverImageAttachmentResult | null>(null);
   const [activeAction, setActiveAction] = useState<
-    'open' | 'verify' | 'writer' | 'input' | 'focus' | null
+    | 'open'
+    | 'verify'
+    | 'writer'
+    | 'input'
+    | 'select-images'
+    | 'images'
+    | 'focus'
+    | null
   >(null);
   const [error, setError] = useState<{
     code: string;
@@ -194,6 +218,8 @@ export function ConnectionScreen() {
 
         if (action === 'open' || action === 'writer') {
           setInputResult(null);
+          setSelectedImages([]);
+          setImageResult(null);
         }
       } else {
         setError(response.error);
@@ -268,6 +294,8 @@ export function ConnectionScreen() {
       setBrowserOpen(false);
       setStatus(null);
       setInputResult(null);
+      setSelectedImages([]);
+      setImageResult(null);
       setDraftErrors({ title: '', body: '' });
       setError(null);
     } finally {
@@ -309,6 +337,8 @@ export function ConnectionScreen() {
 
       if (response.ok) {
         setInputResult(response.result);
+        setSelectedImages([]);
+        setImageResult(null);
       } else {
         setError(response.error);
       }
@@ -316,6 +346,64 @@ export function ConnectionScreen() {
       setError({
         code: 'NAVER_CONNECTION_FAILED',
         message: '제목과 본문 입력을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const selectImages = async (): Promise<void> => {
+    setActiveAction('select-images');
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.selectImages();
+
+      if (response.ok) {
+        if (!response.canceled) {
+          setSelectedImages(response.files);
+          setImageResult(null);
+        }
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'INVALID_IMAGE_SELECTION',
+        message: '이미지 파일 선택 창을 열지 못했습니다. 다시 시도해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const attachImages = async (): Promise<void> => {
+    if (selectedImages.length === 0) {
+      setError({
+        code: 'INVALID_IMAGE_SELECTION',
+        message: '첨부할 JPG 또는 PNG 이미지를 선택해 주세요.',
+      });
+      return;
+    }
+
+    setActiveAction('images');
+    setImageResult(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.attachImages(
+        selectedImages.map((image) => image.id),
+      );
+
+      if (response.ok) {
+        setImageResult(response.result);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'IMAGE_UPLOAD_FAILED',
+        message: '이미지 첨부를 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
       setActiveAction(null);
@@ -354,6 +442,18 @@ export function ConnectionScreen() {
 
   const draftParagraphs = parseDraftParagraphs(draftBody);
   const draftBodyLength = draftParagraphs.join('\n\n').length;
+  const imageError = error
+    ? [
+        'INVALID_IMAGE_SELECTION',
+        'IMAGE_INPUT_NOT_FOUND',
+        'IMAGE_INPUT_AMBIGUOUS',
+        'IMAGE_UPLOAD_FAILED',
+        'IMAGE_PARTIAL_UPLOAD',
+        'IMAGE_COUNT_MISMATCH',
+        'CONTENT_INPUT_REQUIRED',
+      ].includes(error.code)
+    : false;
+  const imageRetryBlocked = error?.code === 'IMAGE_PARTIAL_UPLOAD';
   const editorError = error
     ? [
         'INVALID_DRAFT_CONTENT',
@@ -370,7 +470,7 @@ export function ConnectionScreen() {
         <div>
           <h1>네이버 자동 입력 확인</h1>
           <p>
-            등록 블로그를 연결한 뒤 네이버 편집기에 제목과 본문을 안전하게 입력합니다.
+            등록 블로그를 연결한 뒤 네이버 편집기에 제목, 본문과 이미지를 안전하게 입력합니다.
           </p>
         </div>
         {browserOpen ? (
@@ -426,22 +526,35 @@ export function ConnectionScreen() {
           <XCircle aria-hidden="true" />
           <div>
             <h2>
-              {editorError
-                ? '입력 상태를 확인해 주세요'
-                : '연결 상태를 확인해 주세요'}
+              {imageError
+                ? '이미지 상태를 확인해 주세요'
+                : editorError
+                  ? '입력 상태를 확인해 주세요'
+                  : '연결 상태를 확인해 주세요'}
             </h2>
             <p>{error.message}</p>
           </div>
         </section>
       ) : null}
 
-      {inputResult ? (
+      {imageResult ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>개별사진 첨부를 확인했습니다</h2>
+            <p>
+              선택한 {imageResult.insertedCount}장의 이미지가 네이버 편집기에 삽입됐습니다.
+              임시저장과 최종 발행은 실행하지 않았습니다.
+            </p>
+          </div>
+        </section>
+      ) : inputResult ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
             <h2>제목과 본문 입력을 확인했습니다</h2>
             <p>
-              네이버 Chrome에서 내용을 검토해 주세요. 임시저장과 최종 발행은 실행하지 않았습니다.
+              아래에서 첨부할 이미지를 선택하거나 네이버 Chrome에서 내용을 검토해 주세요.
             </p>
           </div>
         </section>
@@ -802,6 +915,163 @@ export function ConnectionScreen() {
                     <li>기존 내용이 없는 빈 새 글인지 확인</li>
                     <li>제목과 문단을 순서대로 입력</li>
                     <li>입력 결과를 원문과 다시 비교</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+
+      {inputResult ? (
+        <section
+          className="image-test-panel"
+          aria-labelledby="image-test-heading"
+          aria-busy={activeAction === 'select-images' || activeAction === 'images'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="image-test-heading">개별사진 첨부 테스트</h2>
+              <p>
+                로컬 JPG 또는 PNG 파일을 선택해 네이버 편집기에 한 장씩 첨부합니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {imageResult ? '첨부 확인 완료' : '저장하지 않음'}
+            </span>
+          </header>
+
+          <div className="image-test-layout">
+            <div className="image-test-form">
+              <div className="field-group">
+                <span className="field-label">
+                  첨부 이미지 <span>필수</span>
+                </span>
+                <div className="image-select-row">
+                  <button
+                    className="button secondary"
+                    type="button"
+                    disabled={
+                      isRunning || Boolean(imageResult) || imageRetryBlocked
+                    }
+                    onClick={() => void selectImages()}
+                  >
+                    {activeAction === 'select-images' ? (
+                      <LoaderCircle className="is-spinning" aria-hidden="true" />
+                    ) : (
+                      <ImagePlus aria-hidden="true" />
+                    )}
+                    {activeAction === 'select-images'
+                      ? '선택 창 여는 중…'
+                      : selectedImages.length > 0
+                        ? '이미지 다시 선택'
+                        : '이미지 선택'}
+                  </button>
+                  <span className="image-selection-count" aria-live="polite">
+                    {selectedImages.length > 0
+                      ? `${selectedImages.length}장 선택됨`
+                      : '선택된 이미지 없음'}
+                  </span>
+                </div>
+                <p className="field-help">
+                  파일 경로는 화면에 표시하거나 서버로 보내지 않습니다. 이번 단계에서는 JPG와 PNG만 지원합니다.
+                </p>
+
+                {selectedImages.length > 0 ? (
+                  <div className="selected-image-files">
+                    <ul aria-label="선택한 이미지 목록">
+                      {selectedImages.slice(0, 6).map((image) => (
+                        <li key={image.id}>
+                          <Images aria-hidden="true" />
+                          <span>{image.name}</span>
+                          <small>{formatFileSize(image.sizeBytes)}</small>
+                        </li>
+                      ))}
+                    </ul>
+                    {selectedImages.length > 6 ? (
+                      <p>이외 {selectedImages.length - 6}장이 함께 첨부됩니다.</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="image-layout-choice" aria-label="이미지 배치 방식">
+                <CheckCircle2 aria-hidden="true" />
+                <div>
+                  <strong>개별사진</strong>
+                  <p>이미지를 한 장씩 첨부하고 실제 삽입 개수를 다시 확인합니다.</p>
+                </div>
+                <span>이번 단계</span>
+              </div>
+
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  원본 파일은 수정하거나 복사하지 않습니다. BLOW는 이미지 첨부 후에도 임시저장과 최종 발행을 누르지 않습니다.
+                </p>
+              </div>
+
+              {imageError && error ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>이미지를 첨부하지 못했습니다</strong>
+                    <p>{error.message}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary image-attach-button"
+                type="button"
+                disabled={
+                  isRunning ||
+                  selectedImages.length === 0 ||
+                  Boolean(imageResult) ||
+                  imageRetryBlocked
+                }
+                onClick={() => void attachImages()}
+              >
+                {activeAction === 'images' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : imageResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <ImagePlus aria-hidden="true" />
+                )}
+                {activeAction === 'images'
+                  ? '첨부·검증 중…'
+                  : imageResult
+                    ? '첨부 확인 완료'
+                    : '개별사진 첨부'}
+              </button>
+            </div>
+
+            <aside className="image-test-summary" aria-label="이미지 첨부 테스트 범위">
+              <Images aria-hidden="true" />
+              <div>
+                <h3>{imageResult ? '검증 결과' : '이번 단계에서 확인할 내용'}</h3>
+                {imageResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>배치</dt>
+                      <dd>개별사진</dd>
+                    </div>
+                    <div>
+                      <dt>선택</dt>
+                      <dd>{imageResult.requestedCount}장</dd>
+                    </div>
+                    <div>
+                      <dt>삽입</dt>
+                      <dd>{imageResult.insertedCount}장</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>JPG·PNG 파일만 안전하게 선택</li>
+                    <li>선택한 순서대로 한 장씩 첨부</li>
+                    <li>각 이미지가 편집기에 추가됐는지 확인</li>
+                    <li>최종 삽입 개수와 선택 개수를 비교</li>
                   </ol>
                 )}
               </div>
