@@ -26,11 +26,12 @@ interface EditableMock {
 function createEditable(
   initialValue = '',
   editable = true,
+  readTransform: (value: string) => string = (value) => value,
 ): EditableMock {
   let value = initialValue;
   const locator = {
     click: vi.fn().mockResolvedValue(undefined),
-    evaluate: vi.fn(async () => value),
+    evaluate: vi.fn(async () => readTransform(value)),
     fill: vi.fn(async (nextValue: string) => {
       value = nextValue;
     }),
@@ -207,6 +208,30 @@ describe('네이버 편집기 제목·본문 입력', () => {
     expect(page.waitForTimeout).toHaveBeenCalledWith(120);
   });
 
+  it('네이버가 문단 줄바꿈을 글자값에서 생략해도 실제 문자가 같으면 성공한다', async () => {
+    const title = createEditable();
+    const body = createEditable('', false, (value) => value.replace(/\n/g, ''));
+    const page = createEditorPage([title], [body]);
+    const adapter = new NaverEditorAdapter(page);
+
+    await expect(
+      adapter.enterAndVerify({
+        title: '줄바꿈 검증 제목',
+        paragraphs: [
+          '첫 문단입니다.',
+          '둘째 문단입니다.',
+          '셋째 문단입니다. 🙂',
+        ],
+      }),
+    ).resolves.toMatchObject({
+      stage: 'CONTENT_VERIFIED',
+      paragraphCount: 3,
+    });
+
+    expect(body.read()).toBe(
+      '첫 문단입니다.\n\n둘째 문단입니다.\n\n셋째 문단입니다. 🙂',
+    );
+  });
   it('기존 내용이 있으면 아무 글자도 입력하지 않고 중단한다', async () => {
     const title = createEditable('기존 제목');
     const body = createEditable();

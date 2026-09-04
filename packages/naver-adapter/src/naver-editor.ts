@@ -141,6 +141,18 @@ async function readEditableText(locator: Locator): Promise<string> {
       )
       .forEach((placeholder) => placeholder.remove());
 
+    const paragraphNodes = clone.querySelectorAll('.se-text-paragraph, p');
+
+    if (paragraphNodes.length > 0) {
+      return Array.from(paragraphNodes)
+        .map((paragraph) => paragraph.textContent || '')
+        .join('\n');
+    }
+
+    clone.querySelectorAll('br').forEach((lineBreak) => {
+      lineBreak.replaceWith('\n');
+    });
+
     return clone.innerText || clone.textContent || '';
   });
 }
@@ -299,18 +311,19 @@ async function verifyEnteredContent(
   expected: DraftContent,
 ): Promise<void> {
   const expectedBody = expected.paragraphs.join('\n\n');
+  const matchesExpected = (actual: { title: string; body: string }) =>
+    actual.title === expected.title &&
+    (actual.body === expectedBody ||
+      actual.body.replace(/\n/g, '') === expectedBody.replace(/\n/g, ''));
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
   let actual = await readNormalizedContent(fields);
 
-  while (
-    (actual.title !== expected.title || actual.body !== expectedBody) &&
-    Date.now() < deadline
-  ) {
+  while (!matchesExpected(actual) && Date.now() < deadline) {
     await page.waitForTimeout(VERIFY_INTERVAL_MS);
     actual = await readNormalizedContent(fields);
   }
 
-  if (actual.title !== expected.title || actual.body !== expectedBody) {
+  if (!matchesExpected(actual)) {
     throw new NaverEditorError(
       'EDITOR_INPUT_MISMATCH',
       '네이버 편집기 입력이 중간에 누락됐습니다. 제목 ' +
