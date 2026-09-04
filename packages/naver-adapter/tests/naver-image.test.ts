@@ -15,7 +15,7 @@ function createCollection(locators: readonly Locator[]) {
 
 function createImagePage(options?: {
   readonly inputCount?: number;
-  readonly layout?: Exclude<NaverImageLayout, 'individual'>;
+  readonly layout?: NaverImageLayout;
   readonly layoutControlCount?: number;
   readonly partialFailure?: boolean;
   readonly useToolbar?: boolean;
@@ -50,9 +50,18 @@ function createImagePage(options?: {
   const fileChooser = {
     setFiles: vi.fn(applySelectedFiles),
   };
-  const layoutLabel = options?.layout === 'collage' ? '콜라주' : '슬라이드';
+  const layoutLabel = options?.layout === 'individual'
+    ? '개별사진'
+    : options?.layout === 'collage'
+      ? '콜라주'
+      : '슬라이드';
   const layoutControl = {
     click: vi.fn(async () => {
+      if (options?.layout === 'individual') {
+        insertedIndividualCount = pendingImageCount;
+        return;
+      }
+
       groupedComponentCount = 1;
       groupedImageCount = pendingImageCount;
     }),
@@ -166,6 +175,29 @@ describe('네이버 사진 배치 첨부', () => {
     ]);
     expect(result).toMatchObject({
       stage: 'IMAGES_VERIFIED',
+      requestedCount: 2,
+      insertedCount: 2,
+      layout: 'individual',
+    });
+  });
+
+  it('여러 장의 개별 사진은 네이버 개별사진 버튼을 명시적으로 선택한다', async () => {
+    const { input, layoutControl, page } = createImagePage({
+      layout: 'individual',
+    });
+    const adapter = new NaverImageAdapter(page);
+
+    const result = await adapter.attachImages(
+      ['C:\images\one.jpg', 'C:\images\two.png'],
+      'individual',
+    );
+
+    expect(input.setInputFiles).toHaveBeenCalledWith([
+      'C:\images\one.jpg',
+      'C:\images\two.png',
+    ]);
+    expect(layoutControl.click).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
       requestedCount: 2,
       insertedCount: 2,
       layout: 'individual',

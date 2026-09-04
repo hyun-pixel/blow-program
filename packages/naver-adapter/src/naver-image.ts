@@ -54,6 +54,12 @@ const imageLayoutLabels = {
   slide: '슬라이드',
 } as const;
 
+const imageLayoutControlLabels = {
+  individual: ['개별사진', '개별 사진'],
+  collage: ['콜라주'],
+  slide: ['슬라이드'],
+} as const;
+
 export type NaverImageLayout = keyof typeof imageLayoutLabels;
 
 export type NaverImageFailureCode =
@@ -251,9 +257,11 @@ async function uploadImages(
 
 async function findLayoutControlOnce(
   page: Page,
-  layout: Exclude<NaverImageLayout, 'individual'>,
+  layout: NaverImageLayout,
 ): Promise<Locator | null> {
-  const expectedLabel = imageLayoutLabels[layout];
+  const expectedLabels = imageLayoutControlLabels[layout].map((label) =>
+    label.replace(/\s+/g, ''),
+  );
 
   for (const selector of layoutControlSelectors) {
     const candidates: Locator[] = [];
@@ -269,7 +277,14 @@ async function findLayoutControlOnce(
           candidate.innerText().catch(() => ''),
         ]);
 
-        if (visible && label.replace(/\s+/g, ' ').trim() === expectedLabel) {
+        const normalizedLabel = label.replace(/\s+/g, '');
+
+        if (
+          visible &&
+          expectedLabels.some(
+            (expectedLabel) => expectedLabel === normalizedLabel,
+          )
+        ) {
           candidates.push(candidate);
         }
       }
@@ -278,7 +293,7 @@ async function findLayoutControlOnce(
     if (candidates.length > 1) {
       throw new NaverImageError(
         'IMAGE_LAYOUT_CONTROL_AMBIGUOUS',
-        `${expectedLabel} 선택 버튼이 여러 개 확인되어 안전을 위해 작업을 멈췄습니다.`,
+        `${imageLayoutLabels[layout]} 선택 버튼이 여러 개 확인되어 안전을 위해 작업을 멈췄습니다.`,
       );
     }
 
@@ -292,7 +307,7 @@ async function findLayoutControlOnce(
 
 async function waitForLayoutControl(
   page: Page,
-  layout: Exclude<NaverImageLayout, 'individual'>,
+  layout: NaverImageLayout,
 ): Promise<Locator> {
   const deadline = Date.now() + IMAGE_LAYOUT_TIMEOUT_MS;
 
@@ -309,6 +324,32 @@ async function waitForLayoutControl(
   throw new NaverImageError(
     'IMAGE_LAYOUT_CONTROL_NOT_FOUND',
     `이미지는 첨부됐지만 ${imageLayoutLabels[layout]} 선택 버튼을 확인하지 못했습니다. 중복 입력을 막기 위해 빈 새 글에서 다시 시작해 주세요.`,
+  );
+}
+
+async function waitForIndividualControlOrInsertion(
+  page: Page,
+  expectedImageCount: number,
+): Promise<Locator | null> {
+  const deadline = Date.now() + IMAGE_LAYOUT_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    if (await countInsertedImages(page) >= expectedImageCount) {
+      return null;
+    }
+
+    const control = await findLayoutControlOnce(page, 'individual');
+
+    if (control) {
+      return control;
+    }
+
+    await page.waitForTimeout(IMAGE_UPLOAD_POLL_MS);
+  }
+
+  throw new NaverImageError(
+    'IMAGE_LAYOUT_CONTROL_NOT_FOUND',
+    '이미지는 첨부됐지만 개별 사진 선택 버튼을 확인하지 못했습니다. 중복 입력을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
   );
 }
 
@@ -373,6 +414,18 @@ export class NaverImageAdapter {
 
     try {
       await uploadImages(this.page, imagePaths);
+
+      if (imagePaths.length > 1) {
+        const layoutControl = await waitForIndividualControlOrInsertion(
+          this.page,
+          initialCount + imagePaths.length,
+        );
+
+        if (layoutControl) {
+          await layoutControl.click();
+        }
+      }
+
       const actualCount = await waitForImageCount(
         this.page,
         initialCount + imagePaths.length,
