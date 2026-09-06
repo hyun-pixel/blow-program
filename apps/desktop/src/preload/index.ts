@@ -13,6 +13,8 @@ import type {
   NaverImageAttachmentResult,
   NaverImageLayout,
   NaverSelectedImageFile,
+  NaverStickerInsertionResult,
+  NaverStickerPosition,
 } from '@blow/naver-adapter';
 
 type NaverStateResponse =
@@ -45,6 +47,19 @@ type NaverDividerResponse =
   | {
       readonly ok: true;
       readonly result: NaverDividerInsertionResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type NaverStickerResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverStickerInsertionResult;
     }
   | {
       readonly ok: false;
@@ -91,6 +106,7 @@ const ipcChannels = {
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
   naverInsertDivider: 'naver:insert-divider',
+  naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
   naverClose: 'naver:close',
@@ -141,6 +157,14 @@ const blowNaverApi = {
     position: NaverDividerPosition,
   ): Promise<NaverDividerResponse> =>
     ipcRenderer.invoke(ipcChannels.naverInsertDivider, {
+      paragraphNumber,
+      position,
+    }),
+  insertDefaultSticker: (
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+  ): Promise<NaverStickerResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverInsertSticker, {
       paragraphNumber,
       position,
     }),

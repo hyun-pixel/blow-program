@@ -6,6 +6,7 @@ import {
   NaverDividerError,
   NaverEditorError,
   NaverImageError,
+  NaverStickerError,
   parseNaverBlogUrl,
   validateDraftContent,
   type DraftContent,
@@ -16,6 +17,8 @@ import {
   type NaverEditorInputResult,
   type NaverImageAttachmentResult,
   type NaverImageLayout,
+  type NaverStickerInsertionResult,
+  type NaverStickerPosition,
 } from '@blow/naver-adapter';
 import {
   chromium,
@@ -60,6 +63,15 @@ export type NaverRunnerFailureCode =
   | 'IMAGE_LAYOUT_CONTROL_NOT_FOUND'
   | 'IMAGE_LAYOUT_CONTROL_AMBIGUOUS'
   | 'IMAGE_LAYOUT_MISMATCH'
+  | 'INVALID_STICKER_REQUEST'
+  | 'STICKER_ANCHOR_NOT_FOUND'
+  | 'STICKER_ANCHOR_MISMATCH'
+  | 'STICKER_SELECTION_FAILED'
+  | 'STICKER_CONTROL_NOT_FOUND'
+  | 'STICKER_CONTROL_AMBIGUOUS'
+  | 'STICKER_ITEM_NOT_FOUND'
+  | 'STICKER_INSERT_UNCONFIRMED'
+  | 'STICKER_POSITION_MISMATCH'
   | 'CONTENT_INPUT_REQUIRED'
   | 'NAVER_NETWORK_ERROR'
   | 'NAVER_CONNECTION_FAILED';
@@ -84,7 +96,8 @@ function classifyFailure(error: unknown): NaverRunnerFailure {
     error instanceof NaverConnectionError ||
     error instanceof NaverDividerError ||
     error instanceof NaverEditorError ||
-    error instanceof NaverImageError
+    error instanceof NaverImageError ||
+    error instanceof NaverStickerError
   ) {
     return {
       code: error.code,
@@ -250,6 +263,33 @@ export class NaverConnectionSession {
 
     try {
       return await this.adapter.insertDivider(
+        this.profile,
+        content.paragraphs,
+        paragraphNumber,
+        position,
+      );
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async insertDefaultSticker(
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+  ): Promise<NaverStickerInsertionResult> {
+    const content = this.enteredContent;
+
+    if (!content) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.insertDefaultSticker(
         this.profile,
         content.paragraphs,
         paragraphNumber,

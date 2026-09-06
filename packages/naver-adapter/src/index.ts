@@ -37,6 +37,16 @@ export type {
   NaverSelectedImageFile,
 } from './naver-image.js';
 export {
+  NaverStickerAdapter,
+  NaverStickerError,
+  validateStickerRequest,
+} from './naver-sticker.js';
+export type {
+  NaverStickerFailureCode,
+  NaverStickerInsertionResult,
+  NaverStickerPosition,
+} from './naver-sticker.js';
+export {
   getBlogIdFromNaverUrl,
   isNaverLoginUrl,
   isNaverWriterUrl,

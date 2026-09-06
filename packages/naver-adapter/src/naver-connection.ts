@@ -17,6 +17,11 @@ import {
   type NaverImageAttachmentResult,
   type NaverImageLayout,
 } from './naver-image.js';
+import {
+  NaverStickerAdapter,
+  type NaverStickerInsertionResult,
+  type NaverStickerPosition,
+} from './naver-sticker.js';
 
 const BLOG_HOME_URL =
   'https://section.blog.naver.com/BlogHome.naver?directoryNo=0&currentPage=1&groupId=0';
@@ -609,6 +614,27 @@ export class NaverConnectionAdapter {
 
     const dividerAdapter = new NaverDividerAdapter(this.page);
     return dividerAdapter.insertDivider(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+  }
+
+  async insertDefaultSticker(
+    profile: NaverBlogProfile,
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+  ): Promise<NaverStickerInsertionResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 스티커 삽입을 시작하지 않았습니다.',
+      );
+    }
+
+    const stickerAdapter = new NaverStickerAdapter(this.page);
+    return stickerAdapter.insertDefaultSticker(
       expectedParagraphs,
       paragraphNumber,
       position,

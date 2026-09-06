@@ -45,24 +45,31 @@ function createDividerPage(options: DividerPageOptions = {}): {
   const shouldInsert = options.insertDivider ?? true;
   const shouldVerifyPosition = options.verifyPosition ?? true;
   let dividerCount = 0;
-  let beforeCount = 0;
-  let afterCount = 0;
+  const dividerGaps: number[] = [];
+  let pendingParagraphIndex: number | null = null;
   let pendingPosition: NaverDividerPosition | null = null;
 
-  const paragraphs = paragraphTexts.map((text) => ({
+  const paragraphs = paragraphTexts.map((text, paragraphIndex) => ({
+    boundingBox: vi.fn().mockResolvedValue({
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 40,
+    }),
     click: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn(async (
       _callback: unknown,
       argument: string,
     ) => {
       if (argument === 'before' || argument === 'after') {
+        pendingParagraphIndex = paragraphIndex;
         pendingPosition = argument;
-        return undefined;
+        return true;
       }
 
       return {
-        before: beforeCount,
-        after: afterCount,
+        before: dividerGaps.filter((gap) => gap <= paragraphIndex).length,
+        after: dividerGaps.filter((gap) => gap > paragraphIndex).length,
       };
     }),
     innerText: vi.fn().mockResolvedValue(text),
@@ -70,23 +77,23 @@ function createDividerPage(options: DividerPageOptions = {}): {
   } as unknown as Locator));
 
   const controlClick = vi.fn(async () => {
-    if (!shouldInsert || !pendingPosition) {
+    if (
+      !shouldInsert ||
+      pendingParagraphIndex === null ||
+      !pendingPosition
+    ) {
       return;
     }
 
     dividerCount += 1;
-
-    if (shouldVerifyPosition) {
-      if (pendingPosition === 'before') {
-        beforeCount += 1;
-      } else {
-        afterCount += 1;
-      }
-    } else if (pendingPosition === 'before') {
-      afterCount += 1;
-    } else {
-      beforeCount += 1;
-    }
+    const insertedPosition = shouldVerifyPosition
+      ? pendingPosition
+      : pendingPosition === 'before'
+        ? 'after'
+        : 'before';
+    dividerGaps.push(
+      pendingParagraphIndex + (insertedPosition === 'after' ? 1 : 0),
+    );
   });
   const controls = Array.from({ length: controlCount }, () => ({
     click: controlClick,
@@ -125,6 +132,9 @@ function createDividerPage(options: DividerPageOptions = {}): {
 
   const page = {
     frames: vi.fn().mockReturnValue([frame]),
+    keyboard: {
+      press: vi.fn().mockResolvedValue(undefined),
+    },
     url: vi.fn().mockReturnValue(
       'https://blog.naver.com/green_fork?Redirect=Write&categoryNo=1',
     ),
@@ -155,7 +165,11 @@ describe('네이버 구분선 요청 검사', () => {
 describe('네이버 구분선 삽입', () => {
   it.each([
     ['before', 1],
+    ['after', 1],
+    ['before', 2],
     ['after', 2],
+    ['before', 3],
+    ['after', 3],
   ] as const)(
     '선택한 문단의 %s 위치에 구분선 한 개를 넣고 검증한다',
     async (position, paragraphNumber) => {
@@ -315,6 +329,8 @@ describe('네이버 구분선 삽입', () => {
       ),
     ).rejects.toMatchObject({
       code: 'DIVIDER_POSITION_MISMATCH',
+      message:
+        '2번째 문단의 요청 위치는 문단 앞, 실제 감지 위치는 문단 뒤입니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
     });
   });
 });

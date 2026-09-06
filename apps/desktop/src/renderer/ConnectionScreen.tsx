@@ -14,6 +14,7 @@ import {
   MousePointerClick,
   PanelsTopLeft,
   ShieldCheck,
+  Sticker,
   X,
   XCircle,
 } from 'lucide-react';
@@ -30,6 +31,8 @@ import type {
   NaverImageAttachmentResult,
   NaverImageLayout,
   NaverSelectedImageFile,
+  NaverStickerInsertionResult,
+  NaverStickerPosition,
 } from '@blow/naver-adapter';
 
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
@@ -165,6 +168,29 @@ function getDividerPositionLabel(position: NaverDividerPosition): string {
   )!.label;
 }
 
+const stickerPositionOptions: readonly {
+  readonly value: NaverStickerPosition;
+  readonly label: string;
+  readonly description: string;
+}[] = [
+  {
+    value: 'before',
+    label: '문단 앞',
+    description: '선택한 문단이 시작되기 전에 넣습니다.',
+  },
+  {
+    value: 'after',
+    label: '문단 뒤',
+    description: '선택한 문단이 끝난 다음에 넣습니다.',
+  },
+];
+
+function getStickerPositionLabel(position: NaverStickerPosition): string {
+  return stickerPositionOptions.find(
+    (option) => option.value === position,
+  )!.label;
+}
+
 function formatFileSize(sizeBytes: number): string {
   if (sizeBytes < 1_024 * 1_024) {
     return `${Math.max(1, Math.round(sizeBytes / 1_024)).toLocaleString('ko-KR')} KB`;
@@ -204,6 +230,11 @@ export function ConnectionScreen() {
     useState<NaverDividerPosition>('after');
   const [dividerResult, setDividerResult] =
     useState<NaverDividerInsertionResult | null>(null);
+  const [stickerParagraphNumber, setStickerParagraphNumber] = useState(1);
+  const [stickerPosition, setStickerPosition] =
+    useState<NaverStickerPosition>('after');
+  const [stickerResult, setStickerResult] =
+    useState<NaverStickerInsertionResult | null>(null);
   const [selectedImages, setSelectedImages] = useState<
     readonly NaverSelectedImageFile[]
   >([]);
@@ -217,6 +248,7 @@ export function ConnectionScreen() {
     | 'writer'
     | 'input'
     | 'divider'
+    | 'sticker'
     | 'select-images'
     | 'images'
     | 'focus'
@@ -282,6 +314,9 @@ export function ConnectionScreen() {
           setDividerParagraphNumber(1);
           setDividerPosition('after');
           setDividerResult(null);
+          setStickerParagraphNumber(1);
+          setStickerPosition('after');
+          setStickerResult(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -362,6 +397,9 @@ export function ConnectionScreen() {
       setDividerParagraphNumber(1);
       setDividerPosition('after');
       setDividerResult(null);
+      setStickerParagraphNumber(1);
+      setStickerPosition('after');
+      setStickerResult(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -397,6 +435,7 @@ export function ConnectionScreen() {
     setActiveAction('input');
     setInputResult(null);
     setDividerResult(null);
+    setStickerResult(null);
     setError(null);
 
     try {
@@ -480,6 +519,7 @@ export function ConnectionScreen() {
       if (response.ok) {
         setImageResult(response.result);
         setDividerResult(null);
+        setStickerResult(null);
       } else {
         setError(response.error);
       }
@@ -517,6 +557,9 @@ export function ConnectionScreen() {
 
       if (response.ok) {
         setDividerResult(response.result);
+        setStickerParagraphNumber(1);
+        setStickerPosition('after');
+        setStickerResult(null);
       } else {
         setError(response.error);
       }
@@ -524,6 +567,43 @@ export function ConnectionScreen() {
       setError({
         code: 'DIVIDER_INSERT_UNCONFIRMED',
         message: '구분선 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const insertDefaultSticker = async (): Promise<void> => {
+    if (
+      stickerParagraphNumber < 1 ||
+      stickerParagraphNumber > draftParagraphs.length
+    ) {
+      setError({
+        code: 'INVALID_STICKER_REQUEST',
+        message: '스티커를 넣을 문단과 위치를 다시 선택해 주세요.',
+      });
+      return;
+    }
+
+    setActiveAction('sticker');
+    setStickerResult(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.insertDefaultSticker(
+        stickerParagraphNumber,
+        stickerPosition,
+      );
+
+      if (response.ok) {
+        setStickerResult(response.result);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'STICKER_INSERT_UNCONFIRMED',
+        message: '스티커 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
       setActiveAction(null);
@@ -580,6 +660,23 @@ export function ConnectionScreen() {
   ].includes(error?.code ?? '');
   const selectedDividerPositionLabel =
     getDividerPositionLabel(dividerPosition);
+  const stickerError = error
+    ? [
+        'INVALID_STICKER_REQUEST',
+        'STICKER_ANCHOR_NOT_FOUND',
+        'STICKER_ANCHOR_MISMATCH',
+        'STICKER_SELECTION_FAILED',
+        'STICKER_CONTROL_NOT_FOUND',
+        'STICKER_CONTROL_AMBIGUOUS',
+        'STICKER_ITEM_NOT_FOUND',
+        'STICKER_INSERT_UNCONFIRMED',
+        'STICKER_POSITION_MISMATCH',
+      ].includes(error.code)
+    : false;
+  const stickerRetryBlocked = [
+    'STICKER_INSERT_UNCONFIRMED',
+    'STICKER_POSITION_MISMATCH',
+  ].includes(error?.code ?? '');
   const imageError = error
     ? [
         'INVALID_IMAGE_SELECTION',
@@ -677,9 +774,11 @@ export function ConnectionScreen() {
           <XCircle aria-hidden="true" />
           <div>
             <h2>
-              {dividerError
-                ? '구분선 상태를 확인해 주세요'
-                : imageError
+              {stickerError
+                ? '스티커 상태를 확인해 주세요'
+                : dividerError
+                  ? '구분선 상태를 확인해 주세요'
+                  : imageError
                   ? '이미지 상태를 확인해 주세요'
                   : editorError
                   ? '입력 상태를 확인해 주세요'
@@ -690,7 +789,19 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
-      {dividerResult ? (
+      {stickerResult ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>스티커 위치를 확인했습니다</h2>
+            <p>
+              {stickerResult.paragraphNumber}번째 문단의{' '}
+              {getStickerPositionLabel(stickerResult.position)}에 기본 스티커가 삽입됐습니다.
+              임시저장과 최종 발행은 실행하지 않았습니다.
+            </p>
+          </div>
+        </section>
+      ) : dividerResult ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
@@ -1460,6 +1571,187 @@ export function ConnectionScreen() {
                     <li>본문 문단이 입력 원문과 같은지 확인</li>
                     <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
                     <li>정확히 한 개인 구분선 버튼만 조작</li>
+                    <li>삽입 개수와 문단 앞·뒤 순서를 재확인</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+      {dividerResult ? (
+        <section
+          className="divider-test-panel sticker-test-panel"
+          aria-labelledby="sticker-test-heading"
+          aria-busy={activeAction === 'sticker'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="sticker-test-heading">스티커 삽입 테스트</h2>
+              <p>
+                본문 문단과 앞·뒤 위치를 선택해 네이버의 첫 번째 기본 스티커를 넣습니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {stickerResult ? '삽입 확인 완료' : '저장하지 않음'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="divider-location-grid">
+                <div className="field-group">
+                  <label htmlFor="sticker-paragraph">
+                    기준 문단 <span>필수</span>
+                  </label>
+                  <select
+                    id="sticker-paragraph"
+                    value={stickerParagraphNumber}
+                    disabled={
+                      isRunning ||
+                      Boolean(stickerResult) ||
+                      stickerRetryBlocked
+                    }
+                    aria-describedby="sticker-paragraph-help"
+                    onChange={(event) => {
+                      setStickerParagraphNumber(Number(event.target.value));
+                      setError(null);
+                    }}
+                  >
+                    {draftParagraphs.map((paragraph, index) => (
+                      <option value={index + 1} key={index}>
+                        {index + 1}번째 문단 ·{' '}
+                        {paragraph.length > 30
+                          ? paragraph.slice(0, 30) + '…'
+                          : paragraph}
+                      </option>
+                    ))}
+                  </select>
+                  <p id="sticker-paragraph-help" className="field-help">
+                    이번 기술검증에서는 입력이 확인된 본문 문단만 위치 기준으로 사용합니다.
+                  </p>
+                </div>
+
+                <fieldset
+                  className="divider-position-fieldset"
+                  disabled={
+                    isRunning ||
+                    Boolean(stickerResult) ||
+                    stickerRetryBlocked
+                  }
+                  aria-describedby="sticker-position-help"
+                >
+                  <legend className="field-label">
+                    삽입 위치 <span>필수</span>
+                  </legend>
+                  <div className="divider-position-options">
+                    {stickerPositionOptions.map((option) => (
+                      <label
+                        className={
+                          'divider-position-option' +
+                          (stickerPosition === option.value
+                            ? ' is-selected'
+                            : '')
+                        }
+                        key={option.value}
+                      >
+                        <input
+                          type="radio"
+                          name="sticker-position"
+                          value={option.value}
+                          checked={stickerPosition === option.value}
+                          onChange={() => {
+                            setStickerPosition(option.value);
+                            setError(null);
+                          }}
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>{option.description}</small>
+                        </span>
+                        {stickerPosition === option.value ? (
+                          <Check aria-hidden="true" />
+                        ) : null}
+                      </label>
+                    ))}
+                  </div>
+                  <p id="sticker-position-help" className="layout-selection-help">
+                    네이버 선택창에서 표시되는 첫 번째 기본 스티커 한 개를 사용합니다.
+                  </p>
+                </fieldset>
+              </div>
+
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  본문 원문과 스티커 개수, 실제 순서를 다시 확인합니다. 항목을 확실히 식별하지 못하면 임의로 누르지 않고 작업을 멈춥니다.
+                </p>
+              </div>
+
+              {stickerError && error ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>스티커를 삽입하지 못했습니다</strong>
+                    <p>{error.message}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={
+                  isRunning ||
+                  Boolean(stickerResult) ||
+                  stickerRetryBlocked
+                }
+                onClick={() => void insertDefaultSticker()}
+              >
+                {activeAction === 'sticker' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : stickerResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Sticker aria-hidden="true" />
+                )}
+                {activeAction === 'sticker'
+                  ? '삽입·검증 중…'
+                  : stickerResult
+                    ? '삽입 확인 완료'
+                    : '스티커 삽입'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="스티커 삽입 테스트 범위"
+            >
+              <Sticker aria-hidden="true" />
+              <div>
+                <h3>
+                  {stickerResult ? '검증 결과' : '이번 단계에서 확인할 내용'}
+                </h3>
+                {stickerResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>기준</dt>
+                      <dd>{stickerResult.paragraphNumber}번째 문단</dd>
+                    </div>
+                    <div>
+                      <dt>위치</dt>
+                      <dd>{getStickerPositionLabel(stickerResult.position)}</dd>
+                    </div>
+                    <div>
+                      <dt>스티커</dt>
+                      <dd>{stickerResult.stickerCount}개</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>본문 문단이 입력 원문과 같은지 확인</li>
+                    <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
+                    <li>스티커 메뉴에서 첫 번째 기본 항목만 조작</li>
                     <li>삽입 개수와 문단 앞·뒤 순서를 재확인</li>
                   </ol>
                 )}

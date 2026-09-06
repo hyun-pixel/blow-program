@@ -2,6 +2,7 @@ import type {
   Locator,
   Page,
 } from 'playwright-core';
+import { placeCaretAtParagraphEdge as setParagraphCaret } from './naver-editor-selection.js';
 
 const DIVIDER_VERIFY_TIMEOUT_MS = 5_000;
 const DIVIDER_VERIFY_INTERVAL_MS = 100;
@@ -298,32 +299,12 @@ async function measureDividerPosition(
 }
 
 async function placeCaretAtParagraphEdge(
+  page: Page,
   anchor: Locator,
   position: NaverDividerPosition,
 ): Promise<void> {
   try {
-    await anchor.click();
-    await anchor.evaluate((element, edge) => {
-      const editorWindow = element.ownerDocument.defaultView;
-      const selection = editorWindow?.getSelection();
-      const editable = element.closest('[contenteditable]') as
-        | HTMLElement
-        | null;
-
-      if (!editorWindow || !selection) {
-        throw new Error('EDITOR_SELECTION_NOT_AVAILABLE');
-      }
-
-      const range = element.ownerDocument.createRange();
-      range.selectNodeContents(element);
-      range.collapse(edge === 'before');
-      (editable ?? (element as HTMLElement)).focus?.();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      element.ownerDocument.dispatchEvent(
-        new editorWindow.Event('selectionchange', { bubbles: true }),
-      );
-    }, position);
+    await setParagraphCaret(page, anchor, position);
   } catch (error) {
     throw new NaverDividerError(
       'DIVIDER_SELECTION_FAILED',
@@ -377,7 +358,7 @@ export class NaverDividerAdapter {
       const beforeCount = await getVisibleDividerCount(this.page);
       const beforePosition = await measureDividerPosition(anchor);
 
-      await placeCaretAtParagraphEdge(anchor, request.position);
+      await placeCaretAtParagraphEdge(this.page, anchor, request.position);
       await this.page.waitForTimeout(DIVIDER_VERIFY_INTERVAL_MS);
       const control = await requireUniqueDividerControl(this.page);
 
@@ -403,11 +384,13 @@ export class NaverDividerAdapter {
         );
       }
 
-      await requireMatchingParagraphs(
+      const paragraphsAfterInsertion = await requireMatchingParagraphs(
         this.page,
         request.expectedParagraphs,
       );
-      const afterPosition = await measureDividerPosition(anchor);
+      const anchorAfterInsertion =
+        paragraphsAfterInsertion[request.paragraphNumber - 1]!;
+      const afterPosition = await measureDividerPosition(anchorAfterInsertion);
       const isCorrectPosition = request.position === 'before'
         ? afterPosition.before === beforePosition.before + 1 &&
           afterPosition.after === beforePosition.after
@@ -415,9 +398,20 @@ export class NaverDividerAdapter {
           afterPosition.before === beforePosition.before;
 
       if (!isCorrectPosition) {
+        const beforeDelta = afterPosition.before - beforePosition.before;
+        const afterDelta = afterPosition.after - beforePosition.after;
+        const detectedPosition = beforeDelta === 1 && afterDelta === 0
+          ? '문단 앞'
+          : afterDelta === 1 && beforeDelta === 0
+            ? '문단 뒤'
+            : '판정 불가';
+        const requestedPosition = request.position === 'before'
+          ? '문단 앞'
+          : '문단 뒤';
+
         throw new NaverDividerError(
           'DIVIDER_POSITION_MISMATCH',
-          '구분선이 선택한 문단 위치에 삽입됐는지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
+          `${request.paragraphNumber}번째 문단의 요청 위치는 ${requestedPosition}, 실제 감지 위치는 ${detectedPosition}입니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.`,
         );
       }
 

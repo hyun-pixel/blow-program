@@ -15,6 +15,7 @@ import type {
   DraftContent,
   NaverDividerPosition,
   NaverImageLayout,
+  NaverStickerPosition,
 } from '@blow/naver-adapter';
 import {
   MockPocError,
@@ -38,6 +39,7 @@ const ipcChannels = {
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
   naverInsertDivider: 'naver:insert-divider',
+  naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
   naverClose: 'naver:close',
@@ -165,6 +167,13 @@ function parseDividerRequest(input: unknown): {
     paragraphNumber: candidate.paragraphNumber as number,
     position: candidate.position,
   };
+}
+
+function parseStickerRequest(input: unknown): {
+  readonly paragraphNumber: number;
+  readonly position: NaverStickerPosition;
+} | null {
+  return parseDividerRequest(input);
 }
 
 function parseSelectedImageIds(input: unknown): readonly string[] | null {
@@ -637,6 +646,73 @@ function registerNaverIpc(): void {
           error: {
             code: 'DIVIDER_INSERT_UNCONFIRMED',
             message: '구분선 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverInsertSticker,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+      const request = parseStickerRequest(input);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (!request) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_STICKER_REQUEST',
+            message: '스티커를 넣을 문단과 위치를 다시 선택해 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.insertDefaultSticker(
+            request.paragraphNumber,
+            request.position,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'STICKER_INSERT_UNCONFIRMED',
+            message: '스티커 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
           },
         };
       } finally {
