@@ -41,6 +41,7 @@ const ipcChannels = {
   naverEnterContent: 'naver:enter-content',
   naverInsertDivider: 'naver:insert-divider',
   naverInsertQuote: 'naver:insert-quote',
+  naverListStickerCategories: 'naver:list-sticker-categories',
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
@@ -174,8 +175,28 @@ function parseDividerRequest(input: unknown): {
 function parseStickerRequest(input: unknown): {
   readonly paragraphNumber: number;
   readonly position: NaverStickerPosition;
+  readonly categoryId: string;
 } | null {
-  return parseDividerRequest(input);
+  const location = parseDividerRequest(input);
+
+  if (!location || !input || typeof input !== 'object') {
+    return null;
+  }
+
+  const categoryId = (input as { readonly categoryId?: unknown }).categoryId;
+
+  if (
+    typeof categoryId !== 'string' ||
+    categoryId.length < 1 ||
+    categoryId.length > 2_048
+  ) {
+    return null;
+  }
+
+  return {
+    ...location,
+    categoryId,
+  };
 }
 
 function parseQuoteRequest(input: unknown): {
@@ -664,7 +685,7 @@ function registerNaverIpc(): void {
   );
 
   ipcMain.handle(
-    ipcChannels.naverInsertSticker,
+    ipcChannels.naverListStickerCategories,
     async (event, input: unknown) => {
       requireTrustedSender(event);
 
@@ -673,7 +694,7 @@ function registerNaverIpc(): void {
       }
 
       const session = activeNaverSession;
-      const request = parseStickerRequest(input);
+      const request = parseDividerRequest(input);
 
       if (!session) {
         return {
@@ -700,9 +721,77 @@ function registerNaverIpc(): void {
       try {
         return {
           ok: true,
-          result: await session.insertDefaultSticker(
+          result: await session.listStickerCategories(
             request.paragraphNumber,
             request.position,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'STICKER_CATEGORY_NOT_FOUND',
+            message: '스티커 묶음을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverInsertSticker,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+      const request = parseStickerRequest(input);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (!request) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_STICKER_REQUEST',
+            message: '스티커를 넣을 문단·위치·묶음을 다시 선택해 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.insertRandomSticker(
+            request.paragraphNumber,
+            request.position,
+            request.categoryId,
           ),
         };
       } catch (error) {

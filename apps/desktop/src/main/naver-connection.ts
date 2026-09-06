@@ -20,6 +20,7 @@ import {
   type NaverImageLayout,
   type NaverQuoteInsertionResult,
   type NaverQuotePosition,
+  type NaverStickerCategoryResult,
   type NaverStickerInsertionResult,
   type NaverStickerPosition,
 } from '@blow/naver-adapter';
@@ -80,6 +81,9 @@ export type NaverRunnerFailureCode =
   | 'STICKER_SELECTION_FAILED'
   | 'STICKER_CONTROL_NOT_FOUND'
   | 'STICKER_CONTROL_AMBIGUOUS'
+  | 'STICKER_CATEGORY_NOT_FOUND'
+  | 'STICKER_CATEGORY_AMBIGUOUS'
+  | 'STICKER_CATEGORY_STALE'
   | 'STICKER_ITEM_NOT_FOUND'
   | 'STICKER_INSERT_UNCONFIRMED'
   | 'STICKER_POSITION_MISMATCH'
@@ -279,6 +283,62 @@ export class NaverConnectionSession {
         content.paragraphs,
         paragraphNumber,
         position,
+      );
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async listStickerCategories(
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+  ): Promise<NaverStickerCategoryResult> {
+    const content = this.enteredContent;
+
+    if (!content) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.listStickerCategories(
+        this.profile,
+        content.paragraphs,
+        paragraphNumber,
+        position,
+      );
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async insertRandomSticker(
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+    categoryId: string,
+  ): Promise<NaverStickerInsertionResult> {
+    const content = this.enteredContent;
+
+    if (!content) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.insertRandomSticker(
+        this.profile,
+        content.paragraphs,
+        paragraphNumber,
+        position,
+        categoryId,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {

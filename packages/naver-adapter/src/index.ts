@@ -52,6 +52,8 @@ export {
   validateStickerRequest,
 } from './naver-sticker.js';
 export type {
+  NaverStickerCategory,
+  NaverStickerCategoryResult,
   NaverStickerFailureCode,
   NaverStickerInsertionResult,
   NaverStickerPosition,

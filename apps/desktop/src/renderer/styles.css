@@ -1602,6 +1602,18 @@ svg {
   opacity: 0.62;
 }
 
+.sticker-category-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.sticker-category-load-button {
+  min-width: 196px;
+  margin-bottom: 30px;
+}
+
 .divider-insert-button {
   justify-self: start;
   min-width: 184px;
@@ -1662,8 +1674,14 @@ svg {
   }
 
   .divider-location-grid,
-  .divider-position-options {
+  .divider-position-options,
+  .sticker-category-row {
     grid-template-columns: 1fr;
+  }
+
+  .sticker-category-load-button {
+    width: 100%;
+    margin-bottom: 0;
   }
 
   .divider-position-option {

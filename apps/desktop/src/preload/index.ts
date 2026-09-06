@@ -15,6 +15,7 @@ import type {
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
+  NaverStickerCategoryResult,
   NaverStickerInsertionResult,
   NaverStickerPosition,
 } from '@blow/naver-adapter';
@@ -62,6 +63,19 @@ type NaverQuoteResponse =
   | {
       readonly ok: true;
       readonly result: NaverQuoteInsertionResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type NaverStickerCategoryResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverStickerCategoryResult;
     }
   | {
       readonly ok: false;
@@ -122,6 +136,7 @@ const ipcChannels = {
   naverEnterContent: 'naver:enter-content',
   naverInsertDivider: 'naver:insert-divider',
   naverInsertQuote: 'naver:insert-quote',
+  naverListStickerCategories: 'naver:list-sticker-categories',
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
@@ -184,13 +199,23 @@ const blowNaverApi = {
       paragraphNumber,
       position,
     }),
-  insertDefaultSticker: (
+  listStickerCategories: (
     paragraphNumber: number,
     position: NaverStickerPosition,
+  ): Promise<NaverStickerCategoryResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverListStickerCategories, {
+      paragraphNumber,
+      position,
+    }),
+  insertRandomSticker: (
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+    categoryId: string,
   ): Promise<NaverStickerResponse> =>
     ipcRenderer.invoke(ipcChannels.naverInsertSticker, {
       paragraphNumber,
       position,
+      categoryId,
     }),
   selectImages: (): Promise<NaverImageSelectionResponse> =>
     ipcRenderer.invoke(ipcChannels.naverSelectImages),

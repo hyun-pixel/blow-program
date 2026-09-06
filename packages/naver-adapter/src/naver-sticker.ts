@@ -21,9 +21,18 @@ const stickerComponentSelector = [
 
 const stickerControlSelector = 'button, [role="button"]';
 const stickerItemSelector = [
+  '.se-sidebar-container-sticker .se-sidebar-list.se-is-on button.se-sidebar-element-sticker',
   '[class*="sticker"] button',
   '[class*="sticker"] [role="button"]',
   '[class*="sticker"] a',
+].join(', ');
+
+const stickerCategorySelector = [
+  '.se-sidebar-container-sticker .se-panel-tab-list button.se-tab-button:not(.se-tab-button-history)',
+  '[class*="sticker"] [role="tab"]',
+  '[class*="sticker"] [data-category-id]',
+  '[class*="sticker"] [data-pack-id]',
+  '[class*="sticker"] [data-group-id]',
 ].join(', ');
 
 export type NaverStickerPosition = 'before' | 'after';
@@ -35,6 +44,9 @@ export type NaverStickerFailureCode =
   | 'STICKER_SELECTION_FAILED'
   | 'STICKER_CONTROL_NOT_FOUND'
   | 'STICKER_CONTROL_AMBIGUOUS'
+  | 'STICKER_CATEGORY_NOT_FOUND'
+  | 'STICKER_CATEGORY_AMBIGUOUS'
+  | 'STICKER_CATEGORY_STALE'
   | 'STICKER_ITEM_NOT_FOUND'
   | 'STICKER_INSERT_UNCONFIRMED'
   | 'STICKER_POSITION_MISMATCH';
@@ -47,6 +59,22 @@ export interface NaverStickerInsertionResult {
   readonly position: NaverStickerPosition;
   readonly stickerCount: number;
   readonly stickerLabel: string;
+  readonly categoryId?: string;
+  readonly categoryLabel?: string;
+}
+
+export interface NaverStickerCategory {
+  readonly id: string;
+  readonly label: string;
+}
+
+export interface NaverStickerCategoryResult {
+  readonly stage: 'STICKER_CATEGORIES_READY';
+  readonly message: string;
+  readonly currentUrl: string;
+  readonly paragraphNumber: number;
+  readonly position: NaverStickerPosition;
+  readonly categories: readonly NaverStickerCategory[];
 }
 
 export class NaverStickerError extends Error {
@@ -73,6 +101,13 @@ interface StickerControlCandidate {
 interface StickerItemCandidate {
   readonly locator: Locator;
   readonly label: string;
+  readonly identity: string;
+}
+
+interface StickerCategoryCandidate extends NaverStickerCategory {
+  readonly locator: Locator;
+  readonly isSelected: boolean;
+  readonly itemPrefix: string | undefined;
 }
 
 function normalizeParagraphText(value: string): string {
@@ -312,6 +347,8 @@ async function findStickerItems(
             element.getAttribute('data-sticker-id') ||
             element.getAttribute('data-id') ||
             element.getAttribute('data-value') ||
+            text.replace(/\s+/g, ' ').trim() ||
+            element.getAttribute('data-index') ||
             image?.getAttribute('src') ||
             ariaLabel ||
             title ||
@@ -329,26 +366,223 @@ async function findStickerItems(
               element.querySelector('svg') ||
               backgroundVisual,
             ),
+            isDirectStickerItem:
+              element.matches('button.se-sidebar-element-sticker') ||
+              element.getAttribute('data-log') === 'lsk.attach',
+            isCategoryControl: Boolean(
+              element.matches('[role="tab"]') ||
+              element.closest(
+                '[class*="sticker"][class*="tab"], [class*="sticker"] [class*="tab"], [class*="sticker"][class*="category"], [class*="sticker"] [class*="category"]',
+              )
+            ),
           };
-        }).catch(() => ({ label: '', identity: '', hasVisual: false })),
+        }).catch(() => ({
+          label: '',
+          identity: '',
+          hasVisual: false,
+          isDirectStickerItem: false,
+          isCategoryControl: false,
+        })),
       ]);
-      const isNavigation = /(닫기|이전|다음|더보기|목록)/.test(snapshot.label);
+      const isNavigation = /(닫기|이전|다음|더보기|목록|구매|새로고침)/.test(
+        snapshot.label,
+      );
 
       if (
         visible &&
-        snapshot.hasVisual &&
+        (snapshot.hasVisual || snapshot.isDirectStickerItem) &&
         snapshot.identity.length > 0 &&
+        !snapshot.isCategoryControl &&
         !isNavigation
       ) {
         candidates.push({
           locator: item,
           label: snapshot.label || '기본 스티커',
+          identity: snapshot.identity,
         });
       }
     }
   }
 
   return candidates;
+}
+
+async function findStickerCategories(
+  page: Page,
+): Promise<readonly StickerCategoryCandidate[]> {
+  const candidates: StickerCategoryCandidate[] = [];
+
+  for (const [frameIndex, frame] of page.frames().entries()) {
+    const controls = frame.locator(stickerCategorySelector);
+    const count = await controls.count();
+
+    for (let index = 0; index < count; index += 1) {
+      const control = controls.nth(index);
+      const [visible, snapshot] = await Promise.all([
+        control.isVisible().catch(() => false),
+        control.evaluate((element) => {
+          const image = element.querySelector('img');
+          const ariaLabel = element.getAttribute('aria-label') ?? '';
+          const title = element.getAttribute('title') ?? '';
+          const imageAlt = image?.getAttribute('alt') ?? '';
+          const rawText = (element.textContent ?? '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          const className = String(element.className ?? '');
+          const dataLog = element.getAttribute('data-log') ?? '';
+          const identity =
+            element.getAttribute('data-category-id') ||
+            element.getAttribute('data-pack-id') ||
+            element.getAttribute('data-group-id') ||
+            element.getAttribute('data-id') ||
+            element.getAttribute('data-value') ||
+            element.getAttribute('aria-controls') ||
+            rawText ||
+            image?.getAttribute('src') ||
+            '';
+
+          return {
+            label: (ariaLabel || title || imageAlt || rawText)
+              .replace(/\s+/g, ' ')
+              .trim(),
+            rawText,
+            identity,
+            isSelected:
+              element.getAttribute('aria-selected') === 'true' ||
+              /(?:^|\s)se-is-selected(?:\s|$)/.test(className),
+            isUtility:
+              /se-tab-button-(?:history|setting|market)/.test(className) ||
+              /(닫기|이전|다음|더보기|목록|구매|새로고침|설정|OGQ마켓)/.test(
+                ariaLabel || title || rawText,
+              ),
+            isDirectPack:
+              /(?:^|\s)se-tab-button(?:\s|$)/.test(className) &&
+              /lsk\.(?:gif)?stklist/.test(dataLog),
+          };
+        }).catch(() => ({
+          label: '',
+          rawText: '',
+          identity: '',
+          isSelected: false,
+          isUtility: false,
+          isDirectPack: false,
+        })),
+      ]);
+
+      if (!visible || snapshot.isUtility) {
+        continue;
+      }
+
+      const fallbackLabel = `스티커 묶음 ${candidates.length + 1}`;
+      const looksLikeInternalName = /^[a-z][a-z0-9_-]*$/i.test(
+        snapshot.label,
+      );
+      const label = (
+        snapshot.label && !looksLikeInternalName
+          ? snapshot.label
+          : fallbackLabel
+      ).slice(0, 80);
+      const stablePart = (
+        snapshot.identity ||
+        snapshot.label ||
+        String(index)
+      ).slice(0, 120);
+
+      candidates.push({
+        id: `sticker-category:${frameIndex}:${index}:${stablePart}`,
+        label,
+        locator: control,
+        isSelected: snapshot.isSelected,
+        itemPrefix:
+          snapshot.isDirectPack && snapshot.rawText
+            ? snapshot.rawText
+            : undefined,
+      });
+    }
+  }
+
+  const duplicateLabels = new Set<string>();
+  const seenLabels = new Set<string>();
+
+  for (const candidate of candidates) {
+    const normalizedLabel = candidate.label.toLocaleLowerCase('ko-KR');
+
+    if (seenLabels.has(normalizedLabel)) {
+      duplicateLabels.add(normalizedLabel);
+    }
+
+    seenLabels.add(normalizedLabel);
+  }
+
+  if (duplicateLabels.size > 0) {
+    throw new NaverStickerError(
+      'STICKER_CATEGORY_AMBIGUOUS',
+      '이름이 같은 스티커 묶음이 여러 개 보여 안전을 위해 작업을 멈췄습니다.',
+    );
+  }
+
+  return candidates;
+}
+
+async function waitForStickerCategories(
+  page: Page,
+): Promise<readonly StickerCategoryCandidate[]> {
+  const maxAttempts = Math.ceil(
+    STICKER_VERIFY_TIMEOUT_MS / STICKER_VERIFY_INTERVAL_MS,
+  );
+
+  let previousSignature = '';
+  let stableAttempts = 0;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const categories = await findStickerCategories(page);
+    const signature = categories.map((category) => category.id).join('|');
+
+    if (categories.length > 0 && signature === previousSignature) {
+      stableAttempts += 1;
+    } else {
+      previousSignature = signature;
+      stableAttempts = 0;
+    }
+
+    if (categories.length > 0 && stableAttempts >= 3) {
+      return categories;
+    }
+
+    await page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+  }
+
+  throw new NaverStickerError(
+    'STICKER_CATEGORY_NOT_FOUND',
+    '스티커 선택창은 열렸지만 묶음 목록을 확인하지 못했습니다. Chrome 화면을 확인해 주세요.',
+  );
+}
+
+async function waitForStickerItems(
+  page: Page,
+  itemPrefix?: string,
+): Promise<readonly StickerItemCandidate[]> {
+  const maxAttempts = Math.ceil(
+    STICKER_VERIFY_TIMEOUT_MS / STICKER_VERIFY_INTERVAL_MS,
+  );
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const items = await findStickerItems(page);
+    const matchingItems = itemPrefix
+      ? items.filter((item) => item.identity.startsWith(itemPrefix + '-'))
+      : items;
+
+    if (matchingItems.length > 0) {
+      return matchingItems;
+    }
+
+    await page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+  }
+
+  throw new NaverStickerError(
+    'STICKER_ITEM_NOT_FOUND',
+    '선택한 스티커 묶음에서 사용할 항목을 확인하지 못했습니다. Chrome 화면을 확인해 주세요.',
+  );
 }
 
 async function waitForFirstStickerItem(
@@ -439,7 +673,202 @@ async function waitForStickerCount(
 }
 
 export class NaverStickerAdapter {
-  constructor(private readonly page: Page) {}
+  private readonly categoryCache = new Map<string, StickerCategoryCandidate>();
+  private readonly lastStickerIdentityByCategory = new Map<string, string>();
+
+  constructor(
+    private readonly page: Page,
+    private readonly random: () => number = Math.random,
+  ) {}
+
+  async listStickerCategories(
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+  ): Promise<NaverStickerCategoryResult> {
+    const request = validateStickerRequest(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+
+    try {
+      const paragraphs = await requireMatchingParagraphs(
+        this.page,
+        request.expectedParagraphs,
+      );
+      const anchor = paragraphs[request.paragraphNumber - 1]!;
+
+      await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      await this.page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+      const visibleCategories = await findStickerCategories(this.page);
+
+      if (visibleCategories.length === 0) {
+        const control = await requireUniqueStickerControl(this.page);
+        await control.click();
+      }
+
+      const categories = await waitForStickerCategories(this.page);
+      this.categoryCache.clear();
+
+      for (const category of categories) {
+        this.categoryCache.set(category.id, category);
+      }
+
+      return {
+        stage: 'STICKER_CATEGORIES_READY',
+        message: '전용 Chrome에 표시된 스티커 묶음을 불러왔습니다.',
+        currentUrl: this.page.url(),
+        paragraphNumber: request.paragraphNumber,
+        position: request.position,
+        categories: categories.map(({ id, label }) => ({ id, label })),
+      };
+    } catch (error) {
+      if (error instanceof NaverStickerError) {
+        throw error;
+      }
+
+      throw new NaverStickerError(
+        'STICKER_CATEGORY_NOT_FOUND',
+        '스티커 묶음을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+        { cause: error },
+      );
+    }
+  }
+
+  async insertRandomSticker(
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+    categoryId: string,
+  ): Promise<NaverStickerInsertionResult> {
+    const request = validateStickerRequest(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+    const category = this.categoryCache.get(categoryId);
+
+    if (!category) {
+      throw new NaverStickerError(
+        'STICKER_CATEGORY_STALE',
+        '스티커 묶음 선택 정보가 만료됐습니다. 묶음을 다시 불러와 주세요.',
+      );
+    }
+
+    try {
+      const paragraphs = await requireMatchingParagraphs(
+        this.page,
+        request.expectedParagraphs,
+      );
+      const anchor = paragraphs[request.paragraphNumber - 1]!;
+      const beforeCount = await getVisibleStickerCount(this.page);
+      const beforePosition = await measureStickerPosition(anchor);
+
+      await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      await this.page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+
+      let visibleCategories = await findStickerCategories(this.page);
+
+      if (visibleCategories.length === 0) {
+        const control = await requireUniqueStickerControl(this.page);
+        await control.click();
+      }
+
+      visibleCategories = await waitForStickerCategories(this.page);
+      const liveCategory = visibleCategories.find(
+        (candidate) => candidate.id === categoryId,
+      );
+
+      if (!liveCategory) {
+        throw new NaverStickerError(
+          'STICKER_CATEGORY_STALE',
+          '선택한 스티커 묶음을 더 이상 확인할 수 없습니다. 묶음을 다시 불러와 주세요.',
+        );
+      }
+
+      if (!liveCategory.isSelected) {
+        await liveCategory.locator.click();
+        await this.page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS * 2);
+      }
+
+      const items = await waitForStickerItems(
+        this.page,
+        liveCategory.itemPrefix,
+      );
+      const previousIdentity = this.lastStickerIdentityByCategory.get(
+        categoryId,
+      );
+      const selectableItems = items.length > 1 && previousIdentity
+        ? items.filter((item) => item.identity !== previousIdentity)
+        : items;
+      const randomValue = Math.min(
+        Math.max(this.random(), 0),
+        0.999_999_999,
+      );
+      const stickerItem = selectableItems[
+        Math.floor(randomValue * selectableItems.length)
+      ]!;
+
+      await stickerItem.locator.click();
+
+      const afterCount = await waitForStickerCount(
+        this.page,
+        beforeCount + 1,
+      );
+
+      if (afterCount !== beforeCount + 1) {
+        throw new NaverStickerError(
+          'STICKER_INSERT_UNCONFIRMED',
+          '스티커 삽입을 끝까지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
+        );
+      }
+
+      const paragraphsAfterInsertion = await requireMatchingParagraphs(
+        this.page,
+        request.expectedParagraphs,
+      );
+      const anchorAfterInsertion =
+        paragraphsAfterInsertion[request.paragraphNumber - 1]!;
+      const afterPosition = await measureStickerPosition(anchorAfterInsertion);
+      const isCorrectPosition = request.position === 'before'
+        ? afterPosition.before === beforePosition.before + 1 &&
+          afterPosition.after === beforePosition.after
+        : afterPosition.after === beforePosition.after + 1 &&
+          afterPosition.before === beforePosition.before;
+
+      if (!isCorrectPosition) {
+        throw new NaverStickerError(
+          'STICKER_POSITION_MISMATCH',
+          '스티커가 선택한 문단 위치에 삽입됐는지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
+        );
+      }
+
+      this.lastStickerIdentityByCategory.set(categoryId, stickerItem.identity);
+
+      return {
+        stage: 'STICKER_VERIFIED',
+        message: '선택한 스티커 묶음에서 무작위 항목을 넣고 결과를 확인했습니다.',
+        currentUrl: this.page.url(),
+        paragraphNumber: request.paragraphNumber,
+        position: request.position,
+        stickerCount: afterCount,
+        stickerLabel: stickerItem.label,
+        categoryId: category.id,
+        categoryLabel: category.label,
+      };
+    } catch (error) {
+      if (error instanceof NaverStickerError) {
+        throw error;
+      }
+
+      throw new NaverStickerError(
+        'STICKER_INSERT_UNCONFIRMED',
+        '스티커 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+        { cause: error },
+      );
+    }
+  }
 
   async insertDefaultSticker(
     expectedParagraphs: readonly string[],

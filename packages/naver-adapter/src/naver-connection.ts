@@ -24,6 +24,7 @@ import {
 } from './naver-quote.js';
 import {
   NaverStickerAdapter,
+  type NaverStickerCategoryResult,
   type NaverStickerInsertionResult,
   type NaverStickerPosition,
 } from './naver-sticker.js';
@@ -349,7 +350,11 @@ async function getWriterCandidates(page: Page): Promise<WriterCandidate[]> {
 }
 
 export class NaverConnectionAdapter {
-  constructor(private page: Page) {}
+  private stickerAdapter: NaverStickerAdapter;
+
+  constructor(private page: Page) {
+    this.stickerAdapter = new NaverStickerAdapter(page);
+  }
 
   async openHome(profile: NaverBlogProfile): Promise<NaverConnectionStatus> {
     await this.page.goto(BLOG_HOME_URL, {
@@ -543,6 +548,7 @@ export class NaverConnectionAdapter {
 
     const popupPage = await popupPromise;
     this.page = popupPage ?? originPage;
+    this.stickerAdapter = new NaverStickerAdapter(this.page);
 
     try {
       await this.page.waitForURL(
@@ -638,11 +644,52 @@ export class NaverConnectionAdapter {
       );
     }
 
-    const stickerAdapter = new NaverStickerAdapter(this.page);
-    return stickerAdapter.insertDefaultSticker(
+    return this.stickerAdapter.insertDefaultSticker(
       expectedParagraphs,
       paragraphNumber,
       position,
+    );
+  }
+
+  async listStickerCategories(
+    profile: NaverBlogProfile,
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+  ): Promise<NaverStickerCategoryResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 스티커 묶음을 불러오지 않았습니다.',
+      );
+    }
+
+    return this.stickerAdapter.listStickerCategories(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+  }
+
+  async insertRandomSticker(
+    profile: NaverBlogProfile,
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverStickerPosition,
+    categoryId: string,
+  ): Promise<NaverStickerInsertionResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 스티커 삽입을 시작하지 않았습니다.',
+      );
+    }
+
+    return this.stickerAdapter.insertRandomSticker(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+      categoryId,
     );
   }
 

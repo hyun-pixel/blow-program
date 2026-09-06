@@ -34,6 +34,7 @@ import type {
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
+  NaverStickerCategory,
   NaverStickerInsertionResult,
   NaverStickerPosition,
 } from '@blow/naver-adapter';
@@ -259,6 +260,10 @@ export function ConnectionScreen() {
   const [stickerParagraphNumber, setStickerParagraphNumber] = useState(1);
   const [stickerPosition, setStickerPosition] =
     useState<NaverStickerPosition>('after');
+  const [stickerCategories, setStickerCategories] = useState<
+    readonly NaverStickerCategory[]
+  >([]);
+  const [stickerCategoryId, setStickerCategoryId] = useState('');
   const [stickerResult, setStickerResult] =
     useState<NaverStickerInsertionResult | null>(null);
   const [quoteParagraphNumber, setQuoteParagraphNumber] = useState(1);
@@ -279,6 +284,7 @@ export function ConnectionScreen() {
     | 'writer'
     | 'input'
     | 'divider'
+    | 'sticker-categories'
     | 'sticker'
     | 'quote'
     | 'select-images'
@@ -348,6 +354,8 @@ export function ConnectionScreen() {
           setDividerResult(null);
           setStickerParagraphNumber(1);
           setStickerPosition('after');
+          setStickerCategories([]);
+          setStickerCategoryId('');
           setStickerResult(null);
           setQuoteParagraphNumber(1);
           setQuotePosition('after');
@@ -434,6 +442,8 @@ export function ConnectionScreen() {
       setDividerResult(null);
       setStickerParagraphNumber(1);
       setStickerPosition('after');
+      setStickerCategories([]);
+      setStickerCategoryId('');
       setStickerResult(null);
       setQuoteParagraphNumber(1);
       setQuotePosition('after');
@@ -473,6 +483,8 @@ export function ConnectionScreen() {
     setActiveAction('input');
     setInputResult(null);
     setDividerResult(null);
+    setStickerCategories([]);
+    setStickerCategoryId('');
     setStickerResult(null);
     setQuoteParagraphNumber(1);
     setQuotePosition('after');
@@ -560,6 +572,8 @@ export function ConnectionScreen() {
       if (response.ok) {
         setImageResult(response.result);
         setDividerResult(null);
+        setStickerCategories([]);
+        setStickerCategoryId('');
         setStickerResult(null);
         setQuoteParagraphNumber(1);
         setQuotePosition('after');
@@ -620,7 +634,7 @@ export function ConnectionScreen() {
     }
   };
 
-  const insertDefaultSticker = async (): Promise<void> => {
+  const loadStickerCategories = async (): Promise<void> => {
     if (
       stickerParagraphNumber < 1 ||
       stickerParagraphNumber > draftParagraphs.length
@@ -628,6 +642,49 @@ export function ConnectionScreen() {
       setError({
         code: 'INVALID_STICKER_REQUEST',
         message: '스티커를 넣을 문단과 위치를 다시 선택해 주세요.',
+      });
+      return;
+    }
+
+    setActiveAction('sticker-categories');
+    setStickerCategories([]);
+    setStickerCategoryId('');
+    setStickerResult(null);
+    setQuoteParagraphNumber(1);
+    setQuotePosition('after');
+    setQuoteResult(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.listStickerCategories(
+        stickerParagraphNumber,
+        stickerPosition,
+      );
+
+      if (response.ok) {
+        setStickerCategories(response.result.categories);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'STICKER_CATEGORY_NOT_FOUND',
+        message: '스티커 묶음을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const insertRandomSticker = async (): Promise<void> => {
+    if (
+      stickerParagraphNumber < 1 ||
+      stickerParagraphNumber > draftParagraphs.length ||
+      !stickerCategoryId
+    ) {
+      setError({
+        code: 'INVALID_STICKER_REQUEST',
+        message: '스티커를 넣을 문단·위치·묶음을 다시 선택해 주세요.',
       });
       return;
     }
@@ -640,9 +697,10 @@ export function ConnectionScreen() {
     setError(null);
 
     try {
-      const response = await window.blowNaver.insertDefaultSticker(
+      const response = await window.blowNaver.insertRandomSticker(
         stickerParagraphNumber,
         stickerPosition,
+        stickerCategoryId,
       );
 
       if (response.ok) {
@@ -651,6 +709,11 @@ export function ConnectionScreen() {
         setQuotePosition('after');
         setQuoteResult(null);
       } else {
+        if (response.error.code === 'STICKER_CATEGORY_STALE') {
+          setStickerCategories([]);
+          setStickerCategoryId('');
+        }
+
         setError(response.error);
       }
     } catch {
@@ -662,7 +725,6 @@ export function ConnectionScreen() {
       setActiveAction(null);
     }
   };
-
   const insertDefaultQuote = async (): Promise<void> => {
     if (
       quoteParagraphNumber < 1 ||
@@ -774,6 +836,9 @@ export function ConnectionScreen() {
         'STICKER_SELECTION_FAILED',
         'STICKER_CONTROL_NOT_FOUND',
         'STICKER_CONTROL_AMBIGUOUS',
+        'STICKER_CATEGORY_NOT_FOUND',
+        'STICKER_CATEGORY_AMBIGUOUS',
+        'STICKER_CATEGORY_STALE',
         'STICKER_ITEM_NOT_FOUND',
         'STICKER_INSERT_UNCONFIRMED',
         'STICKER_POSITION_MISMATCH',
@@ -916,8 +981,9 @@ export function ConnectionScreen() {
             <h2>스티커 위치를 확인했습니다</h2>
             <p>
               {stickerResult.paragraphNumber}번째 문단의{' '}
-              {getStickerPositionLabel(stickerResult.position)}에 기본 스티커가 삽입됐습니다.
-              임시저장과 최종 발행은 실행하지 않았습니다.
+              {getStickerPositionLabel(stickerResult.position)}에{' '}
+              {stickerResult.categoryLabel ?? '선택한 묶음'}의 무작위 스티커가
+              삽입됐습니다. 임시저장과 최종 발행은 실행하지 않았습니다.
             </p>
           </div>
         </section>
@@ -1703,17 +1769,24 @@ export function ConnectionScreen() {
         <section
           className="divider-test-panel sticker-test-panel"
           aria-labelledby="sticker-test-heading"
-          aria-busy={activeAction === 'sticker'}
+          aria-busy={
+            activeAction === 'sticker-categories' ||
+            activeAction === 'sticker'
+          }
         >
           <header className="panel-heading">
             <div>
-              <h2 id="sticker-test-heading">스티커 삽입 테스트</h2>
+              <h2 id="sticker-test-heading">스티커 묶음·무작위 삽입 테스트</h2>
               <p>
-                본문 문단과 앞·뒤 위치를 선택해 네이버의 첫 번째 기본 스티커를 넣습니다.
+                전용 Chrome에 표시된 묶음 하나를 선택하고, 그 안의 스티커 한 개를 무작위로 넣습니다.
               </p>
             </div>
             <span className="document-state">
-              {stickerResult ? '삽입 확인 완료' : '저장하지 않음'}
+              {stickerResult
+                ? '삽입 확인 완료'
+                : stickerCategories.length > 0
+                  ? '묶음 선택'
+                  : '묶음 불러오기'}
             </span>
           </header>
 
@@ -1735,6 +1808,8 @@ export function ConnectionScreen() {
                     aria-describedby="sticker-paragraph-help"
                     onChange={(event) => {
                       setStickerParagraphNumber(Number(event.target.value));
+                      setStickerCategories([]);
+                      setStickerCategoryId('');
                       setError(null);
                     }}
                   >
@@ -1748,7 +1823,7 @@ export function ConnectionScreen() {
                     ))}
                   </select>
                   <p id="sticker-paragraph-help" className="field-help">
-                    이번 기술검증에서는 입력이 확인된 본문 문단만 위치 기준으로 사용합니다.
+                    입력이 확인된 본문 문단만 위치 기준으로 사용합니다.
                   </p>
                 </div>
 
@@ -1782,6 +1857,8 @@ export function ConnectionScreen() {
                           checked={stickerPosition === option.value}
                           onChange={() => {
                             setStickerPosition(option.value);
+                            setStickerCategories([]);
+                            setStickerCategoryId('');
                             setError(null);
                           }}
                         />
@@ -1796,15 +1873,72 @@ export function ConnectionScreen() {
                     ))}
                   </div>
                   <p id="sticker-position-help" className="layout-selection-help">
-                    네이버 선택창에서 표시되는 첫 번째 기본 스티커 한 개를 사용합니다.
+                    위치를 바꾸면 현재 묶음 목록을 다시 불러옵니다.
                   </p>
                 </fieldset>
+              </div>
+
+              <div className="sticker-category-row">
+                <div className="field-group">
+                  <label htmlFor="sticker-category">
+                    스티커 묶음 <span>필수 · 하나만 선택</span>
+                  </label>
+                  <select
+                    id="sticker-category"
+                    value={stickerCategoryId}
+                    disabled={
+                      isRunning ||
+                      stickerCategories.length === 0 ||
+                      Boolean(stickerResult) ||
+                      stickerRetryBlocked
+                    }
+                    aria-describedby="sticker-category-help"
+                    onChange={(event) => {
+                      setStickerCategoryId(event.target.value);
+                      setError(null);
+                    }}
+                  >
+                    <option value="">묶음을 선택해 주세요</option>
+                    {stickerCategories.map((category) => (
+                      <option value={category.id} key={category.id}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p id="sticker-category-help" className="field-help">
+                    {stickerCategories.length > 0
+                      ? `${stickerCategories.length}개 묶음을 불러왔습니다. 사용할 묶음 하나를 선택해 주세요.`
+                      : '네이버 스티커 창의 실제 묶음을 먼저 불러옵니다.'}
+                  </p>
+                </div>
+
+                <button
+                  className="button secondary sticker-category-load-button"
+                  type="button"
+                  disabled={
+                    isRunning ||
+                    Boolean(stickerResult) ||
+                    stickerRetryBlocked
+                  }
+                  onClick={() => void loadStickerCategories()}
+                >
+                  {activeAction === 'sticker-categories' ? (
+                    <LoaderCircle className="is-spinning" aria-hidden="true" />
+                  ) : (
+                    <Sticker aria-hidden="true" />
+                  )}
+                  {activeAction === 'sticker-categories'
+                    ? '묶음 확인 중…'
+                    : stickerCategories.length > 0
+                      ? '묶음 다시 불러오기'
+                      : '스티커 묶음 불러오기'}
+                </button>
               </div>
 
               <div className="editor-input-note">
                 <ShieldCheck aria-hidden="true" />
                 <p>
-                  본문 원문과 스티커 개수, 실제 순서를 다시 확인합니다. 항목을 확실히 식별하지 못하면 임의로 누르지 않고 작업을 멈춥니다.
+                  선택한 묶음 안에서 한 개만 무작위로 고릅니다. 본문 원문과 스티커 개수, 실제 순서를 다시 확인하며 항목을 확실히 식별하지 못하면 작업을 멈춥니다.
                 </p>
               </div>
 
@@ -1812,7 +1946,7 @@ export function ConnectionScreen() {
                 <div className="editor-inline-error">
                   <XCircle aria-hidden="true" />
                   <div>
-                    <strong>스티커를 삽입하지 못했습니다</strong>
+                    <strong>스티커 작업을 완료하지 못했습니다</strong>
                     <p>{error.message}</p>
                   </div>
                 </div>
@@ -1823,10 +1957,11 @@ export function ConnectionScreen() {
                 type="button"
                 disabled={
                   isRunning ||
+                  !stickerCategoryId ||
                   Boolean(stickerResult) ||
                   stickerRetryBlocked
                 }
-                onClick={() => void insertDefaultSticker()}
+                onClick={() => void insertRandomSticker()}
               >
                 {activeAction === 'sticker' ? (
                   <LoaderCircle className="is-spinning" aria-hidden="true" />
@@ -1836,16 +1971,16 @@ export function ConnectionScreen() {
                   <Sticker aria-hidden="true" />
                 )}
                 {activeAction === 'sticker'
-                  ? '삽입·검증 중…'
+                  ? '무작위 삽입·검증 중…'
                   : stickerResult
                     ? '삽입 확인 완료'
-                    : '스티커 삽입'}
+                    : '무작위 스티커 삽입'}
               </button>
             </div>
 
             <aside
               className="divider-test-summary"
-              aria-label="스티커 삽입 테스트 범위"
+              aria-label="스티커 묶음·무작위 삽입 테스트 범위"
             >
               <Sticker aria-hidden="true" />
               <div>
@@ -1863,15 +1998,23 @@ export function ConnectionScreen() {
                       <dd>{getStickerPositionLabel(stickerResult.position)}</dd>
                     </div>
                     <div>
+                      <dt>묶음</dt>
+                      <dd>{stickerResult.categoryLabel ?? '선택한 묶음'}</dd>
+                    </div>
+                    <div>
+                      <dt>선택 항목</dt>
+                      <dd>{stickerResult.stickerLabel}</dd>
+                    </div>
+                    <div>
                       <dt>스티커</dt>
                       <dd>{stickerResult.stickerCount}개</dd>
                     </div>
                   </dl>
                 ) : (
                   <ol>
-                    <li>본문 문단이 입력 원문과 같은지 확인</li>
-                    <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
-                    <li>스티커 메뉴에서 첫 번째 기본 항목만 조작</li>
+                    <li>전용 Chrome에 표시된 스티커 묶음 확인</li>
+                    <li>사용자가 선택한 묶음 하나만 조작</li>
+                    <li>선택한 묶음 안에서 한 항목을 무작위 선택</li>
                     <li>삽입 개수와 문단 앞·뒤 순서를 재확인</li>
                   </ol>
                 )}
@@ -1879,8 +2022,7 @@ export function ConnectionScreen() {
             </aside>
           </div>
         </section>
-      ) : null}
-      {stickerResult ? (
+      ) : null}      {stickerResult ? (
         <section
           className="divider-test-panel quote-test-panel"
           aria-labelledby="quote-test-heading"
