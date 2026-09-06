@@ -13,6 +13,7 @@ import {
   Minus,
   MousePointerClick,
   PanelsTopLeft,
+  Quote,
   ShieldCheck,
   Sticker,
   X,
@@ -31,6 +32,8 @@ import type {
   NaverImageAttachmentResult,
   NaverImageLayout,
   NaverSelectedImageFile,
+  NaverQuoteInsertionResult,
+  NaverQuotePosition,
   NaverStickerInsertionResult,
   NaverStickerPosition,
 } from '@blow/naver-adapter';
@@ -191,6 +194,29 @@ function getStickerPositionLabel(position: NaverStickerPosition): string {
   )!.label;
 }
 
+const quotePositionOptions: readonly {
+  readonly value: NaverQuotePosition;
+  readonly label: string;
+  readonly description: string;
+}[] = [
+  {
+    value: 'before',
+    label: '문단 앞',
+    description: '선택한 문단이 시작되기 전에 넣습니다.',
+  },
+  {
+    value: 'after',
+    label: '문단 뒤',
+    description: '선택한 문단이 끝난 다음에 넣습니다.',
+  },
+];
+
+function getQuotePositionLabel(position: NaverQuotePosition): string {
+  return quotePositionOptions.find(
+    (option) => option.value === position,
+  )!.label;
+}
+
 function formatFileSize(sizeBytes: number): string {
   if (sizeBytes < 1_024 * 1_024) {
     return `${Math.max(1, Math.round(sizeBytes / 1_024)).toLocaleString('ko-KR')} KB`;
@@ -235,6 +261,11 @@ export function ConnectionScreen() {
     useState<NaverStickerPosition>('after');
   const [stickerResult, setStickerResult] =
     useState<NaverStickerInsertionResult | null>(null);
+  const [quoteParagraphNumber, setQuoteParagraphNumber] = useState(1);
+  const [quotePosition, setQuotePosition] =
+    useState<NaverQuotePosition>('after');
+  const [quoteResult, setQuoteResult] =
+    useState<NaverQuoteInsertionResult | null>(null);
   const [selectedImages, setSelectedImages] = useState<
     readonly NaverSelectedImageFile[]
   >([]);
@@ -249,6 +280,7 @@ export function ConnectionScreen() {
     | 'input'
     | 'divider'
     | 'sticker'
+    | 'quote'
     | 'select-images'
     | 'images'
     | 'focus'
@@ -317,6 +349,9 @@ export function ConnectionScreen() {
           setStickerParagraphNumber(1);
           setStickerPosition('after');
           setStickerResult(null);
+          setQuoteParagraphNumber(1);
+          setQuotePosition('after');
+          setQuoteResult(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -400,6 +435,9 @@ export function ConnectionScreen() {
       setStickerParagraphNumber(1);
       setStickerPosition('after');
       setStickerResult(null);
+      setQuoteParagraphNumber(1);
+      setQuotePosition('after');
+      setQuoteResult(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -436,6 +474,9 @@ export function ConnectionScreen() {
     setInputResult(null);
     setDividerResult(null);
     setStickerResult(null);
+    setQuoteParagraphNumber(1);
+    setQuotePosition('after');
+    setQuoteResult(null);
     setError(null);
 
     try {
@@ -520,6 +561,9 @@ export function ConnectionScreen() {
         setImageResult(response.result);
         setDividerResult(null);
         setStickerResult(null);
+        setQuoteParagraphNumber(1);
+        setQuotePosition('after');
+        setQuoteResult(null);
       } else {
         setError(response.error);
       }
@@ -560,6 +604,9 @@ export function ConnectionScreen() {
         setStickerParagraphNumber(1);
         setStickerPosition('after');
         setStickerResult(null);
+        setQuoteParagraphNumber(1);
+        setQuotePosition('after');
+        setQuoteResult(null);
       } else {
         setError(response.error);
       }
@@ -587,6 +634,9 @@ export function ConnectionScreen() {
 
     setActiveAction('sticker');
     setStickerResult(null);
+    setQuoteParagraphNumber(1);
+    setQuotePosition('after');
+    setQuoteResult(null);
     setError(null);
 
     try {
@@ -597,6 +647,9 @@ export function ConnectionScreen() {
 
       if (response.ok) {
         setStickerResult(response.result);
+        setQuoteParagraphNumber(1);
+        setQuotePosition('after');
+        setQuoteResult(null);
       } else {
         setError(response.error);
       }
@@ -604,6 +657,43 @@ export function ConnectionScreen() {
       setError({
         code: 'STICKER_INSERT_UNCONFIRMED',
         message: '스티커 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const insertDefaultQuote = async (): Promise<void> => {
+    if (
+      quoteParagraphNumber < 1 ||
+      quoteParagraphNumber > draftParagraphs.length
+    ) {
+      setError({
+        code: 'INVALID_QUOTE_REQUEST',
+        message: '인용구를 넣을 문단과 위치를 다시 선택해 주세요.',
+      });
+      return;
+    }
+
+    setActiveAction('quote');
+    setQuoteResult(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.insertDefaultQuote(
+        quoteParagraphNumber,
+        quotePosition,
+      );
+
+      if (response.ok) {
+        setQuoteResult(response.result);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'QUOTE_INSERT_UNCONFIRMED',
+        message: '인용구 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
       setActiveAction(null);
@@ -660,6 +750,22 @@ export function ConnectionScreen() {
   ].includes(error?.code ?? '');
   const selectedDividerPositionLabel =
     getDividerPositionLabel(dividerPosition);
+  const quoteError = error
+    ? [
+        'INVALID_QUOTE_REQUEST',
+        'QUOTE_ANCHOR_NOT_FOUND',
+        'QUOTE_ANCHOR_MISMATCH',
+        'QUOTE_SELECTION_FAILED',
+        'QUOTE_CONTROL_NOT_FOUND',
+        'QUOTE_CONTROL_AMBIGUOUS',
+        'QUOTE_INSERT_UNCONFIRMED',
+        'QUOTE_POSITION_MISMATCH',
+      ].includes(error.code)
+    : false;
+  const quoteRetryBlocked = [
+    'QUOTE_INSERT_UNCONFIRMED',
+    'QUOTE_POSITION_MISMATCH',
+  ].includes(error?.code ?? '');
   const stickerError = error
     ? [
         'INVALID_STICKER_REQUEST',
@@ -774,9 +880,11 @@ export function ConnectionScreen() {
           <XCircle aria-hidden="true" />
           <div>
             <h2>
-              {stickerError
-                ? '스티커 상태를 확인해 주세요'
-                : dividerError
+              {quoteError
+                ? '인용구 상태를 확인해 주세요'
+                : stickerError
+                  ? '스티커 상태를 확인해 주세요'
+                  : dividerError
                   ? '구분선 상태를 확인해 주세요'
                   : imageError
                   ? '이미지 상태를 확인해 주세요'
@@ -789,7 +897,19 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
-      {stickerResult ? (
+      {quoteResult ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>인용구 위치를 확인했습니다</h2>
+            <p>
+              {quoteResult.paragraphNumber}번째 문단의{' '}
+              {getQuotePositionLabel(quoteResult.position)}에 기본 인용구가 삽입됐습니다.
+              임시저장과 최종 발행은 실행하지 않았습니다.
+            </p>
+          </div>
+        </section>
+      ) : stickerResult ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
@@ -1752,6 +1872,187 @@ export function ConnectionScreen() {
                     <li>본문 문단이 입력 원문과 같은지 확인</li>
                     <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
                     <li>스티커 메뉴에서 첫 번째 기본 항목만 조작</li>
+                    <li>삽입 개수와 문단 앞·뒤 순서를 재확인</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+      {stickerResult ? (
+        <section
+          className="divider-test-panel quote-test-panel"
+          aria-labelledby="quote-test-heading"
+          aria-busy={activeAction === 'quote'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="quote-test-heading">인용구 삽입 테스트</h2>
+              <p>
+                본문 문단과 앞·뒤 위치를 선택해 네이버 기본 인용구 한 개를 넣습니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {quoteResult ? '삽입 확인 완료' : '저장하지 않음'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="divider-location-grid">
+                <div className="field-group">
+                  <label htmlFor="quote-paragraph">
+                    기준 문단 <span>필수</span>
+                  </label>
+                  <select
+                    id="quote-paragraph"
+                    value={quoteParagraphNumber}
+                    disabled={
+                      isRunning ||
+                      Boolean(quoteResult) ||
+                      quoteRetryBlocked
+                    }
+                    aria-describedby="quote-paragraph-help"
+                    onChange={(event) => {
+                      setQuoteParagraphNumber(Number(event.target.value));
+                      setError(null);
+                    }}
+                  >
+                    {draftParagraphs.map((paragraph, index) => (
+                      <option value={index + 1} key={index}>
+                        {index + 1}번째 문단 ·{' '}
+                        {paragraph.length > 30
+                          ? paragraph.slice(0, 30) + '…'
+                          : paragraph}
+                      </option>
+                    ))}
+                  </select>
+                  <p id="quote-paragraph-help" className="field-help">
+                    이번 기술검증에서는 입력이 확인된 본문 문단만 위치 기준으로 사용합니다.
+                  </p>
+                </div>
+
+                <fieldset
+                  className="divider-position-fieldset"
+                  disabled={
+                    isRunning ||
+                    Boolean(quoteResult) ||
+                    quoteRetryBlocked
+                  }
+                  aria-describedby="quote-position-help"
+                >
+                  <legend className="field-label">
+                    삽입 위치 <span>필수</span>
+                  </legend>
+                  <div className="divider-position-options">
+                    {quotePositionOptions.map((option) => (
+                      <label
+                        className={
+                          'divider-position-option' +
+                          (quotePosition === option.value
+                            ? ' is-selected'
+                            : '')
+                        }
+                        key={option.value}
+                      >
+                        <input
+                          type="radio"
+                          name="quote-position"
+                          value={option.value}
+                          checked={quotePosition === option.value}
+                          onChange={() => {
+                            setQuotePosition(option.value);
+                            setError(null);
+                          }}
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>{option.description}</small>
+                        </span>
+                        {quotePosition === option.value ? (
+                          <Check aria-hidden="true" />
+                        ) : null}
+                      </label>
+                    ))}
+                  </div>
+                  <p id="quote-position-help" className="layout-selection-help">
+                    네이버 기본 디자인의 빈 인용구 한 개를 사용합니다.
+                  </p>
+                </fieldset>
+              </div>
+
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  본문 원문과 인용구 개수, 실제 순서를 다시 확인합니다. 인용구 버튼을 확실히 식별하지 못하면 작업을 멈춥니다.
+                </p>
+              </div>
+
+              {quoteError && error ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>인용구를 삽입하지 못했습니다</strong>
+                    <p>{error.message}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={
+                  isRunning ||
+                  Boolean(quoteResult) ||
+                  quoteRetryBlocked
+                }
+                onClick={() => void insertDefaultQuote()}
+              >
+                {activeAction === 'quote' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : quoteResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Quote aria-hidden="true" />
+                )}
+                {activeAction === 'quote'
+                  ? '삽입·검증 중…'
+                  : quoteResult
+                    ? '삽입 확인 완료'
+                    : '인용구 삽입'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="인용구 삽입 테스트 범위"
+            >
+              <Quote aria-hidden="true" />
+              <div>
+                <h3>
+                  {quoteResult ? '검증 결과' : '이번 단계에서 확인할 내용'}
+                </h3>
+                {quoteResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>기준</dt>
+                      <dd>{quoteResult.paragraphNumber}번째 문단</dd>
+                    </div>
+                    <div>
+                      <dt>위치</dt>
+                      <dd>{getQuotePositionLabel(quoteResult.position)}</dd>
+                    </div>
+                    <div>
+                      <dt>인용구</dt>
+                      <dd>{quoteResult.quoteCount}개</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>본문 문단이 입력 원문과 같은지 확인</li>
+                    <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
+                    <li>정확히 식별한 인용구 버튼을 한 번만 조작</li>
                     <li>삽입 개수와 문단 앞·뒤 순서를 재확인</li>
                   </ol>
                 )}

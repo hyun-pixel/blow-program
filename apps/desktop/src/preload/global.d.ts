@@ -9,6 +9,8 @@ import type {
   NaverImageAttachmentResult,
   NaverImageLayout,
   NaverSelectedImageFile,
+  NaverQuoteInsertionResult,
+  NaverQuotePosition,
   NaverStickerInsertionResult,
   NaverStickerPosition,
 } from '@blow/naver-adapter';
@@ -49,6 +51,11 @@ interface NaverInputSuccessResponse {
 interface NaverDividerSuccessResponse {
   readonly ok: true;
   readonly result: NaverDividerInsertionResult;
+}
+
+interface NaverQuoteSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverQuoteInsertionResult;
 }
 
 interface NaverStickerSuccessResponse {
@@ -94,6 +101,10 @@ declare global {
         paragraphNumber: number,
         position: NaverDividerPosition,
       ): Promise<NaverErrorResponse | NaverDividerSuccessResponse>;
+      insertDefaultQuote(
+        paragraphNumber: number,
+        position: NaverQuotePosition,
+      ): Promise<NaverErrorResponse | NaverQuoteSuccessResponse>;
       insertDefaultSticker(
         paragraphNumber: number,
         position: NaverStickerPosition,

@@ -18,6 +18,11 @@ import {
   type NaverImageLayout,
 } from './naver-image.js';
 import {
+  NaverQuoteAdapter,
+  type NaverQuoteInsertionResult,
+  type NaverQuotePosition,
+} from './naver-quote.js';
+import {
   NaverStickerAdapter,
   type NaverStickerInsertionResult,
   type NaverStickerPosition,
@@ -635,6 +640,27 @@ export class NaverConnectionAdapter {
 
     const stickerAdapter = new NaverStickerAdapter(this.page);
     return stickerAdapter.insertDefaultSticker(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+  }
+
+  async insertDefaultQuote(
+    profile: NaverBlogProfile,
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverQuotePosition,
+  ): Promise<NaverQuoteInsertionResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 인용구 삽입을 시작하지 않았습니다.',
+      );
+    }
+
+    const quoteAdapter = new NaverQuoteAdapter(this.page);
+    return quoteAdapter.insertDefaultQuote(
       expectedParagraphs,
       paragraphNumber,
       position,

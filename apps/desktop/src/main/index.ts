@@ -15,6 +15,7 @@ import type {
   DraftContent,
   NaverDividerPosition,
   NaverImageLayout,
+  NaverQuotePosition,
   NaverStickerPosition,
 } from '@blow/naver-adapter';
 import {
@@ -39,6 +40,7 @@ const ipcChannels = {
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
   naverInsertDivider: 'naver:insert-divider',
+  naverInsertQuote: 'naver:insert-quote',
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
@@ -172,6 +174,13 @@ function parseDividerRequest(input: unknown): {
 function parseStickerRequest(input: unknown): {
   readonly paragraphNumber: number;
   readonly position: NaverStickerPosition;
+} | null {
+  return parseDividerRequest(input);
+}
+
+function parseQuoteRequest(input: unknown): {
+  readonly paragraphNumber: number;
+  readonly position: NaverQuotePosition;
 } | null {
   return parseDividerRequest(input);
 }
@@ -713,6 +722,73 @@ function registerNaverIpc(): void {
           error: {
             code: 'STICKER_INSERT_UNCONFIRMED',
             message: '스티커 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverInsertQuote,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+      const request = parseQuoteRequest(input);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (!request) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_QUOTE_REQUEST',
+            message: '인용구를 넣을 문단과 위치를 다시 선택해 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.insertDefaultQuote(
+            request.paragraphNumber,
+            request.position,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'QUOTE_INSERT_UNCONFIRMED',
+            message: '인용구 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
           },
         };
       } finally {

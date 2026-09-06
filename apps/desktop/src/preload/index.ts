@@ -13,6 +13,8 @@ import type {
   NaverImageAttachmentResult,
   NaverImageLayout,
   NaverSelectedImageFile,
+  NaverQuoteInsertionResult,
+  NaverQuotePosition,
   NaverStickerInsertionResult,
   NaverStickerPosition,
 } from '@blow/naver-adapter';
@@ -47,6 +49,19 @@ type NaverDividerResponse =
   | {
       readonly ok: true;
       readonly result: NaverDividerInsertionResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type NaverQuoteResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverQuoteInsertionResult;
     }
   | {
       readonly ok: false;
@@ -106,6 +121,7 @@ const ipcChannels = {
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
   naverInsertDivider: 'naver:insert-divider',
+  naverInsertQuote: 'naver:insert-quote',
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
@@ -157,6 +173,14 @@ const blowNaverApi = {
     position: NaverDividerPosition,
   ): Promise<NaverDividerResponse> =>
     ipcRenderer.invoke(ipcChannels.naverInsertDivider, {
+      paragraphNumber,
+      position,
+    }),
+  insertDefaultQuote: (
+    paragraphNumber: number,
+    position: NaverQuotePosition,
+  ): Promise<NaverQuoteResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverInsertQuote, {
       paragraphNumber,
       position,
     }),

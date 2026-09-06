@@ -6,6 +6,7 @@ import {
   NaverDividerError,
   NaverEditorError,
   NaverImageError,
+  NaverQuoteError,
   NaverStickerError,
   parseNaverBlogUrl,
   validateDraftContent,
@@ -17,6 +18,8 @@ import {
   type NaverEditorInputResult,
   type NaverImageAttachmentResult,
   type NaverImageLayout,
+  type NaverQuoteInsertionResult,
+  type NaverQuotePosition,
   type NaverStickerInsertionResult,
   type NaverStickerPosition,
 } from '@blow/naver-adapter';
@@ -63,6 +66,14 @@ export type NaverRunnerFailureCode =
   | 'IMAGE_LAYOUT_CONTROL_NOT_FOUND'
   | 'IMAGE_LAYOUT_CONTROL_AMBIGUOUS'
   | 'IMAGE_LAYOUT_MISMATCH'
+  | 'INVALID_QUOTE_REQUEST'
+  | 'QUOTE_ANCHOR_NOT_FOUND'
+  | 'QUOTE_ANCHOR_MISMATCH'
+  | 'QUOTE_SELECTION_FAILED'
+  | 'QUOTE_CONTROL_NOT_FOUND'
+  | 'QUOTE_CONTROL_AMBIGUOUS'
+  | 'QUOTE_INSERT_UNCONFIRMED'
+  | 'QUOTE_POSITION_MISMATCH'
   | 'INVALID_STICKER_REQUEST'
   | 'STICKER_ANCHOR_NOT_FOUND'
   | 'STICKER_ANCHOR_MISMATCH'
@@ -97,6 +108,7 @@ function classifyFailure(error: unknown): NaverRunnerFailure {
     error instanceof NaverDividerError ||
     error instanceof NaverEditorError ||
     error instanceof NaverImageError ||
+    error instanceof NaverQuoteError ||
     error instanceof NaverStickerError
   ) {
     return {
@@ -290,6 +302,33 @@ export class NaverConnectionSession {
 
     try {
       return await this.adapter.insertDefaultSticker(
+        this.profile,
+        content.paragraphs,
+        paragraphNumber,
+        position,
+      );
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async insertDefaultQuote(
+    paragraphNumber: number,
+    position: NaverQuotePosition,
+  ): Promise<NaverQuoteInsertionResult> {
+    const content = this.enteredContent;
+
+    if (!content) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.insertDefaultQuote(
         this.profile,
         content.paragraphs,
         paragraphNumber,
