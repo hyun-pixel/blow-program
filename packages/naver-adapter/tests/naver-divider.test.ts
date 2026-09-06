@@ -13,7 +13,9 @@ import {
   NaverDividerAdapter,
   NaverDividerError,
   type NaverDividerPosition,
+  type NaverDividerStyleId,
   validateDividerRequest,
+  validateDividerStyleSelection,
 } from '../src/naver-divider.js';
 
 interface DividerPageOptions {
@@ -23,7 +25,21 @@ interface DividerPageOptions {
   readonly controlVisibleAfterCaret?: boolean;
   readonly insertDivider?: boolean;
   readonly verifyPosition?: boolean;
+  readonly styleIds?: readonly NaverDividerStyleId[];
+  readonly styleMenuControlCount?: number;
+  readonly insertedStyleOverride?: NaverDividerStyleId;
 }
+
+const allDividerStyleIds = [
+  'default',
+  'line1',
+  'line2',
+  'line3',
+  'line4',
+  'line5',
+  'line6',
+  'line7',
+] as const;
 
 function createCollection(locators: readonly Locator[]) {
   return {
@@ -35,6 +51,11 @@ function createCollection(locators: readonly Locator[]) {
 function createDividerPage(options: DividerPageOptions = {}): {
   readonly page: Page;
   readonly controlClick: ReturnType<typeof vi.fn>;
+  readonly styleMenuClick: ReturnType<typeof vi.fn>;
+  readonly styleOptionClicks: ReadonlyMap<
+    NaverDividerStyleId,
+    ReturnType<typeof vi.fn>
+  >;
 } {
   const paragraphTexts = options.paragraphs ?? [
     '첫 번째 문단입니다.',
@@ -42,12 +63,16 @@ function createDividerPage(options: DividerPageOptions = {}): {
     '세 번째 문단입니다.',
   ];
   const controlCount = options.controlCount ?? 1;
+  const styleIds = options.styleIds ?? allDividerStyleIds;
+  const styleMenuControlCount = options.styleMenuControlCount ?? 1;
   const shouldInsert = options.insertDivider ?? true;
   const shouldVerifyPosition = options.verifyPosition ?? true;
   let dividerCount = 0;
   const dividerGaps: number[] = [];
+  const insertedStyles: NaverDividerStyleId[] = [];
   let pendingParagraphIndex: number | null = null;
   let pendingPosition: NaverDividerPosition | null = null;
+  let styleMenuOpen = false;
 
   const paragraphs = paragraphTexts.map((text, paragraphIndex) => ({
     boundingBox: vi.fn().mockResolvedValue({
@@ -64,6 +89,7 @@ function createDividerPage(options: DividerPageOptions = {}): {
       if (argument === 'before' || argument === 'after') {
         pendingParagraphIndex = paragraphIndex;
         pendingPosition = argument;
+        styleMenuOpen = false;
         return true;
       }
 
@@ -76,7 +102,9 @@ function createDividerPage(options: DividerPageOptions = {}): {
     isVisible: vi.fn().mockResolvedValue(true),
   } as unknown as Locator));
 
-  const controlClick = vi.fn(async () => {
+  const insertAtPendingPosition = (
+    requestedStyle: NaverDividerStyleId,
+  ): void => {
     if (
       !shouldInsert ||
       pendingParagraphIndex === null ||
@@ -86,6 +114,9 @@ function createDividerPage(options: DividerPageOptions = {}): {
     }
 
     dividerCount += 1;
+    insertedStyles.push(
+      options.insertedStyleOverride ?? requestedStyle,
+    );
     const insertedPosition = shouldVerifyPosition
       ? pendingPosition
       : pendingPosition === 'before'
@@ -94,8 +125,12 @@ function createDividerPage(options: DividerPageOptions = {}): {
     dividerGaps.push(
       pendingParagraphIndex + (insertedPosition === 'after' ? 1 : 0),
     );
+  };
+
+  const controlClick = vi.fn(async () => {
+    insertAtPendingPosition('default');
   });
-  const controls = Array.from({ length: controlCount }, () => ({
+  const mainControls = Array.from({ length: controlCount }, () => ({
     click: controlClick,
     evaluate: vi.fn().mockResolvedValue({
       label: options.controlLabel ?? '구분선',
@@ -105,6 +140,46 @@ function createDividerPage(options: DividerPageOptions = {}): {
       options.controlVisibleAfterCaret ? pendingPosition !== null : true,
     ),
   } as unknown as Locator));
+
+  const styleMenuClick = vi.fn(async () => {
+    styleMenuOpen = true;
+  });
+  const styleMenuControls = Array.from(
+    { length: styleMenuControlCount },
+    () => ({
+      click: styleMenuClick,
+      evaluate: vi.fn().mockResolvedValue({
+        label: '구분선 선택',
+        identity:
+          'se-toolbar-select-button se-select-option-horizontal-line',
+      }),
+      isVisible: vi.fn().mockResolvedValue(true),
+    } as unknown as Locator),
+  );
+
+  const styleOptionClicks = new Map<
+    NaverDividerStyleId,
+    ReturnType<typeof vi.fn>
+  >();
+  const styleOptions = styleIds.map((styleId) => {
+    const click = vi.fn(async () => {
+      insertAtPendingPosition(styleId);
+      styleMenuOpen = false;
+    });
+    styleOptionClicks.set(styleId, click);
+    return {
+      click,
+      evaluate: vi.fn().mockResolvedValue({
+        label:
+          '구분선 ' + (allDividerStyleIds.indexOf(styleId) + 1),
+        identity:
+          'se-toolbar-option-insert-horizontal-line-' +
+          styleId +
+          '-button',
+      }),
+      isVisible: vi.fn(async () => styleMenuOpen),
+    } as unknown as Locator;
+  });
   const emptyCollection = createCollection([]);
 
   const frame = {
@@ -114,13 +189,28 @@ function createDividerPage(options: DividerPageOptions = {}): {
       }
 
       if (selector === 'button, [role="button"]') {
-        return createCollection(controls);
+        return createCollection([
+          ...mainControls,
+          ...styleMenuControls,
+        ]);
+      }
+
+      if (
+        selector.includes(
+          'se-toolbar-option-insert-horizontal-line-',
+        )
+      ) {
+        return createCollection(styleOptions);
       }
 
       if (selector.includes('horizontalLine')) {
         return {
           count: vi.fn(async () => dividerCount),
-          nth: vi.fn(() => ({
+          nth: vi.fn((index: number) => ({
+            evaluate: vi.fn(async (
+              _callback: unknown,
+              expectedClass: string,
+            ) => expectedClass === 'se-l-' + insertedStyles[index]),
             isVisible: vi.fn().mockResolvedValue(true),
           } as unknown as Locator)),
         };
@@ -141,7 +231,12 @@ function createDividerPage(options: DividerPageOptions = {}): {
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
   } as unknown as Page;
 
-  return { page, controlClick };
+  return {
+    page,
+    controlClick,
+    styleMenuClick,
+    styleOptionClicks,
+  };
 }
 
 describe('네이버 구분선 요청 검사', () => {
@@ -159,6 +254,155 @@ describe('네이버 구분선 요청 검사', () => {
     ).toThrowError(
       expect.objectContaining({ code: 'INVALID_DIVIDER_REQUEST' }),
     );
+  });
+
+  it('무작위와 8종 디자인 외의 값은 거부한다', () => {
+    expect(validateDividerStyleSelection('random')).toBe('random');
+    expect(validateDividerStyleSelection('line7')).toBe('line7');
+    expect(() => validateDividerStyleSelection('line8')).toThrowError(
+      expect.objectContaining({ code: 'INVALID_DIVIDER_REQUEST' }),
+    );
+  });
+});
+
+describe('네이버 구분선 디자인', () => {
+  it('현재 편집기에 표시된 8종 디자인을 순서대로 불러온다', async () => {
+    const {
+      page,
+      controlClick,
+      styleMenuClick,
+    } = createDividerPage();
+    const adapter = new NaverDividerAdapter(page);
+
+    await expect(
+      adapter.listDividerStyles(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        2,
+        'after',
+      ),
+    ).resolves.toEqual({
+      stage: 'DIVIDER_STYLES_READY',
+      message: '전용 Chrome에 표시된 구분선 디자인을 불러왔습니다.',
+      currentUrl:
+        'https://blog.naver.com/green_fork?Redirect=Write&categoryNo=1',
+      paragraphNumber: 2,
+      position: 'after',
+      styles: allDividerStyleIds.map((id, index) => ({
+        id,
+        label: '구분선 ' + (index + 1),
+      })),
+    });
+    expect(styleMenuClick).toHaveBeenCalledOnce();
+    expect(controlClick).not.toHaveBeenCalled();
+  });
+
+  it('사용자가 고른 한 가지 디자인을 삽입하고 적용 결과를 검증한다', async () => {
+    const {
+      page,
+      controlClick,
+      styleOptionClicks,
+    } = createDividerPage();
+    const adapter = new NaverDividerAdapter(page);
+
+    await expect(
+      adapter.insertDivider(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        1,
+        'before',
+        'line4',
+      ),
+    ).resolves.toMatchObject({
+      stage: 'DIVIDER_VERIFIED',
+      paragraphNumber: 1,
+      position: 'before',
+      dividerCount: 1,
+      styleId: 'line4',
+      styleLabel: '구분선 5',
+    });
+    expect(styleOptionClicks.get('line4')).toHaveBeenCalledOnce();
+    expect(controlClick).not.toHaveBeenCalled();
+  });
+
+  it('무작위 선택은 현재 보이는 디자인 중 정확히 하나만 고른다', async () => {
+    const {
+      page,
+      styleOptionClicks,
+    } = createDividerPage();
+    const adapter = new NaverDividerAdapter(page, () => 0.999_999);
+
+    await expect(
+      adapter.insertDivider(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        3,
+        'after',
+        'random',
+      ),
+    ).resolves.toMatchObject({
+      stage: 'DIVIDER_VERIFIED',
+      styleId: 'line7',
+      styleLabel: '구분선 8',
+    });
+    expect(styleOptionClicks.get('line7')).toHaveBeenCalledOnce();
+  });
+
+  it('선택한 디자인이 더 이상 보이지 않으면 삽입하지 않는다', async () => {
+    const {
+      page,
+      controlClick,
+    } = createDividerPage({
+      styleIds: ['default', 'line1'],
+    });
+    const adapter = new NaverDividerAdapter(page);
+
+    await expect(
+      adapter.insertDivider(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        1,
+        'after',
+        'line7',
+      ),
+    ).rejects.toMatchObject({
+      code: 'DIVIDER_STYLE_STALE',
+    });
+    expect(controlClick).not.toHaveBeenCalled();
+  });
+
+  it('클릭 뒤 다른 디자인이 적용되면 성공으로 처리하지 않는다', async () => {
+    const { page } = createDividerPage({
+      insertedStyleOverride: 'line1',
+    });
+    const adapter = new NaverDividerAdapter(page);
+
+    await expect(
+      adapter.insertDivider(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        2,
+        'after',
+        'line5',
+      ),
+    ).rejects.toMatchObject({
+      code: 'DIVIDER_STYLE_MISMATCH',
+    });
   });
 });
 

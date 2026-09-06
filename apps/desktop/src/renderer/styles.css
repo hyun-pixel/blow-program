@@ -1602,14 +1602,16 @@ svg {
   opacity: 0.62;
 }
 
-.sticker-category-row {
+.sticker-category-row,
+.divider-style-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 12px;
 }
 
-.sticker-category-load-button {
+.sticker-category-load-button,
+.divider-style-load-button {
   min-width: 196px;
   margin-bottom: 30px;
 }
@@ -1675,11 +1677,13 @@ svg {
 
   .divider-location-grid,
   .divider-position-options,
-  .sticker-category-row {
+  .sticker-category-row,
+  .divider-style-row {
     grid-template-columns: 1fr;
   }
 
-  .sticker-category-load-button {
+  .sticker-category-load-button,
+  .divider-style-load-button {
     width: 100%;
     margin-bottom: 0;
   }

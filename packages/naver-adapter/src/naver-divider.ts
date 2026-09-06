@@ -21,7 +21,25 @@ const dividerComponentSelector = [
 
 const dividerControlSelector = 'button, [role="button"]';
 
+const dividerStyleOptionSelector = [
+  '[class*="se-toolbar-option-insert-horizontal-line-"][class*="-button"]',
+  '[class*="se-insert-menu-sub-panel-button-horizontalLine-"]',
+].join(', ');
+
+const dividerStyleOrder = [
+  'default',
+  'line1',
+  'line2',
+  'line3',
+  'line4',
+  'line5',
+  'line6',
+  'line7',
+] as const;
+
 export type NaverDividerPosition = 'before' | 'after';
+export type NaverDividerStyleId = (typeof dividerStyleOrder)[number];
+export type NaverDividerStyleSelection = NaverDividerStyleId | 'random';
 
 export type NaverDividerFailureCode =
   | 'INVALID_DIVIDER_REQUEST'
@@ -30,8 +48,28 @@ export type NaverDividerFailureCode =
   | 'DIVIDER_SELECTION_FAILED'
   | 'DIVIDER_CONTROL_NOT_FOUND'
   | 'DIVIDER_CONTROL_AMBIGUOUS'
+  | 'DIVIDER_STYLE_CONTROL_NOT_FOUND'
+  | 'DIVIDER_STYLE_CONTROL_AMBIGUOUS'
+  | 'DIVIDER_STYLE_NOT_FOUND'
+  | 'DIVIDER_STYLE_AMBIGUOUS'
+  | 'DIVIDER_STYLE_STALE'
+  | 'DIVIDER_STYLE_MISMATCH'
   | 'DIVIDER_INSERT_UNCONFIRMED'
   | 'DIVIDER_POSITION_MISMATCH';
+
+export interface NaverDividerStyle {
+  readonly id: NaverDividerStyleId;
+  readonly label: string;
+}
+
+export interface NaverDividerStyleResult {
+  readonly stage: 'DIVIDER_STYLES_READY';
+  readonly message: string;
+  readonly currentUrl: string;
+  readonly paragraphNumber: number;
+  readonly position: NaverDividerPosition;
+  readonly styles: readonly NaverDividerStyle[];
+}
 
 export interface NaverDividerInsertionResult {
   readonly stage: 'DIVIDER_VERIFIED';
@@ -40,6 +78,8 @@ export interface NaverDividerInsertionResult {
   readonly paragraphNumber: number;
   readonly position: NaverDividerPosition;
   readonly dividerCount: number;
+  readonly styleId?: NaverDividerStyleId;
+  readonly styleLabel?: string;
 }
 
 export class NaverDividerError extends Error {
@@ -63,6 +103,10 @@ interface DividerControlCandidate {
   readonly score: number;
 }
 
+interface DividerStyleCandidate extends NaverDividerStyle {
+  readonly locator: Locator;
+}
+
 function normalizeParagraphText(value: string): string {
   return value
     .replace(/\r\n?/g, '\n')
@@ -70,6 +114,22 @@ function normalizeParagraphText(value: string): string {
     .replace(/[\u200b\ufeff]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function validateDividerStyleSelection(
+  value: string,
+): NaverDividerStyleSelection {
+  if (
+    value === 'random' ||
+    dividerStyleOrder.includes(value as NaverDividerStyleId)
+  ) {
+    return value as NaverDividerStyleSelection;
+  }
+
+  throw new NaverDividerError(
+    'INVALID_DIVIDER_REQUEST',
+    '사용할 구분선 디자인을 다시 선택해 주세요.',
+  );
 }
 
 export function validateDividerRequest(
@@ -254,6 +314,264 @@ async function requireUniqueDividerControl(page: Page): Promise<Locator> {
   return controls[0]!;
 }
 
+function getDividerStyleLabel(styleId: NaverDividerStyleId): string {
+  return '구분선 ' + (dividerStyleOrder.indexOf(styleId) + 1);
+}
+
+async function findDividerStyleMenuControls(
+  page: Page,
+): Promise<readonly Locator[]> {
+  const candidates: DividerControlCandidate[] = [];
+
+  for (const frame of page.frames()) {
+    const controls = frame.locator(dividerControlSelector);
+    const count = await controls.count();
+
+    for (let index = 0; index < count; index += 1) {
+      const control = controls.nth(index);
+      const [visible, snapshot] = await Promise.all([
+        control.isVisible().catch(() => false),
+        control.evaluate((element) => {
+          const ariaLabel = element.getAttribute('aria-label') ?? '';
+          const title = element.getAttribute('title') ?? '';
+          const text = element.textContent ?? '';
+          const identity = [
+            element.id,
+            element.className,
+            element.getAttribute('data-name') ?? '',
+            element.getAttribute('data-type') ?? '',
+          ].join(' ');
+
+          return {
+            label: (ariaLabel || title || text).replace(/\s+/g, ' ').trim(),
+            identity,
+          };
+        }).catch(() => ({ label: '', identity: '' })),
+      ]);
+
+      if (!visible) {
+        continue;
+      }
+
+      const normalizedLabel = snapshot.label.replace(/\s+/g, ' ').trim();
+      const isExactLabel = normalizedLabel === '구분선 선택';
+      const isRelatedLabel =
+        normalizedLabel.startsWith('구분선') &&
+        /(종류|디자인|스타일|선택|펼치기)/.test(normalizedLabel);
+      const hasStyleMenuIdentity =
+        /horizontal[-_]?line/i.test(snapshot.identity) &&
+        /(select|selector|toggle|dropdown|arrow)/i.test(snapshot.identity);
+      const score = isExactLabel
+        ? 3
+        : isRelatedLabel
+          ? 2
+          : hasStyleMenuIdentity
+            ? 1
+            : 0;
+
+      if (score > 0) {
+        candidates.push({ locator: control, score });
+      }
+    }
+  }
+
+  const highestScore = Math.max(
+    0,
+    ...candidates.map((candidate) => candidate.score),
+  );
+
+  return candidates
+    .filter((candidate) => candidate.score === highestScore)
+    .map((candidate) => candidate.locator);
+}
+
+async function requireUniqueDividerStyleMenuControl(
+  page: Page,
+): Promise<Locator> {
+  const controls = await findDividerStyleMenuControls(page);
+
+  if (controls.length === 0) {
+    throw new NaverDividerError(
+      'DIVIDER_STYLE_CONTROL_NOT_FOUND',
+      '네이버 편집기의 구분선 선택 버튼을 확인하지 못했습니다. Chrome 화면을 확인해 주세요.',
+    );
+  }
+
+  if (controls.length > 1) {
+    throw new NaverDividerError(
+      'DIVIDER_STYLE_CONTROL_AMBIGUOUS',
+      '구분선 선택 버튼이 여러 개 보여 안전을 위해 작업을 멈췄습니다.',
+    );
+  }
+
+  return controls[0]!;
+}
+
+async function findVisibleDividerStyles(
+  page: Page,
+): Promise<readonly DividerStyleCandidate[]> {
+  const candidates: DividerStyleCandidate[] = [];
+
+  for (const frame of page.frames()) {
+    const options = frame.locator(dividerStyleOptionSelector);
+    const count = await options.count();
+
+    for (let index = 0; index < count; index += 1) {
+      const option = options.nth(index);
+      const [visible, snapshot] = await Promise.all([
+        option.isVisible().catch(() => false),
+        option.evaluate((element) => ({
+          label: (
+            element.getAttribute('aria-label') ||
+            element.getAttribute('title') ||
+            element.textContent ||
+            ''
+          ).replace(/\s+/g, ' ').trim(),
+          identity: [
+            element.id,
+            element.className,
+            element.getAttribute('data-name') ?? '',
+            element.getAttribute('data-type') ?? '',
+          ].join(' '),
+        })).catch(() => ({ label: '', identity: '' })),
+      ]);
+
+      if (!visible) {
+        continue;
+      }
+
+      const match = snapshot.identity.match(
+        /(?:se-toolbar-option-insert-horizontal-line-|se-insert-menu-sub-panel-button-horizontalLine-)(default|line[1-7])(?:-button)?/i,
+      );
+      const styleId = match?.[1]?.toLowerCase() as
+        | NaverDividerStyleId
+        | undefined;
+
+      if (!styleId || !dividerStyleOrder.includes(styleId)) {
+        continue;
+      }
+
+      candidates.push({
+        id: styleId,
+        label: /^구분선\s*\d+$/.test(snapshot.label)
+          ? snapshot.label.replace(/구분선\s*(\d+)/, '구분선 $1')
+          : getDividerStyleLabel(styleId),
+        locator: option,
+      });
+    }
+  }
+
+  const unique = new Map<NaverDividerStyleId, DividerStyleCandidate>();
+
+  for (const candidate of candidates) {
+    if (unique.has(candidate.id)) {
+      throw new NaverDividerError(
+        'DIVIDER_STYLE_AMBIGUOUS',
+        '같은 구분선 디자인이 여러 곳에 보여 안전을 위해 작업을 멈췄습니다.',
+      );
+    }
+
+    unique.set(candidate.id, candidate);
+  }
+
+  return dividerStyleOrder
+    .map((styleId) => unique.get(styleId))
+    .filter((candidate): candidate is DividerStyleCandidate =>
+      Boolean(candidate),
+    );
+}
+
+async function waitForDividerStyles(
+  page: Page,
+): Promise<readonly DividerStyleCandidate[]> {
+  const maxAttempts = Math.ceil(
+    DIVIDER_VERIFY_TIMEOUT_MS / DIVIDER_VERIFY_INTERVAL_MS,
+  );
+  let previousSignature = '';
+  let stableAttempts = 0;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const styles = await findVisibleDividerStyles(page);
+    const signature = styles.map((style) => style.id).join('|');
+
+    if (styles.length > 0 && signature === previousSignature) {
+      stableAttempts += 1;
+    } else {
+      previousSignature = signature;
+      stableAttempts = 0;
+    }
+
+    if (styles.length > 0 && stableAttempts >= 2) {
+      return styles;
+    }
+
+    await page.waitForTimeout(DIVIDER_VERIFY_INTERVAL_MS);
+  }
+
+  throw new NaverDividerError(
+    'DIVIDER_STYLE_NOT_FOUND',
+    '구분선 선택창은 열렸지만 디자인 목록을 확인하지 못했습니다. Chrome 화면을 확인해 주세요.',
+  );
+}
+
+async function ensureDividerStyles(
+  page: Page,
+): Promise<readonly DividerStyleCandidate[]> {
+  const visibleStyles = await findVisibleDividerStyles(page);
+
+  if (visibleStyles.length > 0) {
+    return visibleStyles;
+  }
+
+  const control = await requireUniqueDividerStyleMenuControl(page);
+
+  try {
+    await control.click();
+  } catch (error) {
+    throw new NaverDividerError(
+      'DIVIDER_STYLE_NOT_FOUND',
+      '네이버 편집기의 구분선 선택창을 열지 못했습니다. Chrome 화면을 확인해 주세요.',
+      { cause: error },
+    );
+  }
+
+  return waitForDividerStyles(page);
+}
+
+async function getVisibleDividerStyleCount(
+  page: Page,
+  styleId: NaverDividerStyleId,
+): Promise<number> {
+  let total = 0;
+  const layoutClass = 'se-l-' + styleId;
+
+  for (const frame of page.frames()) {
+    const components = frame.locator(dividerComponentSelector);
+    const count = await components.count();
+
+    for (let index = 0; index < count; index += 1) {
+      const component = components.nth(index);
+
+      if (!(await component.isVisible().catch(() => false))) {
+        continue;
+      }
+
+      const hasStyle = await component.evaluate(
+        (element, expectedClass) =>
+          element.classList.contains(expectedClass) ||
+          Boolean(element.querySelector('.' + expectedClass)),
+        layoutClass,
+      ).catch(() => false);
+
+      if (hasStyle) {
+        total += 1;
+      }
+    }
+  }
+
+  return total;
+}
+
 async function getVisibleDividerCount(page: Page): Promise<number> {
   let total = 0;
 
@@ -336,13 +654,16 @@ async function waitForDividerCount(
 }
 
 export class NaverDividerAdapter {
-  constructor(private readonly page: Page) {}
+  constructor(
+    private readonly page: Page,
+    private readonly random: () => number = Math.random,
+  ) {}
 
-  async insertDivider(
+  async listDividerStyles(
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverDividerPosition,
-  ): Promise<NaverDividerInsertionResult> {
+  ): Promise<NaverDividerStyleResult> {
     const request = validateDividerRequest(
       expectedParagraphs,
       paragraphNumber,
@@ -355,21 +676,107 @@ export class NaverDividerAdapter {
         request.expectedParagraphs,
       );
       const anchor = paragraphs[request.paragraphNumber - 1]!;
+
+      await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      await this.page.waitForTimeout(DIVIDER_VERIFY_INTERVAL_MS);
+      const styles = await ensureDividerStyles(this.page);
+
+      return {
+        stage: 'DIVIDER_STYLES_READY',
+        message: '전용 Chrome에 표시된 구분선 디자인을 불러왔습니다.',
+        currentUrl: this.page.url(),
+        paragraphNumber: request.paragraphNumber,
+        position: request.position,
+        styles: styles.map(({ id, label }) => ({ id, label })),
+      };
+    } catch (error) {
+      if (error instanceof NaverDividerError) {
+        throw error;
+      }
+
+      throw new NaverDividerError(
+        'DIVIDER_STYLE_NOT_FOUND',
+        '구분선 디자인을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+        { cause: error },
+      );
+    }
+  }
+
+  async insertDivider(
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverDividerPosition,
+    styleSelection?: NaverDividerStyleSelection,
+  ): Promise<NaverDividerInsertionResult> {
+    const request = validateDividerRequest(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+    const validatedStyle = styleSelection === undefined
+      ? undefined
+      : validateDividerStyleSelection(styleSelection);
+
+    try {
+      const paragraphs = await requireMatchingParagraphs(
+        this.page,
+        request.expectedParagraphs,
+      );
+      const anchor = paragraphs[request.paragraphNumber - 1]!;
       const beforeCount = await getVisibleDividerCount(this.page);
       const beforePosition = await measureDividerPosition(anchor);
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
       await this.page.waitForTimeout(DIVIDER_VERIFY_INTERVAL_MS);
-      const control = await requireUniqueDividerControl(this.page);
 
-      try {
-        await control.click();
-      } catch (error) {
-        throw new NaverDividerError(
-          'DIVIDER_INSERT_UNCONFIRMED',
-          '네이버 편집기의 구분선 버튼을 실행하지 못했습니다. Chrome 화면에서 다른 메뉴나 팝업이 열려 있는지 확인해 주세요.',
-          { cause: error },
+      let selectedStyle: DividerStyleCandidate | undefined;
+      let beforeStyleCount = 0;
+
+      if (validatedStyle === undefined) {
+        const control = await requireUniqueDividerControl(this.page);
+
+        try {
+          await control.click();
+        } catch (error) {
+          throw new NaverDividerError(
+            'DIVIDER_INSERT_UNCONFIRMED',
+            '네이버 편집기의 구분선 버튼을 실행하지 못했습니다. Chrome 화면에서 다른 메뉴나 팝업이 열려 있는지 확인해 주세요.',
+            { cause: error },
+          );
+        }
+      } else {
+        const styles = await ensureDividerStyles(this.page);
+        const requestedStyleId = validatedStyle === 'random'
+          ? styles[
+              Math.floor(
+                Math.min(Math.max(this.random(), 0), 0.999_999_999) *
+                  styles.length,
+              )
+            ]?.id
+          : validatedStyle;
+        selectedStyle = styles.find((style) => style.id === requestedStyleId);
+
+        if (!selectedStyle) {
+          throw new NaverDividerError(
+            'DIVIDER_STYLE_STALE',
+            '선택한 구분선 디자인을 현재 네이버 편집기에서 확인하지 못했습니다. 디자인을 다시 불러와 주세요.',
+          );
+        }
+
+        beforeStyleCount = await getVisibleDividerStyleCount(
+          this.page,
+          selectedStyle.id,
         );
+
+        try {
+          await selectedStyle.locator.click();
+        } catch (error) {
+          throw new NaverDividerError(
+            'DIVIDER_INSERT_UNCONFIRMED',
+            '선택한 구분선 디자인을 실행하지 못했습니다. Chrome 화면을 확인해 주세요.',
+            { cause: error },
+          );
+        }
       }
 
       const afterCount = await waitForDividerCount(
@@ -382,6 +789,20 @@ export class NaverDividerAdapter {
           'DIVIDER_INSERT_UNCONFIRMED',
           '구분선 삽입을 끝까지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
         );
+      }
+
+      if (selectedStyle) {
+        const afterStyleCount = await getVisibleDividerStyleCount(
+          this.page,
+          selectedStyle.id,
+        );
+
+        if (afterStyleCount !== beforeStyleCount + 1) {
+          throw new NaverDividerError(
+            'DIVIDER_STYLE_MISMATCH',
+            '선택한 구분선 디자인이 적용됐는지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
+          );
+        }
       }
 
       const paragraphsAfterInsertion = await requireMatchingParagraphs(
@@ -411,17 +832,27 @@ export class NaverDividerAdapter {
 
         throw new NaverDividerError(
           'DIVIDER_POSITION_MISMATCH',
-          `${request.paragraphNumber}번째 문단의 요청 위치는 ${requestedPosition}, 실제 감지 위치는 ${detectedPosition}입니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.`,
+          request.paragraphNumber + '번째 문단의 요청 위치는 ' +
+            requestedPosition + ', 실제 감지 위치는 ' + detectedPosition +
+            '입니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
         );
       }
 
       return {
         stage: 'DIVIDER_VERIFIED',
-        message: '선택한 본문 문단 위치에 구분선을 넣고 결과를 확인했습니다.',
+        message: selectedStyle
+          ? '선택한 구분선 디자인을 본문 문단 위치에 넣고 결과를 확인했습니다.'
+          : '선택한 본문 문단 위치에 구분선을 넣고 결과를 확인했습니다.',
         currentUrl: this.page.url(),
         paragraphNumber: request.paragraphNumber,
         position: request.position,
         dividerCount: afterCount,
+        ...(selectedStyle
+          ? {
+              styleId: selectedStyle.id,
+              styleLabel: selectedStyle.label,
+            }
+          : {}),
       };
     } catch (error) {
       if (error instanceof NaverDividerError) {

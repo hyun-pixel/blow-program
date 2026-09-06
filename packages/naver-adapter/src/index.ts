@@ -19,11 +19,16 @@ export {
   NaverDividerAdapter,
   NaverDividerError,
   validateDividerRequest,
+  validateDividerStyleSelection,
 } from './naver-divider.js';
 export type {
   NaverDividerFailureCode,
   NaverDividerInsertionResult,
   NaverDividerPosition,
+  NaverDividerStyle,
+  NaverDividerStyleId,
+  NaverDividerStyleResult,
+  NaverDividerStyleSelection,
 } from './naver-divider.js';
 export {
   NaverImageAdapter,

@@ -28,6 +28,8 @@ import type {
   NaverConnectionStatus,
   NaverDividerInsertionResult,
   NaverDividerPosition,
+  NaverDividerStyle,
+  NaverDividerStyleSelection,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -257,6 +259,11 @@ export function ConnectionScreen() {
     useState<NaverDividerPosition>('after');
   const [dividerResult, setDividerResult] =
     useState<NaverDividerInsertionResult | null>(null);
+  const [dividerStyles, setDividerStyles] = useState<
+    readonly NaverDividerStyle[]
+  >([]);
+  const [dividerStyleSelection, setDividerStyleSelection] =
+    useState<NaverDividerStyleSelection>('random');
   const [stickerParagraphNumber, setStickerParagraphNumber] = useState(1);
   const [stickerPosition, setStickerPosition] =
     useState<NaverStickerPosition>('after');
@@ -283,6 +290,7 @@ export function ConnectionScreen() {
     | 'verify'
     | 'writer'
     | 'input'
+    | 'divider-styles'
     | 'divider'
     | 'sticker-categories'
     | 'sticker'
@@ -351,6 +359,8 @@ export function ConnectionScreen() {
           setInputResult(null);
           setDividerParagraphNumber(1);
           setDividerPosition('after');
+          setDividerStyles([]);
+          setDividerStyleSelection('random');
           setDividerResult(null);
           setStickerParagraphNumber(1);
           setStickerPosition('after');
@@ -439,6 +449,8 @@ export function ConnectionScreen() {
       setInputResult(null);
       setDividerParagraphNumber(1);
       setDividerPosition('after');
+      setDividerStyles([]);
+      setDividerStyleSelection('random');
       setDividerResult(null);
       setStickerParagraphNumber(1);
       setStickerPosition('after');
@@ -482,6 +494,8 @@ export function ConnectionScreen() {
 
     setActiveAction('input');
     setInputResult(null);
+    setDividerStyles([]);
+    setDividerStyleSelection('random');
     setDividerResult(null);
     setStickerCategories([]);
     setStickerCategoryId('');
@@ -501,6 +515,8 @@ export function ConnectionScreen() {
         setInputResult(response.result);
         setDividerParagraphNumber(1);
         setDividerPosition('after');
+        setDividerStyles([]);
+        setDividerStyleSelection('random');
         setDividerResult(null);
         setSelectedImages([]);
         setImageResult(null);
@@ -571,6 +587,8 @@ export function ConnectionScreen() {
 
       if (response.ok) {
         setImageResult(response.result);
+        setDividerStyles([]);
+        setDividerStyleSelection('random');
         setDividerResult(null);
         setStickerCategories([]);
         setStickerCategoryId('');
@@ -591,6 +609,44 @@ export function ConnectionScreen() {
     }
   };
 
+  const loadDividerStyles = async (): Promise<void> => {
+    if (
+      dividerParagraphNumber < 1 ||
+      dividerParagraphNumber > draftParagraphs.length
+    ) {
+      setError({
+        code: 'INVALID_DIVIDER_REQUEST',
+        message: '구분선을 넣을 문단과 위치를 다시 선택해 주세요.',
+      });
+      return;
+    }
+
+    setActiveAction('divider-styles');
+    setDividerStyles([]);
+    setDividerStyleSelection('random');
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.listDividerStyles(
+        dividerParagraphNumber,
+        dividerPosition,
+      );
+
+      if (response.ok) {
+        setDividerStyles(response.result.styles);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'DIVIDER_STYLE_NOT_FOUND',
+        message: '구분선 디자인을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
   const insertDivider = async (): Promise<void> => {
     if (
       dividerParagraphNumber < 1 ||
@@ -603,6 +659,14 @@ export function ConnectionScreen() {
       return;
     }
 
+    if (dividerStyles.length === 0) {
+      setError({
+        code: 'DIVIDER_STYLE_NOT_FOUND',
+        message: '구분선 디자인을 먼저 불러와 주세요.',
+      });
+      return;
+    }
+
     setActiveAction('divider');
     setDividerResult(null);
     setError(null);
@@ -611,6 +675,7 @@ export function ConnectionScreen() {
       const response = await window.blowNaver.insertDivider(
         dividerParagraphNumber,
         dividerPosition,
+        dividerStyleSelection,
       );
 
       if (response.ok) {
@@ -802,12 +867,19 @@ export function ConnectionScreen() {
         'DIVIDER_SELECTION_FAILED',
         'DIVIDER_CONTROL_NOT_FOUND',
         'DIVIDER_CONTROL_AMBIGUOUS',
+        'DIVIDER_STYLE_CONTROL_NOT_FOUND',
+        'DIVIDER_STYLE_CONTROL_AMBIGUOUS',
+        'DIVIDER_STYLE_NOT_FOUND',
+        'DIVIDER_STYLE_AMBIGUOUS',
+        'DIVIDER_STYLE_STALE',
+        'DIVIDER_STYLE_MISMATCH',
         'DIVIDER_INSERT_UNCONFIRMED',
         'DIVIDER_POSITION_MISMATCH',
       ].includes(error.code)
     : false;
   const dividerRetryBlocked = [
     'DIVIDER_INSERT_UNCONFIRMED',
+    'DIVIDER_STYLE_MISMATCH',
     'DIVIDER_POSITION_MISMATCH',
   ].includes(error?.code ?? '');
   const selectedDividerPositionLabel =
@@ -994,7 +1066,8 @@ export function ConnectionScreen() {
             <h2>구분선 위치를 확인했습니다</h2>
             <p>
               {dividerResult.paragraphNumber}번째 문단의{' '}
-              {getDividerPositionLabel(dividerResult.position)}에 구분선이 삽입됐습니다.
+              {getDividerPositionLabel(dividerResult.position)}에{' '}
+              {dividerResult.styleLabel ?? '구분선'}이 삽입됐습니다.
               임시저장과 최종 발행은 실행하지 않았습니다.
             </p>
           </div>
@@ -1589,17 +1662,24 @@ export function ConnectionScreen() {
         <section
           className="divider-test-panel"
           aria-labelledby="divider-test-heading"
-          aria-busy={activeAction === 'divider'}
+          aria-busy={
+            activeAction === 'divider-styles' ||
+            activeAction === 'divider'
+          }
         >
           <header className="panel-heading">
             <div>
-              <h2 id="divider-test-heading">구분선 위치 테스트</h2>
+              <h2 id="divider-test-heading">구분선 위치·디자인 테스트</h2>
               <p>
-                본문 문단과 앞·뒤 위치를 하나씩 선택해 네이버 편집기에 구분선을 넣습니다.
+                본문 위치와 디자인을 하나씩 선택해 네이버 편집기에 구분선을 넣습니다.
               </p>
             </div>
             <span className="document-state">
-              {dividerResult ? '삽입 확인 완료' : '저장하지 않음'}
+              {dividerResult
+                ? '삽입 확인 완료'
+                : dividerStyles.length > 0
+                  ? '디자인 선택'
+                  : '디자인 불러오기'}
             </span>
           </header>
 
@@ -1621,6 +1701,8 @@ export function ConnectionScreen() {
                     aria-describedby="divider-paragraph-help"
                     onChange={(event) => {
                       setDividerParagraphNumber(Number(event.target.value));
+                      setDividerStyles([]);
+                      setDividerStyleSelection('random');
                       setError(null);
                     }}
                   >
@@ -1667,6 +1749,8 @@ export function ConnectionScreen() {
                           checked={dividerPosition === option.value}
                           onChange={() => {
                             setDividerPosition(option.value);
+                            setDividerStyles([]);
+                            setDividerStyleSelection('random');
                             setError(null);
                           }}
                         />
@@ -1681,15 +1765,75 @@ export function ConnectionScreen() {
                     ))}
                   </div>
                   <p id="divider-position-help" className="layout-selection-help">
-                    선택한 문단의 시작 전 또는 끝난 다음 위치에 구분선 한 개를 넣습니다.
+                    위치를 바꾸면 현재 디자인 목록을 다시 불러옵니다.
                   </p>
                 </fieldset>
+              </div>
+
+              <div className="divider-style-row">
+                <div className="field-group">
+                  <label htmlFor="divider-style">
+                    구분선 디자인 <span>필수 · 하나만 선택</span>
+                  </label>
+                  <select
+                    id="divider-style"
+                    value={dividerStyleSelection}
+                    disabled={
+                      isRunning ||
+                      dividerStyles.length === 0 ||
+                      Boolean(dividerResult) ||
+                      dividerRetryBlocked
+                    }
+                    aria-describedby="divider-style-help"
+                    onChange={(event) => {
+                      setDividerStyleSelection(
+                        event.target.value as NaverDividerStyleSelection,
+                      );
+                      setError(null);
+                    }}
+                  >
+                    <option value="random">무작위 (추천)</option>
+                    {dividerStyles.map((style) => (
+                      <option value={style.id} key={style.id}>
+                        {style.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p id="divider-style-help" className="field-help">
+                    {dividerStyles.length > 0
+                      ? dividerStyles.length +
+                        '개 디자인을 불러왔습니다. 무작위 또는 특정 디자인 하나를 선택해 주세요.'
+                      : '네이버 구분선 선택창의 실제 디자인을 먼저 불러옵니다.'}
+                  </p>
+                </div>
+
+                <button
+                  className="button secondary divider-style-load-button"
+                  type="button"
+                  disabled={
+                    isRunning ||
+                    Boolean(dividerResult) ||
+                    dividerRetryBlocked
+                  }
+                  onClick={() => void loadDividerStyles()}
+                >
+                  {activeAction === 'divider-styles' ? (
+                    <LoaderCircle className="is-spinning" aria-hidden="true" />
+                  ) : (
+                    <Minus aria-hidden="true" />
+                  )}
+                  {activeAction === 'divider-styles'
+                    ? '디자인 확인 중…'
+                    : dividerStyles.length > 0
+                      ? '디자인 다시 불러오기'
+                      : '구분선 디자인 불러오기'}
+                </button>
               </div>
 
               <div className="editor-input-note">
                 <ShieldCheck aria-hidden="true" />
                 <p>
-                  문단 원문, 구분선 개수와 실제 순서를 다시 확인합니다. 위치를 확정하지 못하면 중복 삽입 없이 작업을 멈춥니다.
+                  문단 원문, 선택한 디자인, 구분선 개수와 실제 순서를 다시 확인합니다. 어느 하나라도 확정하지 못하면 중복 삽입 없이 작업을 멈춥니다.
                 </p>
               </div>
 
@@ -1708,6 +1852,7 @@ export function ConnectionScreen() {
                 type="button"
                 disabled={
                   isRunning ||
+                  dividerStyles.length === 0 ||
                   Boolean(dividerResult) ||
                   dividerRetryBlocked
                 }
@@ -1748,6 +1893,10 @@ export function ConnectionScreen() {
                       <dd>{getDividerPositionLabel(dividerResult.position)}</dd>
                     </div>
                     <div>
+                      <dt>디자인</dt>
+                      <dd>{dividerResult.styleLabel ?? '기본 구분선'}</dd>
+                    </div>
+                    <div>
                       <dt>구분선</dt>
                       <dd>{dividerResult.dividerCount}개</dd>
                     </div>
@@ -1756,8 +1905,9 @@ export function ConnectionScreen() {
                   <ol>
                     <li>본문 문단이 입력 원문과 같은지 확인</li>
                     <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
-                    <li>정확히 한 개인 구분선 버튼만 조작</li>
-                    <li>삽입 개수와 문단 앞·뒤 순서를 재확인</li>
+                    <li>현재 네이버 편집기의 구분선 디자인 목록 확인</li>
+                    <li>무작위 또는 선택한 디자인 한 개만 조작</li>
+                    <li>디자인·삽입 개수·문단 앞뒤 순서를 재확인</li>
                   </ol>
                 )}
               </div>

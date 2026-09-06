@@ -9,6 +9,8 @@ import type {
   NaverConnectionStatus,
   NaverDividerInsertionResult,
   NaverDividerPosition,
+  NaverDividerStyleResult,
+  NaverDividerStyleSelection,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -37,6 +39,19 @@ type NaverInputResponse =
   | {
       readonly ok: true;
       readonly result: NaverEditorInputResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type NaverDividerStyleResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverDividerStyleResult;
     }
   | {
       readonly ok: false;
@@ -134,6 +149,7 @@ const ipcChannels = {
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
+  naverListDividerStyles: 'naver:list-divider-styles',
   naverInsertDivider: 'naver:insert-divider',
   naverInsertQuote: 'naver:insert-quote',
   naverListStickerCategories: 'naver:list-sticker-categories',
@@ -183,13 +199,23 @@ const blowNaverApi = {
   openWriter: () => ipcRenderer.invoke(ipcChannels.naverOpenWriter),
   enterContent: (content: DraftContent): Promise<NaverInputResponse> =>
     ipcRenderer.invoke(ipcChannels.naverEnterContent, content),
+  listDividerStyles: (
+    paragraphNumber: number,
+    position: NaverDividerPosition,
+  ): Promise<NaverDividerStyleResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverListDividerStyles, {
+      paragraphNumber,
+      position,
+    }),
   insertDivider: (
     paragraphNumber: number,
     position: NaverDividerPosition,
+    styleSelection?: NaverDividerStyleSelection,
   ): Promise<NaverDividerResponse> =>
     ipcRenderer.invoke(ipcChannels.naverInsertDivider, {
       paragraphNumber,
       position,
+      styleSelection,
     }),
   insertDefaultQuote: (
     paragraphNumber: number,

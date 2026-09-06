@@ -5,6 +5,8 @@ import type {
   NaverConnectionStatus,
   NaverDividerInsertionResult,
   NaverDividerPosition,
+  NaverDividerStyleResult,
+  NaverDividerStyleSelection,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -47,6 +49,11 @@ interface NaverSuccessResponse {
 interface NaverInputSuccessResponse {
   readonly ok: true;
   readonly result: NaverEditorInputResult;
+}
+
+interface NaverDividerStyleSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverDividerStyleResult;
 }
 
 interface NaverDividerSuccessResponse {
@@ -103,9 +110,14 @@ declare global {
       enterContent(
         content: DraftContent,
       ): Promise<NaverErrorResponse | NaverInputSuccessResponse>;
+      listDividerStyles(
+        paragraphNumber: number,
+        position: NaverDividerPosition,
+      ): Promise<NaverErrorResponse | NaverDividerStyleSuccessResponse>;
       insertDivider(
         paragraphNumber: number,
         position: NaverDividerPosition,
+        styleSelection?: NaverDividerStyleSelection,
       ): Promise<NaverErrorResponse | NaverDividerSuccessResponse>;
       insertDefaultQuote(
         paragraphNumber: number,

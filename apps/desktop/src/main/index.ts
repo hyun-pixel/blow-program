@@ -14,6 +14,7 @@ import {
 import type {
   DraftContent,
   NaverDividerPosition,
+  NaverDividerStyleSelection,
   NaverImageLayout,
   NaverQuotePosition,
   NaverStickerPosition,
@@ -39,6 +40,7 @@ const ipcChannels = {
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
   naverEnterContent: 'naver:enter-content',
+  naverListDividerStyles: 'naver:list-divider-styles',
   naverInsertDivider: 'naver:insert-divider',
   naverInsertQuote: 'naver:insert-quote',
   naverListStickerCategories: 'naver:list-sticker-categories',
@@ -144,9 +146,22 @@ function parseDraftContent(input: unknown): DraftContent | null {
   };
 }
 
+const dividerStyleSelections = new Set<NaverDividerStyleSelection>([
+  'random',
+  'default',
+  'line1',
+  'line2',
+  'line3',
+  'line4',
+  'line5',
+  'line6',
+  'line7',
+]);
+
 function parseDividerRequest(input: unknown): {
   readonly paragraphNumber: number;
   readonly position: NaverDividerPosition;
+  readonly styleSelection?: NaverDividerStyleSelection;
 } | null {
   if (!input || typeof input !== 'object') {
     return null;
@@ -155,13 +170,24 @@ function parseDividerRequest(input: unknown): {
   const candidate = input as {
     readonly paragraphNumber?: unknown;
     readonly position?: unknown;
+    readonly styleSelection?: unknown;
   };
+  const styleSelection = candidate.styleSelection;
 
   if (
     !Number.isInteger(candidate.paragraphNumber) ||
     (candidate.paragraphNumber as number) < 1 ||
     (candidate.paragraphNumber as number) > 100 ||
-    (candidate.position !== 'before' && candidate.position !== 'after')
+    (candidate.position !== 'before' && candidate.position !== 'after') ||
+    (
+      styleSelection !== undefined &&
+      (
+        typeof styleSelection !== 'string' ||
+        !dividerStyleSelections.has(
+          styleSelection as NaverDividerStyleSelection,
+        )
+      )
+    )
   ) {
     return null;
   }
@@ -169,6 +195,12 @@ function parseDividerRequest(input: unknown): {
   return {
     paragraphNumber: candidate.paragraphNumber as number,
     position: candidate.position,
+    ...(styleSelection === undefined
+      ? {}
+      : {
+          styleSelection:
+            styleSelection as NaverDividerStyleSelection,
+        }),
   };
 }
 
@@ -618,6 +650,73 @@ function registerNaverIpc(): void {
   );
 
   ipcMain.handle(
+    ipcChannels.naverListDividerStyles,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+      const request = parseDividerRequest(input);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (!request) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_DIVIDER_REQUEST',
+            message: '구분선을 넣을 문단과 위치를 다시 선택해 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.listDividerStyles(
+            request.paragraphNumber,
+            request.position,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'DIVIDER_STYLE_NOT_FOUND',
+            message: '구분선 디자인을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.naverInsertDivider,
     async (event, input: unknown) => {
       requireTrustedSender(event);
@@ -657,6 +756,7 @@ function registerNaverIpc(): void {
           result: await session.insertDivider(
             request.paragraphNumber,
             request.position,
+            request.styleSelection,
           ),
         };
       } catch (error) {

@@ -11,6 +11,8 @@ import {
   NaverDividerAdapter,
   type NaverDividerInsertionResult,
   type NaverDividerPosition,
+  type NaverDividerStyleResult,
+  type NaverDividerStyleSelection,
 } from './naver-divider.js';
 import {
   NaverImageAdapter,
@@ -610,11 +612,33 @@ export class NaverConnectionAdapter {
     return editor.enterAndVerify(content);
   }
 
+  async listDividerStyles(
+    profile: NaverBlogProfile,
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverDividerPosition,
+  ): Promise<NaverDividerStyleResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 구분선 디자인 확인을 시작하지 않았습니다.',
+      );
+    }
+
+    const dividerAdapter = new NaverDividerAdapter(this.page);
+    return dividerAdapter.listDividerStyles(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+  }
+
   async insertDivider(
     profile: NaverBlogProfile,
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverDividerPosition,
+    styleSelection?: NaverDividerStyleSelection,
   ): Promise<NaverDividerInsertionResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -628,6 +652,7 @@ export class NaverConnectionAdapter {
       expectedParagraphs,
       paragraphNumber,
       position,
+      styleSelection,
     );
   }
 

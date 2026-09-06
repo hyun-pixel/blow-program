@@ -15,6 +15,8 @@ import {
   type NaverConnectionStatus,
   type NaverDividerInsertionResult,
   type NaverDividerPosition,
+  type NaverDividerStyleResult,
+  type NaverDividerStyleSelection,
   type NaverEditorInputResult,
   type NaverImageAttachmentResult,
   type NaverImageLayout,
@@ -56,6 +58,12 @@ export type NaverRunnerFailureCode =
   | 'DIVIDER_SELECTION_FAILED'
   | 'DIVIDER_CONTROL_NOT_FOUND'
   | 'DIVIDER_CONTROL_AMBIGUOUS'
+  | 'DIVIDER_STYLE_CONTROL_NOT_FOUND'
+  | 'DIVIDER_STYLE_CONTROL_AMBIGUOUS'
+  | 'DIVIDER_STYLE_NOT_FOUND'
+  | 'DIVIDER_STYLE_AMBIGUOUS'
+  | 'DIVIDER_STYLE_STALE'
+  | 'DIVIDER_STYLE_MISMATCH'
   | 'DIVIDER_INSERT_UNCONFIRMED'
   | 'DIVIDER_POSITION_MISMATCH'
   | 'INVALID_IMAGE_SELECTION'
@@ -264,9 +272,37 @@ export class NaverConnectionSession {
     }
   }
 
+  async listDividerStyles(
+    paragraphNumber: number,
+    position: NaverDividerPosition,
+  ): Promise<NaverDividerStyleResult> {
+    const content = this.enteredContent;
+
+    if (!content) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.listDividerStyles(
+        this.profile,
+        content.paragraphs,
+        paragraphNumber,
+        position,
+      );
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
   async insertDivider(
     paragraphNumber: number,
     position: NaverDividerPosition,
+    styleSelection?: NaverDividerStyleSelection,
   ): Promise<NaverDividerInsertionResult> {
     const content = this.enteredContent;
 
@@ -283,6 +319,7 @@ export class NaverConnectionSession {
         content.paragraphs,
         paragraphNumber,
         position,
+        styleSelection,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
