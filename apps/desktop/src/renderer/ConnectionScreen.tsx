@@ -47,6 +47,22 @@ import type {
 
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
+type ActionName =
+  | 'open'
+  | 'verify'
+  | 'writer'
+  | 'input'
+  | 'divider-styles'
+  | 'divider'
+  | 'sticker-categories'
+  | 'sticker'
+  | 'quote-styles'
+  | 'quote'
+  | 'save-draft'
+  | 'select-images'
+  | 'images'
+  | 'focus';
+
 function StepIcon({ status }: { readonly status: StepStatus }) {
   if (status === 'complete') {
     return <Check aria-hidden="true" />;
@@ -296,29 +312,17 @@ export function ConnectionScreen() {
     useState<NaverImageLayout>('individual');
   const [imageResult, setImageResult] =
     useState<NaverImageAttachmentResult | null>(null);
-  const [activeAction, setActiveAction] = useState<
-    | 'open'
-    | 'verify'
-    | 'writer'
-    | 'input'
-    | 'divider-styles'
-    | 'divider'
-    | 'sticker-categories'
-    | 'sticker'
-    | 'quote-styles'
-    | 'quote'
-    | 'save-draft'
-    | 'select-images'
-    | 'images'
-    | 'focus'
-    | null
-  >(null);
+  const [activeAction, setActiveAction] = useState<ActionName | null>(null);
   const [error, setError] = useState<{
     code: string;
     message: string;
   } | null>(null);
+  const operationVersionRef = useRef(0);
+  const sessionStoppedRef = useRef(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [stopNotice, setStopNotice] = useState(false);
 
-  const isRunning = activeAction !== null;
+  const isUiBusy = activeAction !== null || isStopping;
   const isAutoChecking =
     browserOpen &&
     !error &&
@@ -326,6 +330,22 @@ export function ConnectionScreen() {
   const fieldError = error?.code === 'INVALID_BLOG_URL'
     ? error.message
     : null;
+
+  const beginOperation = (action: ActionName): number => {
+    const operationVersion = operationVersionRef.current;
+    setActiveAction(action);
+    setStopNotice(false);
+    return operationVersion;
+  };
+
+  const isOperationCurrent = (operationVersion: number): boolean =>
+    operationVersion === operationVersionRef.current;
+
+  const finishOperation = (operationVersion: number): void => {
+    if (isOperationCurrent(operationVersion)) {
+      setActiveAction(null);
+    }
+  };
 
   useEffect(() => {
     if (fieldError) {
@@ -335,6 +355,10 @@ export function ConnectionScreen() {
 
   useEffect(() => {
     return window.blowNaver.onState((response) => {
+      if (sessionStoppedRef.current) {
+        return;
+      }
+
       if (response.ok) {
         setBrowserOpen(true);
         setStatus(response.status);
@@ -355,11 +379,15 @@ export function ConnectionScreen() {
     action: 'open' | 'verify' | 'writer',
     command: () => ReturnType<typeof window.blowNaver.open>,
   ): Promise<void> => {
-    setActiveAction(action);
+    const operationVersion = beginOperation(action);
     setError(null);
 
     try {
       const response = await command();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
 
       if (response.ok) {
         setStatus(response.status);
@@ -402,17 +430,22 @@ export function ConnectionScreen() {
         }
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'NAVER_CONNECTION_FAILED',
         message: '네이버 연결 상태를 확인하지 못했습니다. 다시 시도해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
   const submitConnection = (): void => {
     if (!browserOpen) {
+      sessionStoppedRef.current = false;
       void runConnectionCommand(
         'open',
         () => window.blowNaver.open(blogUrl),
@@ -437,26 +470,39 @@ export function ConnectionScreen() {
   };
 
   const focusChrome = async (): Promise<void> => {
-    setActiveAction('focus');
+    const operationVersion = beginOperation('focus');
 
     try {
       const response = await window.blowNaver.focus();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
 
       if (!response.ok) {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'NAVER_CONNECTION_FAILED',
         message: '전용 Chrome 창을 찾지 못했습니다.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
-  const closeChrome = async (): Promise<void> => {
-    setActiveAction('focus');
+  const stopWork = async (): Promise<void> => {
+    operationVersionRef.current += 1;
+    sessionStoppedRef.current = true;
+    setActiveAction(null);
+    setIsStopping(true);
+    setStopNotice(false);
+    setError(null);
 
     try {
       await window.blowNaver.close();
@@ -483,9 +529,15 @@ export function ConnectionScreen() {
       setImageLayout('individual');
       setImageResult(null);
       setDraftErrors({ title: '', body: '' });
-      setError(null);
+      setStopNotice(true);
+    } catch {
+      sessionStoppedRef.current = false;
+      setError({
+        code: 'AUTOMATION_STOP_FAILED',
+        message: '작업을 중단하지 못했습니다. 전용 Chrome을 직접 닫아 주세요.',
+      });
     } finally {
-      setActiveAction(null);
+      setIsStopping(false);
     }
   };
 
@@ -511,7 +563,7 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('input');
+    const operationVersion = beginOperation('input');
     setInputResult(null);
     setDividerStyles([]);
     setDividerStyleSelection('random');
@@ -533,6 +585,10 @@ export function ConnectionScreen() {
         paragraphs,
       });
 
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       if (response.ok) {
         setInputResult(response.result);
         setDividerParagraphNumber(1);
@@ -546,21 +602,29 @@ export function ConnectionScreen() {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'NAVER_CONNECTION_FAILED',
         message: '제목과 본문 입력을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
   const selectImages = async (): Promise<void> => {
-    setActiveAction('select-images');
+    const operationVersion = beginOperation('select-images');
     setError(null);
 
     try {
       const response = await window.blowNaver.selectImages();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
 
       if (response.ok) {
         if (!response.canceled) {
@@ -571,12 +635,16 @@ export function ConnectionScreen() {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'INVALID_IMAGE_SELECTION',
         message: '이미지 파일 선택 창을 열지 못했습니다. 다시 시도해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
@@ -597,7 +665,7 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('images');
+    const operationVersion = beginOperation('images');
     setImageResult(null);
     setError(null);
 
@@ -606,6 +674,10 @@ export function ConnectionScreen() {
         selectedImages.map((image) => image.id),
         imageLayout,
       );
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
 
       if (response.ok) {
         setImageResult(response.result);
@@ -625,12 +697,16 @@ export function ConnectionScreen() {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'IMAGE_UPLOAD_FAILED',
         message: '이미지 첨부를 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
@@ -646,7 +722,7 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('divider-styles');
+    const operationVersion = beginOperation('divider-styles');
     setDividerStyles([]);
     setDividerStyleSelection('random');
     setError(null);
@@ -657,18 +733,26 @@ export function ConnectionScreen() {
         dividerPosition,
       );
 
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       if (response.ok) {
         setDividerStyles(response.result.styles);
       } else {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'DIVIDER_STYLE_NOT_FOUND',
         message: '구분선 디자인을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
@@ -692,7 +776,7 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('divider');
+    const operationVersion = beginOperation('divider');
     setDividerResult(null);
     setError(null);
 
@@ -702,6 +786,10 @@ export function ConnectionScreen() {
         dividerPosition,
         dividerStyleSelection,
       );
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
 
       if (response.ok) {
         setDividerResult(response.result);
@@ -718,12 +806,16 @@ export function ConnectionScreen() {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'DIVIDER_INSERT_UNCONFIRMED',
         message: '구분선 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
@@ -739,7 +831,7 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('sticker-categories');
+    const operationVersion = beginOperation('sticker-categories');
     setStickerCategories([]);
     setStickerCategoryId('');
     setStickerResult(null);
@@ -757,18 +849,26 @@ export function ConnectionScreen() {
         stickerPosition,
       );
 
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       if (response.ok) {
         setStickerCategories(response.result.categories);
       } else {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'STICKER_CATEGORY_NOT_FOUND',
         message: '스티커 묶음을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
@@ -785,7 +885,7 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('sticker');
+    const operationVersion = beginOperation('sticker');
     setStickerResult(null);
     setQuoteParagraphNumber(1);
     setQuotePosition('after');
@@ -801,6 +901,10 @@ export function ConnectionScreen() {
         stickerPosition,
         stickerCategoryId,
       );
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
 
       if (response.ok) {
         setStickerResult(response.result);
@@ -819,12 +923,16 @@ export function ConnectionScreen() {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'STICKER_INSERT_UNCONFIRMED',
         message: '스티커 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
   const loadQuoteStyles = async (): Promise<void> => {
@@ -839,7 +947,7 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('quote-styles');
+    const operationVersion = beginOperation('quote-styles');
     setQuoteStyles([]);
     setQuoteStyleSelection('random');
     setQuoteResult(null);
@@ -852,18 +960,26 @@ export function ConnectionScreen() {
         quotePosition,
       );
 
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       if (response.ok) {
         setQuoteStyles(response.result.styles);
       } else {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'QUOTE_STYLE_NOT_FOUND',
         message: '인용구 디자인을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
@@ -887,7 +1003,7 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('quote');
+    const operationVersion = beginOperation('quote');
     setQuoteResult(null);
     setDraftSaveResult(null);
     setError(null);
@@ -898,6 +1014,10 @@ export function ConnectionScreen() {
         quotePosition,
         quoteStyleSelection,
       );
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
 
       if (response.ok) {
         setQuoteResult(response.result);
@@ -910,22 +1030,30 @@ export function ConnectionScreen() {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'QUOTE_INSERT_UNCONFIRMED',
         message: '인용구 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
   const saveDraft = async (): Promise<void> => {
-    setActiveAction('save-draft');
+    const operationVersion = beginOperation('save-draft');
     setDraftSaveResult(null);
     setError(null);
 
     try {
       const response = await window.blowNaver.saveDraft();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
 
       if (response.ok) {
         setDraftSaveResult(response.result);
@@ -933,12 +1061,16 @@ export function ConnectionScreen() {
         setError(response.error);
       }
     } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
       setError({
         code: 'DRAFT_SAVE_UNCONFIRMED',
         message: '임시저장 완료 상태를 확인하지 못했습니다. 자동으로 다시 누르지 않았으니 Chrome에서 저장 여부를 확인해 주세요.',
       });
     } finally {
-      setActiveAction(null);
+      finishOperation(operationVersion);
     }
   };
 
@@ -1109,25 +1241,31 @@ export function ConnectionScreen() {
             등록 블로그를 연결한 뒤 네이버 편집기에 제목, 본문, 이미지와 서식을 안전하게 입력합니다.
           </p>
         </div>
-        {browserOpen ? (
+        {browserOpen || isUiBusy ? (
           <div className="page-head-actions">
+            {browserOpen ? (
+              <button
+                className="button secondary"
+                type="button"
+                disabled={isUiBusy}
+                onClick={() => void focusChrome()}
+              >
+                <ExternalLink aria-hidden="true" />
+                Chrome 보기
+              </button>
+            ) : null}
             <button
-              className="button secondary"
+              className="button danger"
               type="button"
-              disabled={isRunning}
-              onClick={() => void focusChrome()}
+              disabled={isStopping}
+              onClick={() => void stopWork()}
             >
-              <ExternalLink aria-hidden="true" />
-              Chrome 보기
-            </button>
-            <button
-              className="button tertiary"
-              type="button"
-              disabled={isRunning}
-              onClick={() => void closeChrome()}
-            >
-              <X aria-hidden="true" />
-              Chrome 닫기
+              {isStopping ? (
+                <LoaderCircle className="is-spinning" aria-hidden="true" />
+              ) : (
+                <X aria-hidden="true" />
+              )}
+              {isStopping ? '중단 중…' : '작업 중단'}
             </button>
           </div>
         ) : null}
@@ -1156,6 +1294,26 @@ export function ConnectionScreen() {
           </span>
         </div>
       </section>
+
+      {(isStopping || stopNotice) && !error ? (
+        <section className="message success-message" role="status">
+          {isStopping ? (
+            <LoaderCircle className="is-spinning" aria-hidden="true" />
+          ) : (
+            <CheckCircle2 aria-hidden="true" />
+          )}
+          <div>
+            <h2>
+              {isStopping ? '작업을 중단하는 중…' : '작업을 중단했습니다'}
+            </h2>
+            <p>
+              {isStopping
+                ? '진행 중인 자동화를 멈추고 전용 Chrome을 닫고 있습니다.'
+                : '전용 Chrome을 닫고 현재 작업 상태를 초기화했습니다. 저장되지 않은 작업은 복구하지 않습니다.'}
+            </p>
+          </div>
+        </section>
+      ) : null}
 
       {error ? (
         <section className="message error-message" role="alert">
@@ -1264,7 +1422,7 @@ export function ConnectionScreen() {
 
       <section
         className="connection-workbench"
-        aria-busy={isRunning || isAutoChecking}
+        aria-busy={isUiBusy || isAutoChecking}
         aria-labelledby="connection-form-heading"
       >
         <div className="connection-form-panel">
@@ -1348,12 +1506,12 @@ export function ConnectionScreen() {
               className="button primary connection-primary"
               type="submit"
               disabled={
-                isRunning ||
+                isUiBusy ||
                 isAutoChecking ||
                 status?.stage === 'WRITER_READY'
               }
             >
-              {isRunning || isAutoChecking ? (
+              {isUiBusy || isAutoChecking ? (
                 <LoaderCircle className="is-spinning" aria-hidden="true" />
               ) : status?.stage === 'WRITER_LINK_READY' ? (
                 <MousePointerClick aria-hidden="true" />
@@ -1388,7 +1546,7 @@ export function ConnectionScreen() {
               <XCircle aria-hidden="true" />
             ) : status?.stage === 'WRITER_READY' ? (
               <CheckCircle2 aria-hidden="true" />
-            ) : isRunning || isAutoChecking ? (
+            ) : isUiBusy || isAutoChecking ? (
               <LoaderCircle className="is-spinning" aria-hidden="true" />
             ) : (
               <Circle aria-hidden="true" />
@@ -1565,7 +1723,7 @@ export function ConnectionScreen() {
               <button
                 className="button primary editor-input-button"
                 type="submit"
-                disabled={isRunning || Boolean(inputResult)}
+                disabled={isUiBusy || Boolean(inputResult)}
               >
                 {activeAction === 'input' ? (
                   <LoaderCircle className="is-spinning" aria-hidden="true" />
@@ -1660,7 +1818,7 @@ export function ConnectionScreen() {
                 className="button primary divider-insert-button"
                 type="button"
                 disabled={
-                  isRunning ||
+                  isUiBusy ||
                   Boolean(draftSaveResult) ||
                   draftSaveRetryBlocked
                 }
@@ -1756,7 +1914,7 @@ export function ConnectionScreen() {
                     className="button secondary"
                     type="button"
                     disabled={
-                      isRunning || Boolean(imageResult) || imageRetryBlocked
+                      isUiBusy || Boolean(imageResult) || imageRetryBlocked
                     }
                     onClick={() => void selectImages()}
                   >
@@ -1801,7 +1959,7 @@ export function ConnectionScreen() {
 
               <fieldset
                 className="image-layout-fieldset"
-                disabled={isRunning || Boolean(imageResult) || imageRetryBlocked}
+                disabled={isUiBusy || Boolean(imageResult) || imageRetryBlocked}
                 aria-describedby="image-layout-help"
               >
                 <legend className="field-label">
@@ -1871,7 +2029,7 @@ export function ConnectionScreen() {
                 className="button primary image-attach-button"
                 type="button"
                 disabled={
-                  isRunning ||
+                  isUiBusy ||
                   selectedImages.length === 0 ||
                   Boolean(imageResult) ||
                   imageRetryBlocked ||
@@ -1963,7 +2121,7 @@ export function ConnectionScreen() {
                     id="divider-paragraph"
                     value={dividerParagraphNumber}
                     disabled={
-                      isRunning ||
+                      isUiBusy ||
                       Boolean(dividerResult) ||
                       dividerRetryBlocked
                     }
@@ -1992,7 +2150,7 @@ export function ConnectionScreen() {
                 <fieldset
                   className="divider-position-fieldset"
                   disabled={
-                    isRunning ||
+                    isUiBusy ||
                     Boolean(dividerResult) ||
                     dividerRetryBlocked
                   }
@@ -2048,7 +2206,7 @@ export function ConnectionScreen() {
                     id="divider-style"
                     value={dividerStyleSelection}
                     disabled={
-                      isRunning ||
+                      isUiBusy ||
                       dividerStyles.length === 0 ||
                       Boolean(dividerResult) ||
                       dividerRetryBlocked
@@ -2080,7 +2238,7 @@ export function ConnectionScreen() {
                   className="button secondary divider-style-load-button"
                   type="button"
                   disabled={
-                    isRunning ||
+                    isUiBusy ||
                     Boolean(dividerResult) ||
                     dividerRetryBlocked
                   }
@@ -2120,7 +2278,7 @@ export function ConnectionScreen() {
                 className="button primary divider-insert-button"
                 type="button"
                 disabled={
-                  isRunning ||
+                  isUiBusy ||
                   dividerStyles.length === 0 ||
                   Boolean(dividerResult) ||
                   dividerRetryBlocked
@@ -2220,7 +2378,7 @@ export function ConnectionScreen() {
                     id="sticker-paragraph"
                     value={stickerParagraphNumber}
                     disabled={
-                      isRunning ||
+                      isUiBusy ||
                       Boolean(stickerResult) ||
                       stickerRetryBlocked
                     }
@@ -2249,7 +2407,7 @@ export function ConnectionScreen() {
                 <fieldset
                   className="divider-position-fieldset"
                   disabled={
-                    isRunning ||
+                    isUiBusy ||
                     Boolean(stickerResult) ||
                     stickerRetryBlocked
                   }
@@ -2306,7 +2464,7 @@ export function ConnectionScreen() {
                     id="sticker-category"
                     value={stickerCategoryId}
                     disabled={
-                      isRunning ||
+                      isUiBusy ||
                       stickerCategories.length === 0 ||
                       Boolean(stickerResult) ||
                       stickerRetryBlocked
@@ -2335,7 +2493,7 @@ export function ConnectionScreen() {
                   className="button secondary sticker-category-load-button"
                   type="button"
                   disabled={
-                    isRunning ||
+                    isUiBusy ||
                     Boolean(stickerResult) ||
                     stickerRetryBlocked
                   }
@@ -2375,7 +2533,7 @@ export function ConnectionScreen() {
                 className="button primary divider-insert-button"
                 type="button"
                 disabled={
-                  isRunning ||
+                  isUiBusy ||
                   !stickerCategoryId ||
                   Boolean(stickerResult) ||
                   stickerRetryBlocked
@@ -2477,7 +2635,7 @@ export function ConnectionScreen() {
                     id="quote-paragraph"
                     value={quoteParagraphNumber}
                     disabled={
-                      isRunning ||
+                      isUiBusy ||
                       Boolean(quoteResult) ||
                       quoteRetryBlocked
                     }
@@ -2508,7 +2666,7 @@ export function ConnectionScreen() {
                 <fieldset
                   className="divider-position-fieldset"
                   disabled={
-                    isRunning ||
+                    isUiBusy ||
                     Boolean(quoteResult) ||
                     quoteRetryBlocked
                   }
@@ -2566,7 +2724,7 @@ export function ConnectionScreen() {
                     id="quote-style"
                     value={quoteStyleSelection}
                     disabled={
-                      isRunning ||
+                      isUiBusy ||
                       quoteStyles.length === 0 ||
                       Boolean(quoteResult) ||
                       quoteRetryBlocked
@@ -2598,7 +2756,7 @@ export function ConnectionScreen() {
                   className="button secondary divider-style-load-button"
                   type="button"
                   disabled={
-                    isRunning ||
+                    isUiBusy ||
                     Boolean(quoteResult) ||
                     quoteRetryBlocked
                   }
@@ -2638,7 +2796,7 @@ export function ConnectionScreen() {
                 className="button primary divider-insert-button"
                 type="button"
                 disabled={
-                  isRunning ||
+                  isUiBusy ||
                   quoteStyles.length === 0 ||
                   Boolean(quoteResult) ||
                   quoteRetryBlocked

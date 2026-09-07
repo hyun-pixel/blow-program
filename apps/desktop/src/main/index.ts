@@ -58,6 +58,7 @@ let mainWindow: BrowserWindow | null = null;
 let activeRun = false;
 let activeMockResult: MockPocResult | null = null;
 let activeNaverSession: NaverConnectionSession | null = null;
+let naverStopVersion = 0;
 const selectedNaverImages = new Map<
   string,
   { readonly path: string; readonly name: string; readonly sizeBytes: number }
@@ -342,6 +343,18 @@ async function closeNaverBrowser(): Promise<void> {
   await session?.close();
 }
 
+async function waitForNaverRunToSettle(): Promise<void> {
+  const timeoutAt = Date.now() + 30_000;
+
+  while (activeRun && Date.now() < timeoutAt) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  if (activeRun) {
+    throw new Error('Timed out while stopping the active Naver operation.');
+  }
+}
+
 async function closeAllBrowsers(): Promise<void> {
   await Promise.all([
     closeMockBrowser(),
@@ -488,6 +501,7 @@ function registerNaverIpc(): void {
     }
 
     activeRun = true;
+    const stopVersion = naverStopVersion;
     await closeAllBrowsers();
 
     try {
@@ -497,6 +511,18 @@ function registerNaverIpc(): void {
         blogUrl: requireBlogUrl(input),
         headless: false,
       });
+
+      if (stopVersion !== naverStopVersion) {
+        await result.session.close();
+        return {
+          ok: false,
+          error: {
+            code: 'AUTOMATION_STOPPED',
+            message: '작업을 중단했습니다.',
+          },
+        };
+      }
+
       activeNaverSession = result.session;
 
       if (
@@ -1342,6 +1368,9 @@ function registerNaverIpc(): void {
 
   ipcMain.handle(ipcChannels.naverClose, async (event) => {
     requireTrustedSender(event);
+    naverStopVersion += 1;
+    await closeNaverBrowser();
+    await waitForNaverRunToSettle();
     await closeNaverBrowser();
     return { ok: true };
   });

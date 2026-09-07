@@ -851,6 +851,16 @@ svg {
 .button.tertiary:hover:not(:disabled) {
   border-color: var(--line);
 }
+.button.danger {
+  border-color: transparent;
+  color: var(--danger);
+  background: transparent;
+}
+
+.button.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
 
 .connection-workbench {
   display: grid;
