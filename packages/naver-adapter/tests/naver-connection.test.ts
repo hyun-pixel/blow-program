@@ -1,4 +1,4 @@
-import type { Page } from 'playwright-core';
+import type { Frame, Page } from 'playwright-core';
 import {
   describe,
   expect,
@@ -11,6 +11,7 @@ import {
   isNaverWriterUrl,
   NaverConnectionAdapter,
   NaverConnectionError,
+  normalizeUserInteractionType,
   normalizeWriterHref,
   parseNaverBlogUrl,
   selectUniqueWriterHref,
@@ -148,6 +149,43 @@ describe('글쓰기 이동 경로 제한', () => {
   });
 });
 
+describe('사용자 Chrome 조작 감지', () => {
+  it.each([
+    ['pointerdown', 'pointer'],
+    ['keydown', 'keyboard'],
+    ['input', 'text-input'],
+    ['wheel', 'scroll'],
+  ] as const)('%s 이벤트를 안전한 분류값으로 변환한다', (eventType, expected) => {
+    expect(normalizeUserInteractionType(eventType)).toBe(expected);
+  });
+
+  it('이벤트 내용 없이 사용자 조작 유형만 감지한다', async () => {
+    let evaluateCall = 0;
+    const frame = {
+      evaluate: vi.fn().mockImplementation(async () => {
+        evaluateCall += 1;
+        return evaluateCall === 2 ? 'pointerdown' : undefined;
+      }),
+    } as unknown as Frame;
+    const page = {
+      bringToFront: vi.fn().mockResolvedValue(undefined),
+      frames: vi.fn().mockReturnValue([frame]),
+      isClosed: vi.fn().mockReturnValue(false),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(page);
+
+    await expect(adapter.waitForUserInteraction({
+      timeoutMs: 500,
+      pollIntervalMs: 25,
+    })).resolves.toEqual({
+      detected: true,
+      interactionType: 'pointer',
+      waitedMs: expect.any(Number),
+    });
+    expect(page.bringToFront).toHaveBeenCalledOnce();
+    expect(frame.evaluate).toHaveBeenCalledTimes(3);
+  });
+});
 describe('글쓰기 새 탭 진입', () => {
   it('새 탭으로 열린 편집기를 활성 화면으로 추적한다', async () => {
     const popupPage = {

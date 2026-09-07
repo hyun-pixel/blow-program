@@ -43,6 +43,8 @@ import type {
   NaverStickerCategory,
   NaverStickerInsertionResult,
   NaverStickerPosition,
+  NaverUserInteractionResult,
+  NaverUserInteractionType,
 } from '@blow/naver-adapter';
 
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
@@ -59,6 +61,7 @@ type ActionName =
   | 'quote-styles'
   | 'quote'
   | 'save-draft'
+  | 'interaction-monitor'
   | 'select-images'
   | 'images'
   | 'focus';
@@ -124,6 +127,26 @@ function getConnectionStepStatus(
   }
 
   return 'complete';
+}
+
+function getUserInteractionLabel(type?: NaverUserInteractionType): string {
+  if (type === 'pointer') {
+    return '마우스 클릭';
+  }
+
+  if (type === 'keyboard') {
+    return '키보드 입력';
+  }
+
+  if (type === 'text-input') {
+    return '텍스트 입력';
+  }
+
+  if (type === 'scroll') {
+    return '화면 스크롤';
+  }
+
+  return '감지되지 않음';
 }
 
 function safeHostLabel(value?: string): string {
@@ -276,6 +299,9 @@ export function ConnectionScreen() {
     useState<NaverEditorInputResult | null>(null);
   const [draftSaveResult, setDraftSaveResult] =
     useState<NaverDraftSaveResult | null>(null);
+  const [interactionResult, setInteractionResult] =
+    useState<NaverUserInteractionResult | null>(null);
+  const [interactionError, setInteractionError] = useState<string | null>(null);
   const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
   const [dividerPosition, setDividerPosition] =
     useState<NaverDividerPosition>('after');
@@ -414,6 +440,8 @@ export function ConnectionScreen() {
           setQuoteStyleSelection('random');
           setQuoteResult(null);
           setDraftSaveResult(null);
+          setInteractionResult(null);
+          setInteractionError(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -525,6 +553,8 @@ export function ConnectionScreen() {
       setQuoteStyleSelection('random');
       setQuoteResult(null);
       setDraftSaveResult(null);
+      setInteractionResult(null);
+      setInteractionError(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -577,6 +607,8 @@ export function ConnectionScreen() {
     setQuoteStyleSelection('random');
     setQuoteResult(null);
     setDraftSaveResult(null);
+    setInteractionResult(null);
+    setInteractionError(null);
     setError(null);
 
     try {
@@ -1074,6 +1106,42 @@ export function ConnectionScreen() {
     }
   };
 
+  const monitorUserInteraction = async (): Promise<void> => {
+    const operationVersion = beginOperation('interaction-monitor');
+    setInteractionResult(null);
+    setInteractionError(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.monitorUserInteraction();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      if (response.ok) {
+        setInteractionResult(response.result);
+      } else {
+        setInteractionError(response.error.message);
+
+        if (response.error.code === 'BROWSER_CLOSED') {
+          setBrowserOpen(false);
+          setStatus(null);
+          setError(response.error);
+        }
+      }
+    } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      setInteractionError(
+        '사용자 조작 감지를 완료하지 못했습니다. 전용 Chrome을 확인해 주세요.',
+      );
+    } finally {
+      finishOperation(operationVersion);
+    }
+  };
   const actionLabel = activeAction === 'open'
     ? 'Chrome 여는 중…'
     : activeAction === 'verify'
@@ -1339,7 +1407,17 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
-      {draftSaveResult ? (
+      {interactionResult?.detected ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>사용자 Chrome 조작을 감지했습니다</h2>
+            <p>
+              {getUserInteractionLabel(interactionResult.interactionType)} 신호만 확인했습니다. 입력 내용과 클릭 위치는 수집하지 않았습니다.
+            </p>
+          </div>
+        </section>
+      ) : draftSaveResult ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
@@ -1599,6 +1677,117 @@ export function ConnectionScreen() {
         </aside>
       </section>
 
+      {status?.stage === 'WRITER_READY' ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="interaction-test-heading"
+          aria-busy={activeAction === 'interaction-monitor'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="interaction-test-heading">Chrome 조작 감지 테스트</h2>
+              <p>
+                10초 동안 전용 Chrome에서 발생하는 사용자 조작을 확인합니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {interactionResult?.detected
+                ? '감지 확인 완료'
+                : activeAction === 'interaction-monitor'
+                  ? '감지 중'
+                  : '테스트 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  시작하면 전용 Chrome이 앞으로 이동합니다. 글 입력 영역이 아닌 페이지 여백을 한 번 클릭해 주세요. 입력 내용은 읽거나 저장하지 않습니다.
+                </p>
+              </div>
+
+              {interactionError ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>사용자 조작 감지를 시작하지 못했습니다</strong>
+                    <p>{interactionError}</p>
+                  </div>
+                </div>
+              ) : interactionResult && !interactionResult.detected ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>10초 동안 조작을 감지하지 못했습니다</strong>
+                    <p>다시 시작한 뒤 전용 Chrome에서 클릭이나 키보드 입력을 해 주세요.</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={isUiBusy || Boolean(interactionResult?.detected)}
+                onClick={() => void monitorUserInteraction()}
+              >
+                {activeAction === 'interaction-monitor' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : interactionResult?.detected ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <MousePointerClick aria-hidden="true" />
+                )}
+                {activeAction === 'interaction-monitor'
+                  ? '사용자 조작 감지 중…'
+                  : interactionResult?.detected
+                    ? '사용자 조작 감지 완료'
+                    : interactionResult
+                      ? '10초 감지 다시 시작'
+                      : '10초 감지 시작'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="사용자 Chrome 조작 감지 범위"
+            >
+              <MousePointerClick aria-hidden="true" />
+              <div>
+                <h3>{interactionResult ? '처리 결과' : '이번 단계에서 확인할 내용'}</h3>
+                {interactionResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>감지 결과</dt>
+                      <dd>{interactionResult.detected ? '감지 완료' : '감지 없음'}</dd>
+                    </div>
+                    <div>
+                      <dt>조작 유형</dt>
+                      <dd>{getUserInteractionLabel(interactionResult.interactionType)}</dd>
+                    </div>
+                    <div>
+                      <dt>대기 시간</dt>
+                      <dd>{Math.max(1, Math.ceil(interactionResult.waitedMs / 1_000))}초</dd>
+                    </div>
+                    <div>
+                      <dt>수집 내용</dt>
+                      <dd>조작 유형만 확인</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>감지 시작과 동시에 전용 Chrome으로 이동</li>
+                    <li>글 입력 영역이 아닌 페이지 여백을 한 번 클릭</li>
+                    <li>입력한 글자나 클릭 위치는 수집하지 않음</li>
+                    <li>조작 감지 후 BLOW 화면으로 자동 복귀</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
       {status?.stage === 'WRITER_READY' ? (
         <section
           className="editor-test-panel"

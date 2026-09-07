@@ -19,6 +19,7 @@ import type {
   NaverStickerCategoryResult,
   NaverStickerInsertionResult,
   NaverStickerPosition,
+  NaverUserInteractionResult,
 } from '@blow/naver-adapter';
 
 interface PocErrorResponse {
@@ -100,6 +101,11 @@ interface NaverImageSuccessResponse {
   readonly result: NaverImageAttachmentResult;
 }
 
+interface NaverUserInteractionSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverUserInteractionResult;
+}
+
 interface BasicSuccessResponse {
   readonly ok: true;
 }
@@ -160,6 +166,9 @@ declare global {
         imageIds: readonly string[],
         layout: NaverImageLayout,
       ): Promise<NaverErrorResponse | NaverImageSuccessResponse>;
+      monitorUserInteraction(): Promise<
+        NaverErrorResponse | NaverUserInteractionSuccessResponse
+      >;
       focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
       close(): Promise<BasicSuccessResponse>;
     };

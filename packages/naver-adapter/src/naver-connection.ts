@@ -1,4 +1,5 @@
 import type {
+  Frame,
   Locator,
   Page,
 } from 'playwright-core';
@@ -86,6 +87,23 @@ export interface NaverConnectionStatus {
   readonly actualBlogId?: string;
   readonly currentUrl: string;
   readonly writerHref?: string;
+}
+
+export type NaverUserInteractionType =
+  | 'pointer'
+  | 'keyboard'
+  | 'text-input'
+  | 'scroll';
+
+export interface NaverUserInteractionResult {
+  readonly detected: boolean;
+  readonly interactionType?: NaverUserInteractionType;
+  readonly waitedMs: number;
+}
+
+export interface NaverUserInteractionMonitorOptions {
+  readonly timeoutMs?: number;
+  readonly pollIntervalMs?: number;
 }
 
 export class NaverConnectionError extends Error {
@@ -197,6 +215,109 @@ function waitForDelay(delayMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, delayMs);
   });
+}
+
+export function normalizeUserInteractionType(
+  eventType: string,
+): NaverUserInteractionType | null {
+  if (eventType === 'pointerdown') {
+    return 'pointer';
+  }
+
+  if (eventType === 'keydown') {
+    return 'keyboard';
+  }
+
+  if (eventType === 'input') {
+    return 'text-input';
+  }
+
+  if (eventType === 'wheel') {
+    return 'scroll';
+  }
+
+  return null;
+}
+
+async function armUserInteractionFrame(frame: Frame): Promise<boolean> {
+  try {
+    await frame.evaluate(() => {
+      type InteractionMonitorState = {
+        detected: string | null;
+        cleanup: () => void;
+      };
+      type InteractionMonitorWindow = Window & {
+        __blowUserInteractionMonitor?: InteractionMonitorState;
+      };
+
+      const monitorWindow = window as InteractionMonitorWindow;
+      monitorWindow.__blowUserInteractionMonitor?.cleanup();
+      const eventNames = [
+        'pointerdown',
+        'keydown',
+        'input',
+        'wheel',
+      ] as const;
+      const state: InteractionMonitorState = {
+        detected: null,
+        cleanup: () => undefined,
+      };
+      const recordInteraction = (event: Event): void => {
+        if (event.isTrusted && !state.detected) {
+          state.detected = event.type;
+        }
+      };
+
+      state.cleanup = () => {
+        for (const eventName of eventNames) {
+          document.removeEventListener(eventName, recordInteraction, true);
+        }
+
+        if (monitorWindow.__blowUserInteractionMonitor === state) {
+          delete monitorWindow.__blowUserInteractionMonitor;
+        }
+      };
+
+      for (const eventName of eventNames) {
+        document.addEventListener(eventName, recordInteraction, true);
+      }
+
+      monitorWindow.__blowUserInteractionMonitor = state;
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readUserInteractionFrame(frame: Frame): Promise<string | null> {
+  try {
+    return await frame.evaluate(() => {
+      type InteractionMonitorWindow = Window & {
+        __blowUserInteractionMonitor?: {
+          detected: string | null;
+        };
+      };
+
+      return (window as InteractionMonitorWindow)
+        .__blowUserInteractionMonitor?.detected ?? null;
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function cleanupUserInteractionFrame(frame: Frame): Promise<void> {
+  await frame.evaluate(() => {
+    type InteractionMonitorWindow = Window & {
+      __blowUserInteractionMonitor?: {
+        cleanup: () => void;
+      };
+    };
+
+    (window as InteractionMonitorWindow)
+      .__blowUserInteractionMonitor?.cleanup();
+  }).catch(() => undefined);
 }
 
 function isRetryableVerificationError(error: unknown): boolean {
@@ -810,6 +931,73 @@ export class NaverConnectionAdapter {
 
     const imageAdapter = new NaverImageAdapter(this.page);
     return imageAdapter.attachImages(imagePaths, layout);
+  }
+
+  async waitForUserInteraction(
+    options: NaverUserInteractionMonitorOptions = {},
+  ): Promise<NaverUserInteractionResult> {
+    const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 10_000, 1), 30_000);
+    const pollIntervalMs = Math.min(
+      Math.max(options.pollIntervalMs ?? 100, 25),
+      500,
+    );
+    const startedAt = Date.now();
+    const armedFrames = new Set<Frame>();
+
+    try {
+      for (const frame of this.page.frames()) {
+        if (await armUserInteractionFrame(frame)) {
+          armedFrames.add(frame);
+        }
+      }
+
+      if (armedFrames.size === 0) {
+        throw new NaverConnectionError(
+          'NAVER_PAGE_UNKNOWN',
+          '현재 Chrome 화면에서 사용자 조작 감지를 시작할 수 없습니다.',
+        );
+      }
+
+      await this.page.bringToFront();
+
+      while (Date.now() - startedAt < timeoutMs) {
+        if (this.page.isClosed()) {
+          throw new Error('Target page has been closed.');
+        }
+
+        for (const frame of this.page.frames()) {
+          if (!armedFrames.has(frame) && await armUserInteractionFrame(frame)) {
+            armedFrames.add(frame);
+          }
+        }
+
+        for (const frame of armedFrames) {
+          const eventType = await readUserInteractionFrame(frame);
+          const interactionType = eventType
+            ? normalizeUserInteractionType(eventType)
+            : null;
+
+          if (interactionType) {
+            return {
+              detected: true,
+              interactionType,
+              waitedMs: Date.now() - startedAt,
+            };
+          }
+        }
+
+        await waitForDelay(pollIntervalMs);
+      }
+
+      return {
+        detected: false,
+        waitedMs: Date.now() - startedAt,
+      };
+    } finally {
+      await Promise.all(
+        [...armedFrames].map((frame) => cleanupUserInteractionFrame(frame)),
+      );
+    }
   }
 
   async bringToFront(): Promise<void> {

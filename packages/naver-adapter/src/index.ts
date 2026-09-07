@@ -84,6 +84,7 @@ export {
   isNaverWriterUrl,
   NaverConnectionAdapter,
   NaverConnectionError,
+  normalizeUserInteractionType,
   normalizeWriterHref,
   parseNaverBlogUrl,
   selectUniqueWriterHref,
@@ -93,4 +94,7 @@ export type {
   NaverConnectionFailureCode,
   NaverConnectionStage,
   NaverConnectionStatus,
+  NaverUserInteractionMonitorOptions,
+  NaverUserInteractionResult,
+  NaverUserInteractionType,
 } from './naver-connection.js';

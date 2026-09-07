@@ -29,6 +29,7 @@ import {
   type NaverStickerCategoryResult,
   type NaverStickerInsertionResult,
   type NaverStickerPosition,
+  type NaverUserInteractionResult,
 } from '@blow/naver-adapter';
 import {
   chromium,
@@ -519,6 +520,18 @@ export class NaverConnectionSession {
         imagePaths,
         layout,
       );
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async waitForUserInteraction(
+    timeoutMs = 10_000,
+  ): Promise<NaverUserInteractionResult> {
+    try {
+      return await this.adapter.waitForUserInteraction({ timeoutMs });
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
         cause: error,

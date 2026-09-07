@@ -23,6 +23,7 @@ import type {
   NaverStickerCategoryResult,
   NaverStickerInsertionResult,
   NaverStickerPosition,
+  NaverUserInteractionResult,
 } from '@blow/naver-adapter';
 
 type NaverStateResponse =
@@ -169,6 +170,19 @@ type NaverImageResponse =
       };
     };
 
+type NaverUserInteractionResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverUserInteractionResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 const ipcChannels = {
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
@@ -187,6 +201,7 @@ const ipcChannels = {
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
+  naverMonitorUserInteraction: 'naver:monitor-user-interaction',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -293,6 +308,8 @@ const blowNaverApi = {
     layout: NaverImageLayout,
   ): Promise<NaverImageResponse> =>
     ipcRenderer.invoke(ipcChannels.naverAttachImages, { imageIds, layout }),
+  monitorUserInteraction: (): Promise<NaverUserInteractionResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverMonitorUserInteraction),
   focus: () => ipcRenderer.invoke(ipcChannels.naverFocus),
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };

@@ -19,6 +19,7 @@ import type {
   NaverQuotePosition,
   NaverQuoteStyleSelection,
   NaverStickerPosition,
+  NaverUserInteractionResult,
 } from '@blow/naver-adapter';
 import {
   MockPocError,
@@ -50,6 +51,7 @@ const ipcChannels = {
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
+  naverMonitorUserInteraction: 'naver:monitor-user-interaction',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -1340,6 +1342,70 @@ function registerNaverIpc(): void {
           error: {
             code: 'IMAGE_UPLOAD_FAILED',
             message: '이미지 첨부를 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverMonitorUserInteraction,
+    async (event): Promise<
+      | { readonly ok: true; readonly result: NaverUserInteractionResult }
+      | {
+          readonly ok: false;
+          readonly error: { readonly code: string; readonly message: string };
+        }
+    > => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        const result = await session.waitForUserInteraction();
+        const appWindow = BrowserWindow.fromWebContents(event.sender);
+
+        if (appWindow && !appWindow.isDestroyed()) {
+          appWindow.show();
+          appWindow.focus();
+        }
+
+        return { ok: true, result };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_CONNECTION_FAILED',
+            message: '사용자 조작 감지를 완료하지 못했습니다. 다시 시도해 주세요.',
           },
         };
       } finally {
