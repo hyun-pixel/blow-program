@@ -16,6 +16,16 @@ export type {
   NaverEditorInputResult,
 } from './naver-editor.js';
 export {
+  NaverDraftSaveAdapter,
+  NaverDraftSaveError,
+} from './naver-draft-save.js';
+export type {
+  NaverDraftSaveFailureCode,
+  NaverDraftSaveResult,
+  NaverDraftSaveSignal,
+  NaverDraftSaveSignalId,
+} from './naver-draft-save.js';
+export {
   NaverDividerAdapter,
   NaverDividerError,
   validateDividerRequest,

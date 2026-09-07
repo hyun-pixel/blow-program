@@ -11,6 +11,7 @@ import type {
   NaverDividerPosition,
   NaverDividerStyleResult,
   NaverDividerStyleSelection,
+  NaverDraftSaveResult,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -102,6 +103,19 @@ type NaverQuoteResponse =
       };
     };
 
+type NaverDraftSaveResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverDraftSaveResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 type NaverStickerCategoryResponse =
   | {
       readonly ok: true;
@@ -168,6 +182,7 @@ const ipcChannels = {
   naverInsertDivider: 'naver:insert-divider',
   naverListQuoteStyles: 'naver:list-quote-styles',
   naverInsertQuote: 'naver:insert-quote',
+  naverSaveDraft: 'naver:save-draft',
   naverListStickerCategories: 'naver:list-sticker-categories',
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
@@ -259,6 +274,8 @@ const blowNaverApi = {
       paragraphNumber,
       position,
     }),
+  saveDraft: (): Promise<NaverDraftSaveResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverSaveDraft),
   insertRandomSticker: (
     paragraphNumber: number,
     position: NaverStickerPosition,

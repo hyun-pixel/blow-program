@@ -68,6 +68,11 @@ interface EditorFields {
   readonly body: Locator;
 }
 
+interface CurrentEditorFields {
+  readonly title: Locator;
+  readonly bodies: readonly Locator[];
+}
+
 function normalizeLineEndings(value: string): string {
   return value
     .replace(/\r\n?/g, '\n')
@@ -194,6 +199,34 @@ async function findUniqueEditable(
   return null;
 }
 
+async function findVisibleEditables(
+  page: Page,
+  selectors: readonly string[],
+): Promise<readonly Locator[]> {
+  for (const selector of selectors) {
+    const candidates: Locator[] = [];
+
+    for (const frame of page.frames()) {
+      const matches = frame.locator(selector);
+      const count = await matches.count();
+
+      for (let index = 0; index < count; index += 1) {
+        const candidate = matches.nth(index);
+
+        if (await candidate.isVisible().catch(() => false)) {
+          candidates.push(candidate);
+        }
+      }
+    }
+
+    if (candidates.length > 0) {
+      return candidates;
+    }
+  }
+
+  return [];
+}
+
 async function findEditorFields(page: Page): Promise<EditorFields | null> {
   const title = await findUniqueEditable(page, '제목', titleSelectors);
   const body = await findUniqueEditable(page, '본문', bodySelectors);
@@ -220,6 +253,31 @@ async function waitForEditorFields(
   throw new NaverEditorError(
     'EDITOR_NOT_READY',
     '네이버 편집기의 제목과 본문 입력 영역을 확인하지 못했습니다. 글쓰기 화면을 확인해 주세요.',
+  );
+}
+
+async function waitForCurrentEditorFields(
+  page: Page,
+  timeoutMs = 15_000,
+): Promise<CurrentEditorFields> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const [title, bodies] = await Promise.all([
+      findUniqueEditable(page, '제목', titleSelectors),
+      findVisibleEditables(page, bodySelectors),
+    ]);
+
+    if (title && bodies.length > 0) {
+      return { title, bodies };
+    }
+
+    await page.waitForTimeout(300);
+  }
+
+  throw new NaverEditorError(
+    'EDITOR_NOT_READY',
+    '네이버 편집기의 현재 제목과 본문을 확인하지 못했습니다.',
   );
 }
 
@@ -339,8 +397,74 @@ async function verifyEnteredContent(
   }
 }
 
+async function readNormalizedCurrentContent(
+  fields: CurrentEditorFields,
+): Promise<{
+  readonly title: string;
+  readonly body: string;
+}> {
+  const [actualTitle, bodyParts] = await Promise.all([
+    readEditableText(fields.title),
+    Promise.all(fields.bodies.map((body) => readEditableText(body))),
+  ]);
+
+  return {
+    title: normalizeEditorTitle(actualTitle),
+    body: bodyParts
+      .flatMap((body) => normalizeEditorParagraphs(body))
+      .join('\n\n'),
+  };
+}
+
+async function verifyCurrentContent(
+  page: Page,
+  fields: CurrentEditorFields,
+  expected: DraftContent,
+): Promise<void> {
+  const expectedBody = expected.paragraphs.join('\n\n');
+  const matchesExpected = (actual: { title: string; body: string }) =>
+    actual.title === expected.title &&
+    (
+      actual.body === expectedBody ||
+      actual.body.replace(/\n/g, '') === expectedBody.replace(/\n/g, '')
+    );
+  const deadline = Date.now() + VERIFY_TIMEOUT_MS;
+  let actual = await readNormalizedCurrentContent(fields);
+
+  while (!matchesExpected(actual) && Date.now() < deadline) {
+    await page.waitForTimeout(VERIFY_INTERVAL_MS);
+    actual = await readNormalizedCurrentContent(fields);
+  }
+
+  if (!matchesExpected(actual)) {
+    throw new NaverEditorError(
+      'EDITOR_INPUT_MISMATCH',
+      '네이버 편집기의 현재 제목 또는 본문이 입력 원문과 다릅니다.',
+    );
+  }
+}
+
 export class NaverEditorAdapter {
   constructor(private readonly page: Page) {}
+
+  async verifyCurrent(input: DraftContent): Promise<void> {
+    const content = validateDraftContent(input);
+
+    try {
+      const fields = await waitForCurrentEditorFields(this.page);
+      await verifyCurrentContent(this.page, fields, content);
+    } catch (error) {
+      if (error instanceof NaverEditorError) {
+        throw error;
+      }
+
+      throw new NaverEditorError(
+        'EDITOR_NOT_READY',
+        '네이버 편집기의 현재 제목과 본문을 확인하지 못했습니다.',
+        { cause: error },
+      );
+    }
+  }
 
   async enterAndVerify(input: DraftContent): Promise<NaverEditorInputResult> {
     const content = validateDraftContent(input);

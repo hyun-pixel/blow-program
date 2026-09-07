@@ -8,6 +8,11 @@ import {
   type NaverEditorInputResult,
 } from './naver-editor.js';
 import {
+  NaverDraftSaveAdapter,
+  NaverDraftSaveError,
+  type NaverDraftSaveResult,
+} from './naver-draft-save.js';
+import {
   NaverDividerAdapter,
   type NaverDividerInsertionResult,
   type NaverDividerPosition,
@@ -762,6 +767,33 @@ export class NaverConnectionAdapter {
       position,
       styleSelection,
     );
+  }
+
+  async saveDraft(
+    profile: NaverBlogProfile,
+    content: DraftContent,
+  ): Promise<NaverDraftSaveResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 임시저장을 시작하지 않았습니다.',
+      );
+    }
+
+    const editor = new NaverEditorAdapter(this.page);
+    await editor.verifyCurrent(content);
+
+    const draftSaveAdapter = new NaverDraftSaveAdapter(this.page);
+    const result = await draftSaveAdapter.saveAndVerify();
+
+    if (!isNaverWriterUrl(result.currentUrl, profile.blogId)) {
+      throw new NaverDraftSaveError(
+        'DRAFT_SAVE_NAVIGATION_UNEXPECTED',
+        '임시저장 후 예상하지 못한 화면으로 이동해 완료로 처리하지 않았습니다. Chrome에서 저장 여부를 확인해 주세요.',
+      );
+    }
+
+    return result;
   }
 
   async attachImages(

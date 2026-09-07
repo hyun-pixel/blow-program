@@ -45,6 +45,7 @@ const ipcChannels = {
   naverInsertDivider: 'naver:insert-divider',
   naverListQuoteStyles: 'naver:list-quote-styles',
   naverInsertQuote: 'naver:insert-quote',
+  naverSaveDraft: 'naver:save-draft',
   naverListStickerCategories: 'naver:list-sticker-categories',
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
@@ -1104,6 +1105,56 @@ function registerNaverIpc(): void {
       }
     },
   );
+
+  ipcMain.handle(ipcChannels.naverSaveDraft, async (event) => {
+    requireTrustedSender(event);
+
+    if (activeRun) {
+      return busyResponse();
+    }
+
+    const session = activeNaverSession;
+
+    if (!session) {
+      return {
+        ok: false,
+        error: {
+          code: 'NAVER_SESSION_NOT_FOUND',
+          message: '전용 Chrome을 먼저 열어 주세요.',
+        },
+      };
+    }
+
+    activeRun = true;
+
+    try {
+      return {
+        ok: true,
+        result: await session.saveDraft(),
+      };
+    } catch (error) {
+      if (error instanceof NaverConnectionRunnerError) {
+        if (error.failure.code === 'BROWSER_CLOSED') {
+          activeNaverSession = null;
+        }
+
+        return {
+          ok: false,
+          error: error.failure,
+        };
+      }
+
+      return {
+        ok: false,
+        error: {
+          code: 'DRAFT_SAVE_UNCONFIRMED',
+          message: '임시저장 완료 상태를 확인하지 못했습니다. Chrome에서 저장 여부를 확인해 주세요.',
+        },
+      };
+    } finally {
+      activeRun = false;
+    }
+  });
 
   ipcMain.handle(ipcChannels.naverSelectImages, async (event) => {
     requireTrustedSender(event);

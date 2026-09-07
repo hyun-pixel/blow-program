@@ -14,6 +14,7 @@ import {
   MousePointerClick,
   PanelsTopLeft,
   Quote,
+  Save,
   ShieldCheck,
   Sticker,
   X,
@@ -30,6 +31,7 @@ import type {
   NaverDividerPosition,
   NaverDividerStyle,
   NaverDividerStyleSelection,
+  NaverDraftSaveResult,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -256,6 +258,8 @@ export function ConnectionScreen() {
   });
   const [inputResult, setInputResult] =
     useState<NaverEditorInputResult | null>(null);
+  const [draftSaveResult, setDraftSaveResult] =
+    useState<NaverDraftSaveResult | null>(null);
   const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
   const [dividerPosition, setDividerPosition] =
     useState<NaverDividerPosition>('after');
@@ -303,6 +307,7 @@ export function ConnectionScreen() {
     | 'sticker'
     | 'quote-styles'
     | 'quote'
+    | 'save-draft'
     | 'select-images'
     | 'images'
     | 'focus'
@@ -380,6 +385,7 @@ export function ConnectionScreen() {
           setQuoteStyles([]);
           setQuoteStyleSelection('random');
           setQuoteResult(null);
+          setDraftSaveResult(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -472,6 +478,7 @@ export function ConnectionScreen() {
       setQuoteStyles([]);
       setQuoteStyleSelection('random');
       setQuoteResult(null);
+      setDraftSaveResult(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -517,6 +524,7 @@ export function ConnectionScreen() {
     setQuoteStyles([]);
     setQuoteStyleSelection('random');
     setQuoteResult(null);
+    setDraftSaveResult(null);
     setError(null);
 
     try {
@@ -612,6 +620,7 @@ export function ConnectionScreen() {
         setQuoteStyles([]);
         setQuoteStyleSelection('random');
         setQuoteResult(null);
+        setDraftSaveResult(null);
       } else {
         setError(response.error);
       }
@@ -704,6 +713,7 @@ export function ConnectionScreen() {
         setQuoteStyles([]);
         setQuoteStyleSelection('random');
         setQuoteResult(null);
+        setDraftSaveResult(null);
       } else {
         setError(response.error);
       }
@@ -738,6 +748,7 @@ export function ConnectionScreen() {
     setQuoteStyles([]);
     setQuoteStyleSelection('random');
     setQuoteResult(null);
+    setDraftSaveResult(null);
     setError(null);
 
     try {
@@ -781,6 +792,7 @@ export function ConnectionScreen() {
     setQuoteStyles([]);
     setQuoteStyleSelection('random');
     setQuoteResult(null);
+    setDraftSaveResult(null);
     setError(null);
 
     try {
@@ -797,6 +809,7 @@ export function ConnectionScreen() {
         setQuoteStyles([]);
         setQuoteStyleSelection('random');
         setQuoteResult(null);
+        setDraftSaveResult(null);
       } else {
         if (response.error.code === 'STICKER_CATEGORY_STALE') {
           setStickerCategories([]);
@@ -830,6 +843,7 @@ export function ConnectionScreen() {
     setQuoteStyles([]);
     setQuoteStyleSelection('random');
     setQuoteResult(null);
+    setDraftSaveResult(null);
     setError(null);
 
     try {
@@ -875,6 +889,7 @@ export function ConnectionScreen() {
 
     setActiveAction('quote');
     setQuoteResult(null);
+    setDraftSaveResult(null);
     setError(null);
 
     try {
@@ -898,6 +913,29 @@ export function ConnectionScreen() {
       setError({
         code: 'QUOTE_INSERT_UNCONFIRMED',
         message: '인용구 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const saveDraft = async (): Promise<void> => {
+    setActiveAction('save-draft');
+    setDraftSaveResult(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.saveDraft();
+
+      if (response.ok) {
+        setDraftSaveResult(response.result);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'DRAFT_SAVE_UNCONFIRMED',
+        message: '임시저장 완료 상태를 확인하지 못했습니다. 자동으로 다시 누르지 않았으니 Chrome에서 저장 여부를 확인해 주세요.',
       });
     } finally {
       setActiveAction(null);
@@ -1029,6 +1067,29 @@ export function ConnectionScreen() {
     selectedImages.length > 0 &&
     selectedImages.length < 2;
   const selectedImageLayoutLabel = getImageLayoutLabel(imageLayout);
+  const draftSaveError = error
+    ? [
+        'DRAFT_SAVE_CONTROL_NOT_FOUND',
+        'DRAFT_SAVE_CONTROL_AMBIGUOUS',
+        'DRAFT_SAVE_CLICK_FAILED',
+        'DRAFT_SAVE_UNCONFIRMED',
+        'DRAFT_SAVE_NAVIGATION_UNEXPECTED',
+      ].includes(error.code) ||
+      (
+        Boolean(inputResult) &&
+        [
+          'CONTENT_INPUT_REQUIRED',
+          'EDITOR_NOT_READY',
+          'EDITOR_FIELD_AMBIGUOUS',
+          'EDITOR_INPUT_MISMATCH',
+        ].includes(error.code)
+      )
+    : false;
+  const draftSaveRetryBlocked = [
+    'DRAFT_SAVE_CLICK_FAILED',
+    'DRAFT_SAVE_UNCONFIRMED',
+    'DRAFT_SAVE_NAVIGATION_UNEXPECTED',
+  ].includes(error?.code ?? '');
   const editorError = error
     ? [
         'INVALID_DRAFT_CONTENT',
@@ -1101,7 +1162,9 @@ export function ConnectionScreen() {
           <XCircle aria-hidden="true" />
           <div>
             <h2>
-              {quoteError
+              {draftSaveError
+                ? '임시저장 상태를 확인해 주세요'
+                : quoteError
                 ? '인용구 상태를 확인해 주세요'
                 : stickerError
                   ? '스티커 상태를 확인해 주세요'
@@ -1118,7 +1181,17 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
-      {quoteResult ? (
+      {draftSaveResult ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>네이버 임시저장을 실행했습니다</h2>
+            <p>
+              저장 버튼을 한 번 조작했습니다. 최종 발행은 실행하지 않았습니다.
+            </p>
+          </div>
+        </section>
+      ) : quoteResult ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
@@ -1512,7 +1585,7 @@ export function ConnectionScreen() {
             <aside className="editor-test-summary" aria-label="입력 테스트 범위">
               <FileText aria-hidden="true" />
               <div>
-                <h3>{inputResult ? '검증 결과' : '이번 단계에서 확인할 내용'}</h3>
+                <h3>{inputResult ? '처리 결과' : '이번 단계에서 확인할 내용'}</h3>
                 {inputResult ? (
                   <dl className="editor-result-values">
                     <div>
@@ -1542,6 +1615,118 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
+      {inputResult ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="draft-save-heading"
+          aria-busy={activeAction === 'save-draft'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="draft-save-heading">네이버 임시저장</h2>
+              <p>
+                제목·본문 입력 직후 사진과 장식 테스트를 건너뛰고 바로 임시저장할 수 있습니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {draftSaveResult
+                ? '임시저장 실행 완료'
+                : activeAction === 'save-draft'
+                  ? '임시저장 실행 중'
+                  : '저장 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  네이버의 저장 버튼은 한 번만 조작하며 자동으로 다시 누르지 않습니다. 최종 발행은 실행하지 않습니다.
+                </p>
+              </div>
+
+              {draftSaveError && error ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>임시저장을 실행하지 못했습니다</strong>
+                    <p>{error.message}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={
+                  isRunning ||
+                  Boolean(draftSaveResult) ||
+                  draftSaveRetryBlocked
+                }
+                onClick={() => void saveDraft()}
+              >
+                {activeAction === 'save-draft' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : draftSaveResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Save aria-hidden="true" />
+                )}
+                {activeAction === 'save-draft'
+                  ? '임시저장 실행 중…'
+                  : draftSaveResult
+                    ? '임시저장 실행 완료'
+                    : '임시저장 실행'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="네이버 임시저장 처리 범위"
+            >
+              <Save aria-hidden="true" />
+              <div>
+                <h3>
+                  {draftSaveResult
+                    ? '처리 결과'
+                    : '이번 단계에서 확인할 내용'}
+                </h3>
+                {draftSaveResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>저장 결과</dt>
+                      <dd>임시저장 실행 완료</dd>
+                    </div>
+
+                    <div>
+                      <dt>처리 기록</dt>
+                      <dd>
+                        {draftSaveResult.signals
+                          .map((signal) => signal.label)
+                          .join(' · ')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>최종 발행</dt>
+                      <dd>실행하지 않음</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>사진·서식 단계를 건너뛰고 바로 실행 가능</li>
+                    <li>제목과 본문이 입력 원문과 같은지 확인</li>
+                    <li>표시된 저장 버튼이 정확히 하나인지 확인</li>
+                    <li>저장 버튼 조작이 오류 없이 완료됐는지 확인</li>
+                    <li>네이버 응답과 개수 변화는 참고 정보로 수집</li>
+                    <li>최종 발행 기능은 탐색하거나 조작하지 않음</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
       {inputResult ? (
         <section
           className="image-test-panel"
@@ -1712,7 +1897,7 @@ export function ConnectionScreen() {
             <aside className="image-test-summary" aria-label="이미지 첨부 테스트 범위">
               <Images aria-hidden="true" />
               <div>
-                <h3>{imageResult ? '검증 결과' : '이번 단계에서 확인할 내용'}</h3>
+                <h3>{imageResult ? '처리 결과' : '이번 단계에서 확인할 내용'}</h3>
                 {imageResult ? (
                   <dl className="editor-result-values">
                     <div>
@@ -1964,7 +2149,7 @@ export function ConnectionScreen() {
               <Minus aria-hidden="true" />
               <div>
                 <h3>
-                  {dividerResult ? '검증 결과' : '이번 단계에서 확인할 내용'}
+                  {dividerResult ? '처리 결과' : '이번 단계에서 확인할 내용'}
                 </h3>
                 {dividerResult ? (
                   <dl className="editor-result-values">
@@ -2219,7 +2404,7 @@ export function ConnectionScreen() {
               <Sticker aria-hidden="true" />
               <div>
                 <h3>
-                  {stickerResult ? '검증 결과' : '이번 단계에서 확인할 내용'}
+                  {stickerResult ? '처리 결과' : '이번 단계에서 확인할 내용'}
                 </h3>
                 {stickerResult ? (
                   <dl className="editor-result-values">
@@ -2302,6 +2487,7 @@ export function ConnectionScreen() {
                       setQuoteStyles([]);
                       setQuoteStyleSelection('random');
                       setQuoteResult(null);
+                      setDraftSaveResult(null);
                       setError(null);
                     }}
                   >
@@ -2351,6 +2537,7 @@ export function ConnectionScreen() {
                             setQuoteStyles([]);
                             setQuoteStyleSelection('random');
                             setQuoteResult(null);
+                            setDraftSaveResult(null);
                             setError(null);
                           }}
                         />
@@ -2480,7 +2667,7 @@ export function ConnectionScreen() {
               <Quote aria-hidden="true" />
               <div>
                 <h3>
-                  {quoteResult ? '검증 결과' : '이번 단계에서 확인할 내용'}
+                  {quoteResult ? '처리 결과' : '이번 단계에서 확인할 내용'}
                 </h3>
                 {quoteResult ? (
                   <dl className="editor-result-values">

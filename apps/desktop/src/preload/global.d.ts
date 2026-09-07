@@ -7,6 +7,7 @@ import type {
   NaverDividerPosition,
   NaverDividerStyleResult,
   NaverDividerStyleSelection,
+  NaverDraftSaveResult,
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
@@ -71,6 +72,11 @@ interface NaverQuoteStyleSuccessResponse {
 interface NaverQuoteSuccessResponse {
   readonly ok: true;
   readonly result: NaverQuoteInsertionResult;
+}
+
+interface NaverDraftSaveSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverDraftSaveResult;
 }
 
 interface NaverStickerCategorySuccessResponse {
@@ -139,6 +145,9 @@ declare global {
         paragraphNumber: number,
         position: NaverStickerPosition,
       ): Promise<NaverErrorResponse | NaverStickerCategorySuccessResponse>;
+      saveDraft(): Promise<
+        NaverErrorResponse | NaverDraftSaveSuccessResponse
+      >;
       insertRandomSticker(
         paragraphNumber: number,
         position: NaverStickerPosition,

@@ -268,3 +268,54 @@ describe('네이버 편집기 제목·본문 입력', () => {
     });
   });
 });
+describe('네이버 편집기 임시저장 전 확인', () => {
+  it('현재 제목과 본문이 입력 원문과 같은지 다시 읽고 값을 변경하지 않는다', async () => {
+    const title = createEditable('[BLOW 입력 테스트] 제목 확인');
+    const body = createEditable(
+      '첫 번째 문단입니다.\n\n두 번째 문단입니다.',
+    );
+    const page = createEditorPage([title], [body]);
+    const adapter = new NaverEditorAdapter(page);
+
+    await expect(
+      adapter.verifyCurrent({
+        title: '[BLOW 입력 테스트] 제목 확인',
+        paragraphs: [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+        ],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(title.locator.fill).not.toHaveBeenCalled();
+    expect(body.locator.fill).not.toHaveBeenCalled();
+    expect(page.keyboard.insertText).not.toHaveBeenCalled();
+  });
+
+  it('사진과 장식 사이에서 나뉜 본문 구역을 순서대로 합쳐 확인한다', async () => {
+    const title = createEditable('[BLOW 입력 테스트] 제목 확인');
+    const firstBody = createEditable('첫 번째 문단입니다.');
+    const secondBody = createEditable(
+      '두 번째 문단입니다.\n\n세 번째 문단입니다.',
+    );
+    const page = createEditorPage(
+      [title],
+      [firstBody, secondBody],
+    );
+    const adapter = new NaverEditorAdapter(page);
+
+    await expect(
+      adapter.verifyCurrent({
+        title: '[BLOW 입력 테스트] 제목 확인',
+        paragraphs: [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(firstBody.locator.fill).not.toHaveBeenCalled();
+    expect(secondBody.locator.fill).not.toHaveBeenCalled();
+  });
+});

@@ -4,6 +4,7 @@ import {
   NaverConnectionAdapter,
   NaverConnectionError,
   NaverDividerError,
+  NaverDraftSaveError,
   NaverEditorError,
   NaverImageError,
   NaverQuoteError,
@@ -17,6 +18,7 @@ import {
   type NaverDividerPosition,
   type NaverDividerStyleResult,
   type NaverDividerStyleSelection,
+  type NaverDraftSaveResult,
   type NaverEditorInputResult,
   type NaverImageAttachmentResult,
   type NaverImageLayout,
@@ -54,6 +56,11 @@ export type NaverRunnerFailureCode =
   | 'EDITOR_FIELD_AMBIGUOUS'
   | 'EDITOR_NOT_BLANK'
   | 'EDITOR_INPUT_MISMATCH'
+  | 'DRAFT_SAVE_CONTROL_NOT_FOUND'
+  | 'DRAFT_SAVE_CONTROL_AMBIGUOUS'
+  | 'DRAFT_SAVE_CLICK_FAILED'
+  | 'DRAFT_SAVE_UNCONFIRMED'
+  | 'DRAFT_SAVE_NAVIGATION_UNEXPECTED'
   | 'INVALID_DIVIDER_REQUEST'
   | 'DIVIDER_ANCHOR_NOT_FOUND'
   | 'DIVIDER_ANCHOR_MISMATCH'
@@ -126,6 +133,7 @@ function classifyFailure(error: unknown): NaverRunnerFailure {
   if (
     error instanceof NaverConnectionError ||
     error instanceof NaverDividerError ||
+    error instanceof NaverDraftSaveError ||
     error instanceof NaverEditorError ||
     error instanceof NaverImageError ||
     error instanceof NaverQuoteError ||
@@ -468,6 +476,25 @@ export class NaverConnectionSession {
         position,
         styleSelection,
       );
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async saveDraft(): Promise<NaverDraftSaveResult> {
+    const content = this.enteredContent;
+
+    if (!content) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.saveDraft(this.profile, content);
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
         cause: error,
