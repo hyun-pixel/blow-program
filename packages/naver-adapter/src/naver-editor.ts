@@ -41,6 +41,7 @@ export type NaverEditorFailureCode =
   | 'EDITOR_NOT_READY'
   | 'EDITOR_FIELD_AMBIGUOUS'
   | 'EDITOR_NOT_BLANK'
+  | 'EDITOR_INPUT_INTERRUPTED'
   | 'EDITOR_INPUT_MISMATCH';
 
 export interface NaverEditorInputResult {
@@ -60,6 +61,15 @@ export class NaverEditorError extends Error {
   ) {
     super(message, options);
     this.name = 'NaverEditorError';
+  }
+}
+
+function throwIfInputInterrupted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new NaverEditorError(
+      'EDITOR_INPUT_INTERRUPTED',
+      '사용자 조작을 감지해 제목과 본문 입력을 중단했습니다.',
+    );
   }
 }
 
@@ -236,12 +246,15 @@ async function findEditorFields(page: Page): Promise<EditorFields | null> {
 
 async function waitForEditorFields(
   page: Page,
+  signal?: AbortSignal,
   timeoutMs = 15_000,
 ): Promise<EditorFields> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
+    throwIfInputInterrupted(signal);
     const fields = await findEditorFields(page);
+    throwIfInputInterrupted(signal);
 
     if (fields) {
       return fields;
@@ -250,6 +263,7 @@ async function waitForEditorFields(
     await page.waitForTimeout(300);
   }
 
+  throwIfInputInterrupted(signal);
   throw new NaverEditorError(
     'EDITOR_NOT_READY',
     '네이버 편집기의 제목과 본문 입력 영역을 확인하지 못했습니다. 글쓰기 화면을 확인해 주세요.',
@@ -301,10 +315,14 @@ async function requireBlankDraft(fields: EditorFields): Promise<void> {
 async function insertTextSlowly(
   page: Page,
   value: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   for (const character of value) {
+    throwIfInputInterrupted(signal);
     await page.keyboard.insertText(character);
+    throwIfInputInterrupted(signal);
     await page.waitForTimeout(TYPING_DELAY_MS);
+    throwIfInputInterrupted(signal);
   }
 }
 
@@ -312,36 +330,53 @@ async function enterTitle(
   page: Page,
   locator: Locator,
   title: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  if (await locator.isEditable().catch(() => false)) {
+  throwIfInputInterrupted(signal);
+  const isEditable = await locator.isEditable().catch(() => false);
+  throwIfInputInterrupted(signal);
+
+  if (isEditable) {
     await locator.fill(title);
+    throwIfInputInterrupted(signal);
     return;
   }
 
   await locator.click();
-  await insertTextSlowly(page, title);
+  throwIfInputInterrupted(signal);
+  await insertTextSlowly(page, title, signal);
 }
 
 async function enterParagraphs(
   page: Page,
   locator: Locator,
   paragraphs: readonly string[],
+  signal?: AbortSignal,
 ): Promise<void> {
-  if (await locator.isEditable().catch(() => false)) {
+  throwIfInputInterrupted(signal);
+  const isEditable = await locator.isEditable().catch(() => false);
+  throwIfInputInterrupted(signal);
+
+  if (isEditable) {
     await locator.fill(paragraphs.join('\n\n'));
+    throwIfInputInterrupted(signal);
     return;
   }
 
   await locator.click();
+  throwIfInputInterrupted(signal);
 
   for (let index = 0; index < paragraphs.length; index += 1) {
-    await insertTextSlowly(page, paragraphs[index]!);
+    await insertTextSlowly(page, paragraphs[index]!, signal);
 
     if (index < paragraphs.length - 1) {
+      throwIfInputInterrupted(signal);
       await page.keyboard.press('Enter');
       await page.waitForTimeout(FIELD_SETTLE_DELAY_MS);
+      throwIfInputInterrupted(signal);
       await page.keyboard.press('Enter');
       await page.waitForTimeout(FIELD_SETTLE_DELAY_MS);
+      throwIfInputInterrupted(signal);
     }
   }
 }
@@ -367,6 +402,7 @@ async function verifyEnteredContent(
   page: Page,
   fields: EditorFields,
   expected: DraftContent,
+  signal?: AbortSignal,
 ): Promise<void> {
   const expectedBody = expected.paragraphs.join('\n\n');
   const matchesExpected = (actual: { title: string; body: string }) =>
@@ -374,11 +410,15 @@ async function verifyEnteredContent(
     (actual.body === expectedBody ||
       actual.body.replace(/\n/g, '') === expectedBody.replace(/\n/g, ''));
   const deadline = Date.now() + VERIFY_TIMEOUT_MS;
+  throwIfInputInterrupted(signal);
   let actual = await readNormalizedContent(fields);
+  throwIfInputInterrupted(signal);
 
   while (!matchesExpected(actual) && Date.now() < deadline) {
     await page.waitForTimeout(VERIFY_INTERVAL_MS);
+    throwIfInputInterrupted(signal);
     actual = await readNormalizedContent(fields);
+    throwIfInputInterrupted(signal);
   }
 
   if (!matchesExpected(actual)) {
@@ -466,17 +506,24 @@ export class NaverEditorAdapter {
     }
   }
 
-  async enterAndVerify(input: DraftContent): Promise<NaverEditorInputResult> {
+  async enterAndVerify(
+    input: DraftContent,
+    signal?: AbortSignal,
+  ): Promise<NaverEditorInputResult> {
     const content = validateDraftContent(input);
 
     try {
-      const fields = await waitForEditorFields(this.page);
+      throwIfInputInterrupted(signal);
+      const fields = await waitForEditorFields(this.page, signal);
       await requireBlankDraft(fields);
-      await enterTitle(this.page, fields.title, content.title);
+      throwIfInputInterrupted(signal);
+      await enterTitle(this.page, fields.title, content.title, signal);
       await this.page.waitForTimeout(FIELD_SETTLE_DELAY_MS);
-      await enterParagraphs(this.page, fields.body, content.paragraphs);
+      throwIfInputInterrupted(signal);
+      await enterParagraphs(this.page, fields.body, content.paragraphs, signal);
       await this.page.waitForTimeout(FIELD_SETTLE_DELAY_MS);
-      await verifyEnteredContent(this.page, fields, content);
+      throwIfInputInterrupted(signal);
+      await verifyEnteredContent(this.page, fields, content, signal);
 
       const body = content.paragraphs.join('\n\n');
 

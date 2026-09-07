@@ -728,6 +728,7 @@ export class NaverConnectionAdapter {
   async enterContent(
     profile: NaverBlogProfile,
     content: DraftContent,
+    signal?: AbortSignal,
   ): Promise<NaverEditorInputResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -737,7 +738,7 @@ export class NaverConnectionAdapter {
     }
 
     const editor = new NaverEditorAdapter(this.page);
-    return editor.enterAndVerify(content);
+    return editor.enterAndVerify(content, signal);
   }
 
   async listDividerStyles(

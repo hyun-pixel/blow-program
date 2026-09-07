@@ -208,6 +208,33 @@ describe('네이버 편집기 제목·본문 입력', () => {
     expect(page.waitForTimeout).toHaveBeenCalledWith(120);
   });
 
+  it('중단 신호를 받으면 다음 글자를 입력하지 않는다', async () => {
+    const title = createEditable('', false);
+    const body = createEditable('', false);
+    const page = createEditorPage([title], [body]);
+    const controller = new AbortController();
+    vi.mocked(page.waitForTimeout).mockImplementation(async (timeout) => {
+      if (timeout === 12) {
+        controller.abort();
+      }
+    });
+    const adapter = new NaverEditorAdapter(page);
+
+    await expect(adapter.enterAndVerify(
+      {
+        title: '중단 확인 제목',
+        paragraphs: ['입력되면 안 되는 본문'],
+      },
+      controller.signal,
+    )).rejects.toMatchObject({
+      code: 'EDITOR_INPUT_INTERRUPTED',
+    });
+
+    expect(page.keyboard.insertText).toHaveBeenCalledTimes(1);
+    expect(title.read()).toBe('중');
+    expect(body.locator.click).not.toHaveBeenCalled();
+  });
+
   it('네이버가 문단 줄바꿈을 글자값에서 생략해도 실제 문자가 같으면 성공한다', async () => {
     const title = createEditable();
     const body = createEditable('', false, (value) => value.replace(/\n/g, ''));

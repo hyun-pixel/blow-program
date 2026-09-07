@@ -49,6 +49,7 @@ export type NaverRunnerFailureCode =
   | 'INVALID_BLOG_URL'
   | 'LOGIN_WAIT_TIMEOUT'
   | 'NAVER_PAGE_UNKNOWN'
+  | 'USER_INTERACTION_DETECTED'
   | 'WRITER_LINK_NOT_FOUND'
   | 'WRITER_LINK_AMBIGUOUS'
   | 'WRITER_NOT_READY'
@@ -56,6 +57,7 @@ export type NaverRunnerFailureCode =
   | 'EDITOR_NOT_READY'
   | 'EDITOR_FIELD_AMBIGUOUS'
   | 'EDITOR_NOT_BLANK'
+  | 'EDITOR_INPUT_INTERRUPTED'
   | 'EDITOR_INPUT_MISMATCH'
   | 'DRAFT_SAVE_CONTROL_NOT_FOUND'
   | 'DRAFT_SAVE_CONTROL_AMBIGUOUS'
@@ -273,12 +275,16 @@ export class NaverConnectionSession {
     }
   }
 
-  async enterContent(content: DraftContent): Promise<NaverEditorInputResult> {
+  async enterContent(
+    content: DraftContent,
+    signal?: AbortSignal,
+  ): Promise<NaverEditorInputResult> {
     try {
       const normalizedContent = validateDraftContent(content);
       const result = await this.adapter.enterContent(
         this.profile,
         normalizedContent,
+        signal,
       );
       this.enteredContent = normalizedContent;
       return result;

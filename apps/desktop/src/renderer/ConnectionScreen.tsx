@@ -348,7 +348,9 @@ export function ConnectionScreen() {
   const [isStopping, setIsStopping] = useState(false);
   const [stopNotice, setStopNotice] = useState(false);
 
-  const isUiBusy = activeAction !== null || isStopping;
+  const isActivelyRunning = activeAction !== null || isStopping;
+  const isInteractionPaused = error?.code === 'USER_INTERACTION_DETECTED';
+  const isUiBusy = isActivelyRunning || isInteractionPaused;
   const isAutoChecking =
     browserOpen &&
     !error &&
@@ -1296,6 +1298,7 @@ export function ConnectionScreen() {
         'EDITOR_NOT_READY',
         'EDITOR_FIELD_AMBIGUOUS',
         'EDITOR_NOT_BLANK',
+        'EDITOR_INPUT_INTERRUPTED',
         'EDITOR_INPUT_MISMATCH',
       ].includes(error.code)
     : false;
@@ -1309,13 +1312,13 @@ export function ConnectionScreen() {
             등록 블로그를 연결한 뒤 네이버 편집기에 제목, 본문, 이미지와 서식을 안전하게 입력합니다.
           </p>
         </div>
-        {browserOpen || isUiBusy ? (
+        {browserOpen || isActivelyRunning ? (
           <div className="page-head-actions">
             {browserOpen ? (
               <button
                 className="button secondary"
                 type="button"
-                disabled={isUiBusy}
+                disabled={isActivelyRunning}
                 onClick={() => void focusChrome()}
               >
                 <ExternalLink aria-hidden="true" />
@@ -1388,7 +1391,9 @@ export function ConnectionScreen() {
           <XCircle aria-hidden="true" />
           <div>
             <h2>
-              {draftSaveError
+              {isInteractionPaused
+                ? '자동 입력을 안전하게 멈췄습니다'
+                : draftSaveError
                 ? '임시저장 상태를 확인해 주세요'
                 : quoteError
                 ? '인용구 상태를 확인해 주세요'
@@ -1894,8 +1899,7 @@ export function ConnectionScreen() {
               <div className="editor-input-note">
                 <ShieldCheck aria-hidden="true" />
                 <p>
-                  BLOW는 임시저장과 최종 발행을 누르지 않습니다. 입력값은 디스크에 저장하지 않지만,
-                  네이버 편집기가 자동 복구용 내용을 남길 수 있습니다.
+                  입력 버튼을 누르면 2초 동안 안전 감시를 준비합니다. 자동 입력이 끝나기 전에 BLOW 화면을 벗어나면 작업을 멈춥니다. 입력값은 디스크에 저장하지 않지만, 네이버 편집기가 자동 복구용 내용을 남길 수 있습니다.
                 </p>
               </div>
 
