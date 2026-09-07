@@ -13,7 +13,9 @@ import {
   NaverQuoteAdapter,
   NaverQuoteError,
   type NaverQuotePosition,
+  type NaverQuoteStyleId,
   validateQuoteRequest,
+  validateQuoteStyleSelection,
 } from '../src/naver-quote.js';
 
 interface QuotePageOptions {
@@ -23,7 +25,19 @@ interface QuotePageOptions {
   readonly controlVisibleAfterCaret?: boolean;
   readonly insertQuote?: boolean;
   readonly verifyPosition?: boolean;
+  readonly styleIds?: readonly NaverQuoteStyleId[];
+  readonly styleMenuControlCount?: number;
+  readonly insertedStyleOverride?: NaverQuoteStyleId;
 }
+
+const allQuoteStyleIds = [
+  'default',
+  'quotation_line',
+  'quotation_bubble',
+  'quotation_underline',
+  'quotation_postit',
+  'quotation_corner',
+] as const;
 
 function createCollection(locators: readonly Locator[]) {
   return {
@@ -35,6 +49,11 @@ function createCollection(locators: readonly Locator[]) {
 function createQuotePage(options: QuotePageOptions = {}): {
   readonly page: Page;
   readonly controlClick: ReturnType<typeof vi.fn>;
+  readonly styleMenuClick: ReturnType<typeof vi.fn>;
+  readonly styleOptionClicks: ReadonlyMap<
+    NaverQuoteStyleId,
+    ReturnType<typeof vi.fn>
+  >;
 } {
   const paragraphTexts = options.paragraphs ?? [
     '첫 번째 문단입니다.',
@@ -42,12 +61,16 @@ function createQuotePage(options: QuotePageOptions = {}): {
     '세 번째 문단입니다.',
   ];
   const controlCount = options.controlCount ?? 1;
+  const styleIds = options.styleIds ?? allQuoteStyleIds;
+  const styleMenuControlCount = options.styleMenuControlCount ?? 1;
   const shouldInsert = options.insertQuote ?? true;
   const shouldVerifyPosition = options.verifyPosition ?? true;
   let quoteCount = 0;
   const quoteGaps: number[] = [];
+  const insertedStyles: NaverQuoteStyleId[] = [];
   let pendingParagraphIndex: number | null = null;
   let pendingPosition: NaverQuotePosition | null = null;
+  let styleMenuOpen = false;
 
   const paragraphs = paragraphTexts.map((text, paragraphIndex) => ({
     boundingBox: vi.fn().mockResolvedValue({
@@ -64,6 +87,7 @@ function createQuotePage(options: QuotePageOptions = {}): {
       if (argument === 'before' || argument === 'after') {
         pendingParagraphIndex = paragraphIndex;
         pendingPosition = argument;
+        styleMenuOpen = false;
         return true;
       }
 
@@ -76,7 +100,9 @@ function createQuotePage(options: QuotePageOptions = {}): {
     isVisible: vi.fn().mockResolvedValue(true),
   } as unknown as Locator));
 
-  const controlClick = vi.fn(async () => {
+  const insertAtPendingPosition = (
+    requestedStyle: NaverQuoteStyleId,
+  ): void => {
     if (
       !shouldInsert ||
       pendingParagraphIndex === null ||
@@ -86,6 +112,9 @@ function createQuotePage(options: QuotePageOptions = {}): {
     }
 
     quoteCount += 1;
+    insertedStyles.push(
+      options.insertedStyleOverride ?? requestedStyle,
+    );
     const insertedPosition = shouldVerifyPosition
       ? pendingPosition
       : pendingPosition === 'before'
@@ -94,8 +123,12 @@ function createQuotePage(options: QuotePageOptions = {}): {
     quoteGaps.push(
       pendingParagraphIndex + (insertedPosition === 'after' ? 1 : 0),
     );
+  };
+
+  const controlClick = vi.fn(async () => {
+    insertAtPendingPosition('default');
   });
-  const controls = Array.from({ length: controlCount }, () => ({
+  const mainControls = Array.from({ length: controlCount }, () => ({
     click: controlClick,
     evaluate: vi.fn().mockResolvedValue({
       label: options.controlLabel ?? '인용구',
@@ -105,6 +138,45 @@ function createQuotePage(options: QuotePageOptions = {}): {
       options.controlVisibleAfterCaret ? pendingPosition !== null : true,
     ),
   } as unknown as Locator));
+
+  const styleMenuClick = vi.fn(async () => {
+    styleMenuOpen = true;
+  });
+  const styleMenuControls = Array.from(
+    { length: styleMenuControlCount },
+    () => ({
+      click: styleMenuClick,
+      evaluate: vi.fn().mockResolvedValue({
+        label: '인용구 선택',
+        identity: 'se-toolbar-select-button se-select-option-quotation',
+      }),
+      isVisible: vi.fn().mockResolvedValue(true),
+    } as unknown as Locator),
+  );
+
+  const styleOptionClicks = new Map<
+    NaverQuoteStyleId,
+    ReturnType<typeof vi.fn>
+  >();
+  const styleOptions = styleIds.map((styleId) => {
+    const click = vi.fn(async () => {
+      insertAtPendingPosition(styleId);
+      styleMenuOpen = false;
+    });
+    styleOptionClicks.set(styleId, click);
+
+    return {
+      click,
+      evaluate: vi.fn().mockResolvedValue({
+        label: '인용구 ' + (allQuoteStyleIds.indexOf(styleId) + 1),
+        identity:
+          'se-toolbar-option-insert-quotation-' +
+          styleId +
+          '-button',
+      }),
+      isVisible: vi.fn(async () => styleMenuOpen),
+    } as unknown as Locator;
+  });
   const emptyCollection = createCollection([]);
 
   const frame = {
@@ -114,13 +186,28 @@ function createQuotePage(options: QuotePageOptions = {}): {
       }
 
       if (selector === 'button, [role="button"]') {
-        return createCollection(controls);
+        return createCollection([
+          ...mainControls,
+          ...styleMenuControls,
+        ]);
+      }
+
+      if (
+        selector.includes(
+          'se-toolbar-option-insert-quotation-',
+        )
+      ) {
+        return createCollection(styleOptions);
       }
 
       if (selector.includes('.se-component.se-quotation')) {
         return {
           count: vi.fn(async () => quoteCount),
-          nth: vi.fn(() => ({
+          nth: vi.fn((index: number) => ({
+            evaluate: vi.fn(async (
+              _callback: unknown,
+              expectedClass: string,
+            ) => expectedClass === 'se-l-' + insertedStyles[index]),
             isVisible: vi.fn().mockResolvedValue(true),
           } as unknown as Locator)),
         };
@@ -141,9 +228,13 @@ function createQuotePage(options: QuotePageOptions = {}): {
     waitForTimeout: vi.fn().mockResolvedValue(undefined),
   } as unknown as Page;
 
-  return { page, controlClick };
+  return {
+    page,
+    controlClick,
+    styleMenuClick,
+    styleOptionClicks,
+  };
 }
-
 describe('네이버 인용구 요청 검사', () => {
   it('문단 번호와 앞·뒤 위치를 검사한다', () => {
     expect(
@@ -159,6 +250,163 @@ describe('네이버 인용구 요청 검사', () => {
     ).toThrowError(
       expect.objectContaining({ code: 'INVALID_QUOTE_REQUEST' }),
     );
+  });
+
+  it('무작위와 6종 디자인 외의 값은 거부한다', () => {
+    expect(validateQuoteStyleSelection('random')).toBe('random');
+    expect(validateQuoteStyleSelection('quotation_corner')).toBe(
+      'quotation_corner',
+    );
+    expect(() =>
+      validateQuoteStyleSelection('quotation_unknown'),
+    ).toThrowError(
+      expect.objectContaining({ code: 'INVALID_QUOTE_REQUEST' }),
+    );
+  });
+});
+
+describe('네이버 인용구 디자인', () => {
+  it('현재 편집기에 표시된 6종 디자인을 순서대로 불러온다', async () => {
+    const {
+      page,
+      controlClick,
+      styleMenuClick,
+    } = createQuotePage();
+    const adapter = new NaverQuoteAdapter(page);
+
+    await expect(
+      adapter.listQuoteStyles(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        2,
+        'after',
+      ),
+    ).resolves.toEqual({
+      stage: 'QUOTE_STYLES_READY',
+      message: '전용 Chrome에 표시된 인용구 디자인을 불러왔습니다.',
+      currentUrl:
+        'https://blog.naver.com/green_fork?Redirect=Write&categoryNo=1',
+      paragraphNumber: 2,
+      position: 'after',
+      styles: allQuoteStyleIds.map((id, index) => ({
+        id,
+        label: '인용구 ' + (index + 1),
+      })),
+    });
+    expect(styleMenuClick).toHaveBeenCalledOnce();
+    expect(controlClick).not.toHaveBeenCalled();
+  });
+
+  it('사용자가 고른 한 가지 디자인을 삽입하고 적용 결과를 검증한다', async () => {
+    const {
+      page,
+      controlClick,
+      styleOptionClicks,
+    } = createQuotePage();
+    const adapter = new NaverQuoteAdapter(page);
+
+    await expect(
+      adapter.insertQuote(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        1,
+        'before',
+        'quotation_postit',
+      ),
+    ).resolves.toMatchObject({
+      stage: 'QUOTE_VERIFIED',
+      paragraphNumber: 1,
+      position: 'before',
+      quoteCount: 1,
+      styleId: 'quotation_postit',
+      styleLabel: '인용구 5',
+    });
+    expect(
+      styleOptionClicks.get('quotation_postit'),
+    ).toHaveBeenCalledOnce();
+    expect(controlClick).not.toHaveBeenCalled();
+  });
+
+  it('무작위 선택은 현재 보이는 디자인 중 정확히 하나만 고른다', async () => {
+    const {
+      page,
+      styleOptionClicks,
+    } = createQuotePage();
+    const adapter = new NaverQuoteAdapter(page, () => 0.999_999);
+
+    await expect(
+      adapter.insertQuote(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        3,
+        'after',
+        'random',
+      ),
+    ).resolves.toMatchObject({
+      stage: 'QUOTE_VERIFIED',
+      styleId: 'quotation_corner',
+      styleLabel: '인용구 6',
+    });
+    expect(
+      styleOptionClicks.get('quotation_corner'),
+    ).toHaveBeenCalledOnce();
+  });
+
+  it('선택한 디자인이 더 이상 보이지 않으면 삽입하지 않는다', async () => {
+    const {
+      page,
+      controlClick,
+    } = createQuotePage({
+      styleIds: ['default', 'quotation_line'],
+    });
+    const adapter = new NaverQuoteAdapter(page);
+
+    await expect(
+      adapter.insertQuote(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        1,
+        'after',
+        'quotation_corner',
+      ),
+    ).rejects.toMatchObject({
+      code: 'QUOTE_STYLE_STALE',
+    });
+    expect(controlClick).not.toHaveBeenCalled();
+  });
+
+  it('클릭 뒤 다른 디자인이 적용되면 성공으로 처리하지 않는다', async () => {
+    const { page } = createQuotePage({
+      insertedStyleOverride: 'quotation_line',
+    });
+    const adapter = new NaverQuoteAdapter(page);
+
+    await expect(
+      adapter.insertQuote(
+        [
+          '첫 번째 문단입니다.',
+          '두 번째 문단입니다.',
+          '세 번째 문단입니다.',
+        ],
+        2,
+        'after',
+        'quotation_postit',
+      ),
+    ).rejects.toMatchObject({
+      code: 'QUOTE_STYLE_MISMATCH',
+    });
   });
 });
 

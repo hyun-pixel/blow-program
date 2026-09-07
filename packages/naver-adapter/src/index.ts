@@ -45,11 +45,16 @@ export {
   NaverQuoteAdapter,
   NaverQuoteError,
   validateQuoteRequest,
+  validateQuoteStyleSelection,
 } from './naver-quote.js';
 export type {
   NaverQuoteFailureCode,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
+  NaverQuoteStyle,
+  NaverQuoteStyleId,
+  NaverQuoteStyleResult,
+  NaverQuoteStyleSelection,
 } from './naver-quote.js';
 export {
   NaverStickerAdapter,

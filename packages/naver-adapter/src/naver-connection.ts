@@ -23,6 +23,8 @@ import {
   NaverQuoteAdapter,
   type NaverQuoteInsertionResult,
   type NaverQuotePosition,
+  type NaverQuoteStyleResult,
+  type NaverQuoteStyleSelection,
 } from './naver-quote.js';
 import {
   NaverStickerAdapter,
@@ -718,11 +720,33 @@ export class NaverConnectionAdapter {
     );
   }
 
-  async insertDefaultQuote(
+  async listQuoteStyles(
     profile: NaverBlogProfile,
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverQuotePosition,
+  ): Promise<NaverQuoteStyleResult> {
+    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '네이버 글쓰기 화면이 아니어서 인용구 디자인 확인을 시작하지 않았습니다.',
+      );
+    }
+
+    const quoteAdapter = new NaverQuoteAdapter(this.page);
+    return quoteAdapter.listQuoteStyles(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+  }
+
+  async insertQuote(
+    profile: NaverBlogProfile,
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverQuotePosition,
+    styleSelection?: NaverQuoteStyleSelection,
   ): Promise<NaverQuoteInsertionResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -732,10 +756,11 @@ export class NaverConnectionAdapter {
     }
 
     const quoteAdapter = new NaverQuoteAdapter(this.page);
-    return quoteAdapter.insertDefaultQuote(
+    return quoteAdapter.insertQuote(
       expectedParagraphs,
       paragraphNumber,
       position,
+      styleSelection,
     );
   }
 

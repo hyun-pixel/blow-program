@@ -13,6 +13,8 @@ import type {
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
+  NaverQuoteStyleResult,
+  NaverQuoteStyleSelection,
   NaverStickerCategoryResult,
   NaverStickerInsertionResult,
   NaverStickerPosition,
@@ -59,6 +61,11 @@ interface NaverDividerStyleSuccessResponse {
 interface NaverDividerSuccessResponse {
   readonly ok: true;
   readonly result: NaverDividerInsertionResult;
+}
+
+interface NaverQuoteStyleSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverQuoteStyleResult;
 }
 
 interface NaverQuoteSuccessResponse {
@@ -119,9 +126,14 @@ declare global {
         position: NaverDividerPosition,
         styleSelection?: NaverDividerStyleSelection,
       ): Promise<NaverErrorResponse | NaverDividerSuccessResponse>;
-      insertDefaultQuote(
+      listQuoteStyles(
         paragraphNumber: number,
         position: NaverQuotePosition,
+      ): Promise<NaverErrorResponse | NaverQuoteStyleSuccessResponse>;
+      insertQuote(
+        paragraphNumber: number,
+        position: NaverQuotePosition,
+        styleSelection?: NaverQuoteStyleSelection,
       ): Promise<NaverErrorResponse | NaverQuoteSuccessResponse>;
       listStickerCategories(
         paragraphNumber: number,

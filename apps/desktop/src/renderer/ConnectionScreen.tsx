@@ -36,6 +36,8 @@ import type {
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
+  NaverQuoteStyle,
+  NaverQuoteStyleSelection,
   NaverStickerCategory,
   NaverStickerInsertionResult,
   NaverStickerPosition,
@@ -276,6 +278,11 @@ export function ConnectionScreen() {
   const [quoteParagraphNumber, setQuoteParagraphNumber] = useState(1);
   const [quotePosition, setQuotePosition] =
     useState<NaverQuotePosition>('after');
+  const [quoteStyles, setQuoteStyles] = useState<
+    readonly NaverQuoteStyle[]
+  >([]);
+  const [quoteStyleSelection, setQuoteStyleSelection] =
+    useState<NaverQuoteStyleSelection>('random');
   const [quoteResult, setQuoteResult] =
     useState<NaverQuoteInsertionResult | null>(null);
   const [selectedImages, setSelectedImages] = useState<
@@ -294,6 +301,7 @@ export function ConnectionScreen() {
     | 'divider'
     | 'sticker-categories'
     | 'sticker'
+    | 'quote-styles'
     | 'quote'
     | 'select-images'
     | 'images'
@@ -369,6 +377,8 @@ export function ConnectionScreen() {
           setStickerResult(null);
           setQuoteParagraphNumber(1);
           setQuotePosition('after');
+          setQuoteStyles([]);
+          setQuoteStyleSelection('random');
           setQuoteResult(null);
           setSelectedImages([]);
           setImageLayout('individual');
@@ -459,6 +469,8 @@ export function ConnectionScreen() {
       setStickerResult(null);
       setQuoteParagraphNumber(1);
       setQuotePosition('after');
+      setQuoteStyles([]);
+      setQuoteStyleSelection('random');
       setQuoteResult(null);
       setSelectedImages([]);
       setImageLayout('individual');
@@ -502,6 +514,8 @@ export function ConnectionScreen() {
     setStickerResult(null);
     setQuoteParagraphNumber(1);
     setQuotePosition('after');
+    setQuoteStyles([]);
+    setQuoteStyleSelection('random');
     setQuoteResult(null);
     setError(null);
 
@@ -595,6 +609,8 @@ export function ConnectionScreen() {
         setStickerResult(null);
         setQuoteParagraphNumber(1);
         setQuotePosition('after');
+        setQuoteStyles([]);
+        setQuoteStyleSelection('random');
         setQuoteResult(null);
       } else {
         setError(response.error);
@@ -685,6 +701,8 @@ export function ConnectionScreen() {
         setStickerResult(null);
         setQuoteParagraphNumber(1);
         setQuotePosition('after');
+        setQuoteStyles([]);
+        setQuoteStyleSelection('random');
         setQuoteResult(null);
       } else {
         setError(response.error);
@@ -717,6 +735,8 @@ export function ConnectionScreen() {
     setStickerResult(null);
     setQuoteParagraphNumber(1);
     setQuotePosition('after');
+    setQuoteStyles([]);
+    setQuoteStyleSelection('random');
     setQuoteResult(null);
     setError(null);
 
@@ -758,6 +778,8 @@ export function ConnectionScreen() {
     setStickerResult(null);
     setQuoteParagraphNumber(1);
     setQuotePosition('after');
+    setQuoteStyles([]);
+    setQuoteStyleSelection('random');
     setQuoteResult(null);
     setError(null);
 
@@ -772,6 +794,8 @@ export function ConnectionScreen() {
         setStickerResult(response.result);
         setQuoteParagraphNumber(1);
         setQuotePosition('after');
+        setQuoteStyles([]);
+        setQuoteStyleSelection('random');
         setQuoteResult(null);
       } else {
         if (response.error.code === 'STICKER_CATEGORY_STALE') {
@@ -790,7 +814,7 @@ export function ConnectionScreen() {
       setActiveAction(null);
     }
   };
-  const insertDefaultQuote = async (): Promise<void> => {
+  const loadQuoteStyles = async (): Promise<void> => {
     if (
       quoteParagraphNumber < 1 ||
       quoteParagraphNumber > draftParagraphs.length
@@ -802,19 +826,72 @@ export function ConnectionScreen() {
       return;
     }
 
-    setActiveAction('quote');
+    setActiveAction('quote-styles');
+    setQuoteStyles([]);
+    setQuoteStyleSelection('random');
     setQuoteResult(null);
     setError(null);
 
     try {
-      const response = await window.blowNaver.insertDefaultQuote(
+      const response = await window.blowNaver.listQuoteStyles(
         quoteParagraphNumber,
         quotePosition,
       );
 
       if (response.ok) {
+        setQuoteStyles(response.result.styles);
+      } else {
+        setError(response.error);
+      }
+    } catch {
+      setError({
+        code: 'QUOTE_STYLE_NOT_FOUND',
+        message: '인용구 디자인을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+      });
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const insertQuote = async (): Promise<void> => {
+    if (
+      quoteParagraphNumber < 1 ||
+      quoteParagraphNumber > draftParagraphs.length
+    ) {
+      setError({
+        code: 'INVALID_QUOTE_REQUEST',
+        message: '인용구를 넣을 문단과 위치를 다시 선택해 주세요.',
+      });
+      return;
+    }
+
+    if (quoteStyles.length === 0) {
+      setError({
+        code: 'QUOTE_STYLE_NOT_FOUND',
+        message: '인용구 디자인을 먼저 불러와 주세요.',
+      });
+      return;
+    }
+
+    setActiveAction('quote');
+    setQuoteResult(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.insertQuote(
+        quoteParagraphNumber,
+        quotePosition,
+        quoteStyleSelection,
+      );
+
+      if (response.ok) {
         setQuoteResult(response.result);
       } else {
+        if (response.error.code === 'QUOTE_STYLE_STALE') {
+          setQuoteStyles([]);
+          setQuoteStyleSelection('random');
+        }
+
         setError(response.error);
       }
     } catch {
@@ -892,12 +969,19 @@ export function ConnectionScreen() {
         'QUOTE_SELECTION_FAILED',
         'QUOTE_CONTROL_NOT_FOUND',
         'QUOTE_CONTROL_AMBIGUOUS',
+        'QUOTE_STYLE_CONTROL_NOT_FOUND',
+        'QUOTE_STYLE_CONTROL_AMBIGUOUS',
+        'QUOTE_STYLE_NOT_FOUND',
+        'QUOTE_STYLE_AMBIGUOUS',
+        'QUOTE_STYLE_STALE',
+        'QUOTE_STYLE_MISMATCH',
         'QUOTE_INSERT_UNCONFIRMED',
         'QUOTE_POSITION_MISMATCH',
       ].includes(error.code)
     : false;
   const quoteRetryBlocked = [
     'QUOTE_INSERT_UNCONFIRMED',
+    'QUOTE_STYLE_MISMATCH',
     'QUOTE_POSITION_MISMATCH',
   ].includes(error?.code ?? '');
   const stickerError = error
@@ -2176,17 +2260,24 @@ export function ConnectionScreen() {
         <section
           className="divider-test-panel quote-test-panel"
           aria-labelledby="quote-test-heading"
-          aria-busy={activeAction === 'quote'}
+          aria-busy={
+            activeAction === 'quote-styles' ||
+            activeAction === 'quote'
+          }
         >
           <header className="panel-heading">
             <div>
-              <h2 id="quote-test-heading">인용구 삽입 테스트</h2>
+              <h2 id="quote-test-heading">인용구 위치·디자인 테스트</h2>
               <p>
-                본문 문단과 앞·뒤 위치를 선택해 네이버 기본 인용구 한 개를 넣습니다.
+                본문 위치와 디자인을 하나씩 선택해 네이버 편집기에 인용구를 넣습니다.
               </p>
             </div>
             <span className="document-state">
-              {quoteResult ? '삽입 확인 완료' : '저장하지 않음'}
+              {quoteResult
+                ? '삽입 확인 완료'
+                : quoteStyles.length > 0
+                  ? '디자인 선택'
+                  : '디자인 불러오기'}
             </span>
           </header>
 
@@ -2208,6 +2299,9 @@ export function ConnectionScreen() {
                     aria-describedby="quote-paragraph-help"
                     onChange={(event) => {
                       setQuoteParagraphNumber(Number(event.target.value));
+                      setQuoteStyles([]);
+                      setQuoteStyleSelection('random');
+                      setQuoteResult(null);
                       setError(null);
                     }}
                   >
@@ -2215,7 +2309,7 @@ export function ConnectionScreen() {
                       <option value={index + 1} key={index}>
                         {index + 1}번째 문단 ·{' '}
                         {paragraph.length > 30
-                          ? paragraph.slice(0, 30) + '…'
+                          ? `${paragraph.slice(0, 30)}…`
                           : paragraph}
                       </option>
                     ))}
@@ -2240,12 +2334,11 @@ export function ConnectionScreen() {
                   <div className="divider-position-options">
                     {quotePositionOptions.map((option) => (
                       <label
-                        className={
-                          'divider-position-option' +
-                          (quotePosition === option.value
+                        className={`divider-position-option${
+                          quotePosition === option.value
                             ? ' is-selected'
-                            : '')
-                        }
+                            : ''
+                        }`}
                         key={option.value}
                       >
                         <input
@@ -2255,6 +2348,9 @@ export function ConnectionScreen() {
                           checked={quotePosition === option.value}
                           onChange={() => {
                             setQuotePosition(option.value);
+                            setQuoteStyles([]);
+                            setQuoteStyleSelection('random');
+                            setQuoteResult(null);
                             setError(null);
                           }}
                         />
@@ -2269,15 +2365,75 @@ export function ConnectionScreen() {
                     ))}
                   </div>
                   <p id="quote-position-help" className="layout-selection-help">
-                    네이버 기본 디자인의 빈 인용구 한 개를 사용합니다.
+                    위치를 바꾸면 현재 디자인 목록을 다시 불러옵니다.
                   </p>
                 </fieldset>
+              </div>
+
+              <div className="divider-style-row">
+                <div className="field-group">
+                  <label htmlFor="quote-style">
+                    인용구 디자인 <span>필수 · 하나만 선택</span>
+                  </label>
+                  <select
+                    id="quote-style"
+                    value={quoteStyleSelection}
+                    disabled={
+                      isRunning ||
+                      quoteStyles.length === 0 ||
+                      Boolean(quoteResult) ||
+                      quoteRetryBlocked
+                    }
+                    aria-describedby="quote-style-help"
+                    onChange={(event) => {
+                      setQuoteStyleSelection(
+                        event.target.value as NaverQuoteStyleSelection,
+                      );
+                      setError(null);
+                    }}
+                  >
+                    <option value="random">무작위 (추천)</option>
+                    {quoteStyles.map((style) => (
+                      <option value={style.id} key={style.id}>
+                        {style.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p id="quote-style-help" className="field-help">
+                    {quoteStyles.length > 0
+                      ? quoteStyles.length +
+                        '개 디자인을 불러왔습니다. 무작위 또는 특정 디자인 하나를 선택해 주세요.'
+                      : '네이버 인용구 선택창의 실제 디자인을 먼저 불러옵니다.'}
+                  </p>
+                </div>
+
+                <button
+                  className="button secondary divider-style-load-button"
+                  type="button"
+                  disabled={
+                    isRunning ||
+                    Boolean(quoteResult) ||
+                    quoteRetryBlocked
+                  }
+                  onClick={() => void loadQuoteStyles()}
+                >
+                  {activeAction === 'quote-styles' ? (
+                    <LoaderCircle className="is-spinning" aria-hidden="true" />
+                  ) : (
+                    <Quote aria-hidden="true" />
+                  )}
+                  {activeAction === 'quote-styles'
+                    ? '디자인 확인 중…'
+                    : quoteStyles.length > 0
+                      ? '디자인 다시 불러오기'
+                      : '인용구 디자인 불러오기'}
+                </button>
               </div>
 
               <div className="editor-input-note">
                 <ShieldCheck aria-hidden="true" />
                 <p>
-                  본문 원문과 인용구 개수, 실제 순서를 다시 확인합니다. 인용구 버튼을 확실히 식별하지 못하면 작업을 멈춥니다.
+                  문단 원문, 선택한 디자인, 인용구 개수와 실제 순서를 다시 확인합니다. 어느 하나라도 확정하지 못하면 중복 삽입 없이 작업을 멈춥니다.
                 </p>
               </div>
 
@@ -2296,10 +2452,11 @@ export function ConnectionScreen() {
                 type="button"
                 disabled={
                   isRunning ||
+                  quoteStyles.length === 0 ||
                   Boolean(quoteResult) ||
                   quoteRetryBlocked
                 }
-                onClick={() => void insertDefaultQuote()}
+                onClick={() => void insertQuote()}
               >
                 {activeAction === 'quote' ? (
                   <LoaderCircle className="is-spinning" aria-hidden="true" />
@@ -2318,7 +2475,7 @@ export function ConnectionScreen() {
 
             <aside
               className="divider-test-summary"
-              aria-label="인용구 삽입 테스트 범위"
+              aria-label="인용구 위치·디자인 테스트 범위"
             >
               <Quote aria-hidden="true" />
               <div>
@@ -2336,6 +2493,10 @@ export function ConnectionScreen() {
                       <dd>{getQuotePositionLabel(quoteResult.position)}</dd>
                     </div>
                     <div>
+                      <dt>디자인</dt>
+                      <dd>{quoteResult.styleLabel ?? '기본 인용구'}</dd>
+                    </div>
+                    <div>
                       <dt>인용구</dt>
                       <dd>{quoteResult.quoteCount}개</dd>
                     </div>
@@ -2344,8 +2505,9 @@ export function ConnectionScreen() {
                   <ol>
                     <li>본문 문단이 입력 원문과 같은지 확인</li>
                     <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
-                    <li>정확히 식별한 인용구 버튼을 한 번만 조작</li>
-                    <li>삽입 개수와 문단 앞·뒤 순서를 재확인</li>
+                    <li>현재 네이버 편집기의 인용구 디자인 목록 확인</li>
+                    <li>무작위 또는 선택한 디자인 한 개만 조작</li>
+                    <li>디자인·삽입 개수·문단 앞뒤 순서를 재확인</li>
                   </ol>
                 )}
               </div>

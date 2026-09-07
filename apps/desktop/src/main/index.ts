@@ -17,6 +17,7 @@ import type {
   NaverDividerStyleSelection,
   NaverImageLayout,
   NaverQuotePosition,
+  NaverQuoteStyleSelection,
   NaverStickerPosition,
 } from '@blow/naver-adapter';
 import {
@@ -42,6 +43,7 @@ const ipcChannels = {
   naverEnterContent: 'naver:enter-content',
   naverListDividerStyles: 'naver:list-divider-styles',
   naverInsertDivider: 'naver:insert-divider',
+  naverListQuoteStyles: 'naver:list-quote-styles',
   naverInsertQuote: 'naver:insert-quote',
   naverListStickerCategories: 'naver:list-sticker-categories',
   naverInsertSticker: 'naver:insert-sticker',
@@ -231,11 +233,60 @@ function parseStickerRequest(input: unknown): {
   };
 }
 
+const quoteStyleSelections = new Set<NaverQuoteStyleSelection>([
+  'random',
+  'default',
+  'quotation_line',
+  'quotation_bubble',
+  'quotation_underline',
+  'quotation_postit',
+  'quotation_corner',
+]);
+
 function parseQuoteRequest(input: unknown): {
   readonly paragraphNumber: number;
   readonly position: NaverQuotePosition;
+  readonly styleSelection?: NaverQuoteStyleSelection;
 } | null {
-  return parseDividerRequest(input);
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const candidate = input as {
+    readonly paragraphNumber?: unknown;
+    readonly position?: unknown;
+    readonly styleSelection?: unknown;
+  };
+  const styleSelection = candidate.styleSelection;
+
+  if (
+    !Number.isInteger(candidate.paragraphNumber) ||
+    (candidate.paragraphNumber as number) < 1 ||
+    (candidate.paragraphNumber as number) > 100 ||
+    (candidate.position !== 'before' && candidate.position !== 'after') ||
+    (
+      styleSelection !== undefined &&
+      (
+        typeof styleSelection !== 'string' ||
+        !quoteStyleSelections.has(
+          styleSelection as NaverQuoteStyleSelection,
+        )
+      )
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    paragraphNumber: candidate.paragraphNumber as number,
+    position: candidate.position,
+    ...(styleSelection === undefined
+      ? {}
+      : {
+          styleSelection:
+            styleSelection as NaverQuoteStyleSelection,
+        }),
+  };
 }
 
 function parseSelectedImageIds(input: unknown): readonly string[] | null {
@@ -920,6 +971,73 @@ function registerNaverIpc(): void {
   );
 
   ipcMain.handle(
+    ipcChannels.naverListQuoteStyles,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+      const request = parseQuoteRequest(input);
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (!request) {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_QUOTE_REQUEST',
+            message: '인용구를 넣을 문단과 위치를 다시 선택해 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.listQuoteStyles(
+            request.paragraphNumber,
+            request.position,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'QUOTE_STYLE_NOT_FOUND',
+            message: '인용구 디자인을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.naverInsertQuote,
     async (event, input: unknown) => {
       requireTrustedSender(event);
@@ -956,9 +1074,10 @@ function registerNaverIpc(): void {
       try {
         return {
           ok: true,
-          result: await session.insertDefaultQuote(
+          result: await session.insertQuote(
             request.paragraphNumber,
             request.position,
+            request.styleSelection,
           ),
         };
       } catch (error) {

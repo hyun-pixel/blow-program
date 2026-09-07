@@ -17,6 +17,8 @@ import type {
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
+  NaverQuoteStyleResult,
+  NaverQuoteStyleSelection,
   NaverStickerCategoryResult,
   NaverStickerInsertionResult,
   NaverStickerPosition,
@@ -65,6 +67,19 @@ type NaverDividerResponse =
   | {
       readonly ok: true;
       readonly result: NaverDividerInsertionResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type NaverQuoteStyleResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverQuoteStyleResult;
     }
   | {
       readonly ok: false;
@@ -151,6 +166,7 @@ const ipcChannels = {
   naverEnterContent: 'naver:enter-content',
   naverListDividerStyles: 'naver:list-divider-styles',
   naverInsertDivider: 'naver:insert-divider',
+  naverListQuoteStyles: 'naver:list-quote-styles',
   naverInsertQuote: 'naver:insert-quote',
   naverListStickerCategories: 'naver:list-sticker-categories',
   naverInsertSticker: 'naver:insert-sticker',
@@ -217,13 +233,23 @@ const blowNaverApi = {
       position,
       styleSelection,
     }),
-  insertDefaultQuote: (
+  listQuoteStyles: (
     paragraphNumber: number,
     position: NaverQuotePosition,
+  ): Promise<NaverQuoteStyleResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverListQuoteStyles, {
+      paragraphNumber,
+      position,
+    }),
+  insertQuote: (
+    paragraphNumber: number,
+    position: NaverQuotePosition,
+    styleSelection?: NaverQuoteStyleSelection,
   ): Promise<NaverQuoteResponse> =>
     ipcRenderer.invoke(ipcChannels.naverInsertQuote, {
       paragraphNumber,
       position,
+      styleSelection,
     }),
   listStickerCategories: (
     paragraphNumber: number,

@@ -22,7 +22,23 @@ const quoteComponentSelector = [
 
 const quoteControlSelector = 'button, [role="button"]';
 
+const quoteStyleOptionSelector = [
+  '[class*="se-toolbar-option-insert-quotation-"][class*="-button"]',
+  '[class*="se-insert-menu-sub-panel-button-quotation-"]',
+].join(', ');
+
+const quoteStyleOrder = [
+  'default',
+  'quotation_line',
+  'quotation_bubble',
+  'quotation_underline',
+  'quotation_postit',
+  'quotation_corner',
+] as const;
+
 export type NaverQuotePosition = 'before' | 'after';
+export type NaverQuoteStyleId = (typeof quoteStyleOrder)[number];
+export type NaverQuoteStyleSelection = NaverQuoteStyleId | 'random';
 
 export type NaverQuoteFailureCode =
   | 'INVALID_QUOTE_REQUEST'
@@ -31,8 +47,28 @@ export type NaverQuoteFailureCode =
   | 'QUOTE_SELECTION_FAILED'
   | 'QUOTE_CONTROL_NOT_FOUND'
   | 'QUOTE_CONTROL_AMBIGUOUS'
+  | 'QUOTE_STYLE_CONTROL_NOT_FOUND'
+  | 'QUOTE_STYLE_CONTROL_AMBIGUOUS'
+  | 'QUOTE_STYLE_NOT_FOUND'
+  | 'QUOTE_STYLE_AMBIGUOUS'
+  | 'QUOTE_STYLE_STALE'
+  | 'QUOTE_STYLE_MISMATCH'
   | 'QUOTE_INSERT_UNCONFIRMED'
   | 'QUOTE_POSITION_MISMATCH';
+
+export interface NaverQuoteStyle {
+  readonly id: NaverQuoteStyleId;
+  readonly label: string;
+}
+
+export interface NaverQuoteStyleResult {
+  readonly stage: 'QUOTE_STYLES_READY';
+  readonly message: string;
+  readonly currentUrl: string;
+  readonly paragraphNumber: number;
+  readonly position: NaverQuotePosition;
+  readonly styles: readonly NaverQuoteStyle[];
+}
 
 export interface NaverQuoteInsertionResult {
   readonly stage: 'QUOTE_VERIFIED';
@@ -41,6 +77,8 @@ export interface NaverQuoteInsertionResult {
   readonly paragraphNumber: number;
   readonly position: NaverQuotePosition;
   readonly quoteCount: number;
+  readonly styleId?: NaverQuoteStyleId;
+  readonly styleLabel?: string;
 }
 
 export class NaverQuoteError extends Error {
@@ -64,6 +102,10 @@ interface QuoteControlCandidate {
   readonly score: number;
 }
 
+interface QuoteStyleCandidate extends NaverQuoteStyle {
+  readonly locator: Locator;
+}
+
 function normalizeParagraphText(value: string): string {
   return value
     .replace(/\r\n?/g, '\n')
@@ -71,6 +113,22 @@ function normalizeParagraphText(value: string): string {
     .replace(/[\u200b\ufeff]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function validateQuoteStyleSelection(
+  value: string,
+): NaverQuoteStyleSelection {
+  if (
+    value === 'random' ||
+    quoteStyleOrder.includes(value as NaverQuoteStyleId)
+  ) {
+    return value as NaverQuoteStyleSelection;
+  }
+
+  throw new NaverQuoteError(
+    'INVALID_QUOTE_REQUEST',
+    '사용할 인용구 디자인을 다시 선택해 주세요.',
+  );
 }
 
 export function validateQuoteRequest(
@@ -212,7 +270,9 @@ async function findQuoteControls(page: Page): Promise<readonly Locator[]> {
       );
       const isRelatedLabel =
         normalizedLabel.startsWith('인용구') && !isSupportingControl;
-      const hasQuoteIdentity = /(quotation|quote)/i.test(snapshot.identity);
+      const hasQuoteIdentity =
+        !isSupportingControl &&
+        /(quotation|quote)/i.test(snapshot.identity);
       const score = isExactLabel
         ? 3
         : isRelatedLabel
@@ -255,6 +315,264 @@ async function requireUniqueQuoteControl(page: Page): Promise<Locator> {
   }
 
   return controls[0]!;
+}
+
+function getQuoteStyleLabel(styleId: NaverQuoteStyleId): string {
+  return '인용구 ' + (quoteStyleOrder.indexOf(styleId) + 1);
+}
+
+async function findQuoteStyleMenuControls(
+  page: Page,
+): Promise<readonly Locator[]> {
+  const candidates: QuoteControlCandidate[] = [];
+
+  for (const frame of page.frames()) {
+    const controls = frame.locator(quoteControlSelector);
+    const count = await controls.count();
+
+    for (let index = 0; index < count; index += 1) {
+      const control = controls.nth(index);
+      const [visible, snapshot] = await Promise.all([
+        control.isVisible().catch(() => false),
+        control.evaluate((element) => {
+          const ariaLabel = element.getAttribute('aria-label') ?? '';
+          const title = element.getAttribute('title') ?? '';
+          const text = element.textContent ?? '';
+          const identity = [
+            element.id,
+            element.className,
+            element.getAttribute('data-name') ?? '',
+            element.getAttribute('data-type') ?? '',
+          ].join(' ');
+
+          return {
+            label: (ariaLabel || title || text).replace(/\s+/g, ' ').trim(),
+            identity,
+          };
+        }).catch(() => ({ label: '', identity: '' })),
+      ]);
+
+      if (!visible) {
+        continue;
+      }
+
+      const normalizedLabel = snapshot.label.replace(/\s+/g, ' ').trim();
+      const isExactLabel = normalizedLabel === '인용구 선택';
+      const isRelatedLabel =
+        normalizedLabel.startsWith('인용구') &&
+        /(종류|디자인|스타일|선택|펼치기)/.test(normalizedLabel);
+      const hasStyleMenuIdentity =
+        /(quotation|quote)/i.test(snapshot.identity) &&
+        /(select|selector|toggle|dropdown|arrow)/i.test(snapshot.identity);
+      const score = isExactLabel
+        ? 3
+        : isRelatedLabel
+          ? 2
+          : hasStyleMenuIdentity
+            ? 1
+            : 0;
+
+      if (score > 0) {
+        candidates.push({ locator: control, score });
+      }
+    }
+  }
+
+  const highestScore = Math.max(
+    0,
+    ...candidates.map((candidate) => candidate.score),
+  );
+
+  return candidates
+    .filter((candidate) => candidate.score === highestScore)
+    .map((candidate) => candidate.locator);
+}
+
+async function requireUniqueQuoteStyleMenuControl(
+  page: Page,
+): Promise<Locator> {
+  const controls = await findQuoteStyleMenuControls(page);
+
+  if (controls.length === 0) {
+    throw new NaverQuoteError(
+      'QUOTE_STYLE_CONTROL_NOT_FOUND',
+      '네이버 편집기의 인용구 선택 버튼을 확인하지 못했습니다. Chrome 화면을 확인해 주세요.',
+    );
+  }
+
+  if (controls.length > 1) {
+    throw new NaverQuoteError(
+      'QUOTE_STYLE_CONTROL_AMBIGUOUS',
+      '인용구 선택 버튼이 여러 개 보여 안전을 위해 작업을 멈췄습니다.',
+    );
+  }
+
+  return controls[0]!;
+}
+
+async function findVisibleQuoteStyles(
+  page: Page,
+): Promise<readonly QuoteStyleCandidate[]> {
+  const candidates: QuoteStyleCandidate[] = [];
+
+  for (const frame of page.frames()) {
+    const options = frame.locator(quoteStyleOptionSelector);
+    const count = await options.count();
+
+    for (let index = 0; index < count; index += 1) {
+      const option = options.nth(index);
+      const [visible, snapshot] = await Promise.all([
+        option.isVisible().catch(() => false),
+        option.evaluate((element) => ({
+          label: (
+            element.getAttribute('aria-label') ||
+            element.getAttribute('title') ||
+            element.textContent ||
+            ''
+          ).replace(/\s+/g, ' ').trim(),
+          identity: [
+            element.id,
+            element.className,
+            element.getAttribute('data-name') ?? '',
+            element.getAttribute('data-type') ?? '',
+          ].join(' '),
+        })).catch(() => ({ label: '', identity: '' })),
+      ]);
+
+      if (!visible) {
+        continue;
+      }
+
+      const match = snapshot.identity.match(
+        /(?:se-toolbar-option-insert-quotation-|se-insert-menu-sub-panel-button-quotation-)(default|quotation_(?:line|bubble|underline|postit|corner))(?:-button)?/i,
+      );
+      const styleId = match?.[1]?.toLowerCase() as
+        | NaverQuoteStyleId
+        | undefined;
+
+      if (!styleId || !quoteStyleOrder.includes(styleId)) {
+        continue;
+      }
+
+      candidates.push({
+        id: styleId,
+        label: /^인용구\s*\d+$/.test(snapshot.label)
+          ? snapshot.label.replace(/인용구\s*(\d+)/, '인용구 $1')
+          : getQuoteStyleLabel(styleId),
+        locator: option,
+      });
+    }
+  }
+
+  const unique = new Map<NaverQuoteStyleId, QuoteStyleCandidate>();
+
+  for (const candidate of candidates) {
+    if (unique.has(candidate.id)) {
+      throw new NaverQuoteError(
+        'QUOTE_STYLE_AMBIGUOUS',
+        '같은 인용구 디자인이 여러 곳에 보여 안전을 위해 작업을 멈췄습니다.',
+      );
+    }
+
+    unique.set(candidate.id, candidate);
+  }
+
+  return quoteStyleOrder
+    .map((styleId) => unique.get(styleId))
+    .filter((candidate): candidate is QuoteStyleCandidate =>
+      Boolean(candidate),
+    );
+}
+
+async function waitForQuoteStyles(
+  page: Page,
+): Promise<readonly QuoteStyleCandidate[]> {
+  const maxAttempts = Math.ceil(
+    QUOTE_VERIFY_TIMEOUT_MS / QUOTE_VERIFY_INTERVAL_MS,
+  );
+  let previousSignature = '';
+  let stableAttempts = 0;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const styles = await findVisibleQuoteStyles(page);
+    const signature = styles.map((style) => style.id).join('|');
+
+    if (styles.length > 0 && signature === previousSignature) {
+      stableAttempts += 1;
+    } else {
+      previousSignature = signature;
+      stableAttempts = 0;
+    }
+
+    if (styles.length > 0 && stableAttempts >= 2) {
+      return styles;
+    }
+
+    await page.waitForTimeout(QUOTE_VERIFY_INTERVAL_MS);
+  }
+
+  throw new NaverQuoteError(
+    'QUOTE_STYLE_NOT_FOUND',
+    '인용구 선택창은 열렸지만 디자인 목록을 확인하지 못했습니다. Chrome 화면을 확인해 주세요.',
+  );
+}
+
+async function ensureQuoteStyles(
+  page: Page,
+): Promise<readonly QuoteStyleCandidate[]> {
+  const visibleStyles = await findVisibleQuoteStyles(page);
+
+  if (visibleStyles.length > 0) {
+    return visibleStyles;
+  }
+
+  const control = await requireUniqueQuoteStyleMenuControl(page);
+
+  try {
+    await control.click();
+  } catch (error) {
+    throw new NaverQuoteError(
+      'QUOTE_STYLE_NOT_FOUND',
+      '네이버 편집기의 인용구 선택창을 열지 못했습니다. Chrome 화면을 확인해 주세요.',
+      { cause: error },
+    );
+  }
+
+  return waitForQuoteStyles(page);
+}
+
+async function getVisibleQuoteStyleCount(
+  page: Page,
+  styleId: NaverQuoteStyleId,
+): Promise<number> {
+  let total = 0;
+  const layoutClass = 'se-l-' + styleId;
+
+  for (const frame of page.frames()) {
+    const components = frame.locator(quoteComponentSelector);
+    const count = await components.count();
+
+    for (let index = 0; index < count; index += 1) {
+      const component = components.nth(index);
+
+      if (!(await component.isVisible().catch(() => false))) {
+        continue;
+      }
+
+      const hasStyle = await component.evaluate(
+        (element, expectedClass) =>
+          element.classList.contains(expectedClass) ||
+          Boolean(element.querySelector('.' + expectedClass)),
+        layoutClass,
+      ).catch(() => false);
+
+      if (hasStyle) {
+        total += 1;
+      }
+    }
+  }
+
+  return total;
 }
 
 async function getVisibleQuoteCount(page: Page): Promise<number> {
@@ -339,13 +657,16 @@ async function waitForQuoteCount(
 }
 
 export class NaverQuoteAdapter {
-  constructor(private readonly page: Page) {}
+  constructor(
+    private readonly page: Page,
+    private readonly random: () => number = Math.random,
+  ) {}
 
-  async insertDefaultQuote(
+  async listQuoteStyles(
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverQuotePosition,
-  ): Promise<NaverQuoteInsertionResult> {
+  ): Promise<NaverQuoteStyleResult> {
     const request = validateQuoteRequest(
       expectedParagraphs,
       paragraphNumber,
@@ -358,21 +679,107 @@ export class NaverQuoteAdapter {
         request.expectedParagraphs,
       );
       const anchor = paragraphs[request.paragraphNumber - 1]!;
+
+      await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      await this.page.waitForTimeout(QUOTE_VERIFY_INTERVAL_MS);
+      const styles = await ensureQuoteStyles(this.page);
+
+      return {
+        stage: 'QUOTE_STYLES_READY',
+        message: '전용 Chrome에 표시된 인용구 디자인을 불러왔습니다.',
+        currentUrl: this.page.url(),
+        paragraphNumber: request.paragraphNumber,
+        position: request.position,
+        styles: styles.map(({ id, label }) => ({ id, label })),
+      };
+    } catch (error) {
+      if (error instanceof NaverQuoteError) {
+        throw error;
+      }
+
+      throw new NaverQuoteError(
+        'QUOTE_STYLE_NOT_FOUND',
+        '인용구 디자인을 불러오지 못했습니다. Chrome 화면을 확인해 주세요.',
+        { cause: error },
+      );
+    }
+  }
+
+  async insertQuote(
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverQuotePosition,
+    styleSelection?: NaverQuoteStyleSelection,
+  ): Promise<NaverQuoteInsertionResult> {
+    const request = validateQuoteRequest(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
+    const validatedStyle = styleSelection === undefined
+      ? undefined
+      : validateQuoteStyleSelection(styleSelection);
+
+    try {
+      const paragraphs = await requireMatchingParagraphs(
+        this.page,
+        request.expectedParagraphs,
+      );
+      const anchor = paragraphs[request.paragraphNumber - 1]!;
       const beforeCount = await getVisibleQuoteCount(this.page);
       const beforePosition = await measureQuotePosition(anchor);
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
       await this.page.waitForTimeout(QUOTE_VERIFY_INTERVAL_MS);
-      const control = await requireUniqueQuoteControl(this.page);
 
-      try {
-        await control.click();
-      } catch (error) {
-        throw new NaverQuoteError(
-          'QUOTE_INSERT_UNCONFIRMED',
-          '네이버 편집기의 인용구 버튼을 실행하지 못했습니다. Chrome 화면에서 다른 메뉴나 팝업이 열려 있는지 확인해 주세요.',
-          { cause: error },
+      let selectedStyle: QuoteStyleCandidate | undefined;
+      let beforeStyleCount = 0;
+
+      if (validatedStyle === undefined) {
+        const control = await requireUniqueQuoteControl(this.page);
+
+        try {
+          await control.click();
+        } catch (error) {
+          throw new NaverQuoteError(
+            'QUOTE_INSERT_UNCONFIRMED',
+            '네이버 편집기의 인용구 버튼을 실행하지 못했습니다. Chrome 화면에서 다른 메뉴나 팝업이 열려 있는지 확인해 주세요.',
+            { cause: error },
+          );
+        }
+      } else {
+        const styles = await ensureQuoteStyles(this.page);
+        const requestedStyleId = validatedStyle === 'random'
+          ? styles[
+              Math.floor(
+                Math.min(Math.max(this.random(), 0), 0.999_999_999) *
+                  styles.length,
+              )
+            ]?.id
+          : validatedStyle;
+        selectedStyle = styles.find((style) => style.id === requestedStyleId);
+
+        if (!selectedStyle) {
+          throw new NaverQuoteError(
+            'QUOTE_STYLE_STALE',
+            '선택한 인용구 디자인을 현재 네이버 편집기에서 확인하지 못했습니다. 디자인을 다시 불러와 주세요.',
+          );
+        }
+
+        beforeStyleCount = await getVisibleQuoteStyleCount(
+          this.page,
+          selectedStyle.id,
         );
+
+        try {
+          await selectedStyle.locator.click();
+        } catch (error) {
+          throw new NaverQuoteError(
+            'QUOTE_INSERT_UNCONFIRMED',
+            '선택한 인용구 디자인을 실행하지 못했습니다. Chrome 화면을 확인해 주세요.',
+            { cause: error },
+          );
+        }
       }
 
       const afterCount = await waitForQuoteCount(
@@ -385,6 +792,20 @@ export class NaverQuoteAdapter {
           'QUOTE_INSERT_UNCONFIRMED',
           '인용구 삽입을 끝까지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
         );
+      }
+
+      if (selectedStyle) {
+        const afterStyleCount = await getVisibleQuoteStyleCount(
+          this.page,
+          selectedStyle.id,
+        );
+
+        if (afterStyleCount !== beforeStyleCount + 1) {
+          throw new NaverQuoteError(
+            'QUOTE_STYLE_MISMATCH',
+            '선택한 인용구 디자인이 적용됐는지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
+          );
+        }
       }
 
       const paragraphsAfterInsertion = await requireMatchingParagraphs(
@@ -414,17 +835,27 @@ export class NaverQuoteAdapter {
 
         throw new NaverQuoteError(
           'QUOTE_POSITION_MISMATCH',
-          `${request.paragraphNumber}번째 문단의 요청 위치는 ${requestedPosition}, 실제 감지 위치는 ${detectedPosition}입니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.`,
+          request.paragraphNumber + '번째 문단의 요청 위치는 ' +
+            requestedPosition + ', 실제 감지 위치는 ' + detectedPosition +
+            '입니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
         );
       }
 
       return {
         stage: 'QUOTE_VERIFIED',
-        message: '선택한 본문 문단 위치에 인용구를 넣고 결과를 확인했습니다.',
+        message: selectedStyle
+          ? '선택한 인용구 디자인을 본문 문단 위치에 넣고 결과를 확인했습니다.'
+          : '선택한 본문 문단 위치에 인용구를 넣고 결과를 확인했습니다.',
         currentUrl: this.page.url(),
         paragraphNumber: request.paragraphNumber,
         position: request.position,
         quoteCount: afterCount,
+        ...(selectedStyle
+          ? {
+              styleId: selectedStyle.id,
+              styleLabel: selectedStyle.label,
+            }
+          : {}),
       };
     } catch (error) {
       if (error instanceof NaverQuoteError) {
@@ -437,5 +868,17 @@ export class NaverQuoteAdapter {
         { cause: error },
       );
     }
+  }
+
+  async insertDefaultQuote(
+    expectedParagraphs: readonly string[],
+    paragraphNumber: number,
+    position: NaverQuotePosition,
+  ): Promise<NaverQuoteInsertionResult> {
+    return this.insertQuote(
+      expectedParagraphs,
+      paragraphNumber,
+      position,
+    );
   }
 }

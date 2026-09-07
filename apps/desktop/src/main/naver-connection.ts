@@ -22,6 +22,8 @@ import {
   type NaverImageLayout,
   type NaverQuoteInsertionResult,
   type NaverQuotePosition,
+  type NaverQuoteStyleResult,
+  type NaverQuoteStyleSelection,
   type NaverStickerCategoryResult,
   type NaverStickerInsertionResult,
   type NaverStickerPosition,
@@ -81,6 +83,12 @@ export type NaverRunnerFailureCode =
   | 'QUOTE_SELECTION_FAILED'
   | 'QUOTE_CONTROL_NOT_FOUND'
   | 'QUOTE_CONTROL_AMBIGUOUS'
+  | 'QUOTE_STYLE_CONTROL_NOT_FOUND'
+  | 'QUOTE_STYLE_CONTROL_AMBIGUOUS'
+  | 'QUOTE_STYLE_NOT_FOUND'
+  | 'QUOTE_STYLE_AMBIGUOUS'
+  | 'QUOTE_STYLE_STALE'
+  | 'QUOTE_STYLE_MISMATCH'
   | 'QUOTE_INSERT_UNCONFIRMED'
   | 'QUOTE_POSITION_MISMATCH'
   | 'INVALID_STICKER_REQUEST'
@@ -411,9 +419,37 @@ export class NaverConnectionSession {
     }
   }
 
-  async insertDefaultQuote(
+  async listQuoteStyles(
     paragraphNumber: number,
     position: NaverQuotePosition,
+  ): Promise<NaverQuoteStyleResult> {
+    const content = this.enteredContent;
+
+    if (!content) {
+      throw new NaverConnectionRunnerError({
+        code: 'CONTENT_INPUT_REQUIRED',
+        message: '먼저 제목과 본문 입력을 완료해 주세요.',
+      });
+    }
+
+    try {
+      return await this.adapter.listQuoteStyles(
+        this.profile,
+        content.paragraphs,
+        paragraphNumber,
+        position,
+      );
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async insertQuote(
+    paragraphNumber: number,
+    position: NaverQuotePosition,
+    styleSelection?: NaverQuoteStyleSelection,
   ): Promise<NaverQuoteInsertionResult> {
     const content = this.enteredContent;
 
@@ -425,11 +461,12 @@ export class NaverConnectionSession {
     }
 
     try {
-      return await this.adapter.insertDefaultQuote(
+      return await this.adapter.insertQuote(
         this.profile,
         content.paragraphs,
         paragraphNumber,
         position,
+        styleSelection,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
