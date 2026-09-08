@@ -1068,13 +1068,57 @@ function registerNaverIpc(): void {
 
       activeRun = true;
 
+      const appWindow = BrowserWindow.fromWebContents(event.sender);
+      const stickerAbortController = new AbortController();
+      let userLeftApp =
+        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      const recordAppBlur = (): void => {
+        userLeftApp = true;
+        stickerAbortController.abort();
+      };
+      const userInteractionResponse = () => {
+        if (appWindow && !appWindow.isDestroyed()) {
+          appWindow.show();
+          appWindow.focus();
+        }
+
+        return {
+          ok: false as const,
+          error: {
+            code: 'USER_INTERACTION_DETECTED',
+            message: '스티커 묶음 확인 중 BLOW 화면을 벗어난 것을 감지해 남은 작업을 멈췄습니다. 자동으로 다시 실행하지 말고 Chrome에서 결과를 확인한 뒤 작업 중단으로 새 작업을 시작해 주세요.',
+          },
+        };
+      };
+
+      if (appWindow && !appWindow.isDestroyed()) {
+        appWindow.on('blur', recordAppBlur);
+      }
+
       try {
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
+        const result = await session.listStickerCategories(
+          request.paragraphNumber,
+          request.position,
+          stickerAbortController.signal,
+        );
+
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
         return {
           ok: true,
-          result: await session.listStickerCategories(
-            request.paragraphNumber,
-            request.position,
-          ),
+          result,
         };
       } catch (error) {
         if (error instanceof NaverConnectionRunnerError) {
@@ -1082,10 +1126,18 @@ function registerNaverIpc(): void {
             activeNaverSession = null;
           }
 
+          if (userLeftApp) {
+            return userInteractionResponse();
+          }
+
           return {
             ok: false,
             error: error.failure,
           };
+        }
+
+        if (userLeftApp) {
+          return userInteractionResponse();
         }
 
         return {
@@ -1096,6 +1148,10 @@ function registerNaverIpc(): void {
           },
         };
       } finally {
+        if (appWindow && !appWindow.isDestroyed()) {
+          appWindow.off('blur', recordAppBlur);
+        }
+
         activeRun = false;
       }
     },
@@ -1135,14 +1191,58 @@ function registerNaverIpc(): void {
 
       activeRun = true;
 
+      const appWindow = BrowserWindow.fromWebContents(event.sender);
+      const stickerAbortController = new AbortController();
+      let userLeftApp =
+        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      const recordAppBlur = (): void => {
+        userLeftApp = true;
+        stickerAbortController.abort();
+      };
+      const userInteractionResponse = () => {
+        if (appWindow && !appWindow.isDestroyed()) {
+          appWindow.show();
+          appWindow.focus();
+        }
+
+        return {
+          ok: false as const,
+          error: {
+            code: 'USER_INTERACTION_DETECTED',
+            message: '스티커 삽입 중 BLOW 화면을 벗어난 것을 감지해 남은 작업을 멈췄습니다. 자동으로 다시 삽입하지 말고 Chrome에서 결과를 확인한 뒤 작업 중단으로 새 작업을 시작해 주세요.',
+          },
+        };
+      };
+
+      if (appWindow && !appWindow.isDestroyed()) {
+        appWindow.on('blur', recordAppBlur);
+      }
+
       try {
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
+        const result = await session.insertRandomSticker(
+          request.paragraphNumber,
+          request.position,
+          request.categoryId,
+          stickerAbortController.signal,
+        );
+
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
         return {
           ok: true,
-          result: await session.insertRandomSticker(
-            request.paragraphNumber,
-            request.position,
-            request.categoryId,
-          ),
+          result,
         };
       } catch (error) {
         if (error instanceof NaverConnectionRunnerError) {
@@ -1150,10 +1250,18 @@ function registerNaverIpc(): void {
             activeNaverSession = null;
           }
 
+          if (userLeftApp) {
+            return userInteractionResponse();
+          }
+
           return {
             ok: false,
             error: error.failure,
           };
+        }
+
+        if (userLeftApp) {
+          return userInteractionResponse();
         }
 
         return {
@@ -1164,6 +1272,10 @@ function registerNaverIpc(): void {
           },
         };
       } finally {
+        if (appWindow && !appWindow.isDestroyed()) {
+          appWindow.off('blur', recordAppBlur);
+        }
+
         activeRun = false;
       }
     },

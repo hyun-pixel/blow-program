@@ -17,6 +17,8 @@ import {
 } from '../src/naver-sticker.js';
 
 interface StickerPageOptions {
+  readonly abortAfterCaret?: AbortController;
+  readonly abortAfterCategoryClick?: AbortController;
   readonly paragraphs?: readonly string[];
   readonly controlCount?: number;
   readonly itemCount?: number;
@@ -72,6 +74,7 @@ function createStickerPage(options: StickerPageOptions = {}): {
       if (argument === 'before' || argument === 'after') {
         pendingParagraphIndex = paragraphIndex;
         pendingPosition = argument;
+        options.abortAfterCaret?.abort();
         return true;
       }
 
@@ -118,6 +121,7 @@ function createStickerPage(options: StickerPageOptions = {}): {
   const categoryClicks = categoryLabels.map((_, index) =>
     vi.fn(() => {
       selectedCategoryIndex = index;
+      options.abortAfterCategoryClick?.abort();
     }),
   );
   const categories = categoryLabels.map((label, index) => ({
@@ -386,6 +390,56 @@ describe('네이버 스티커 묶음 선택과 무작위 삽입', () => {
     '두 번째 문단입니다.',
     '세 번째 문단입니다.',
   ];
+
+  it('중단 신호를 받으면 스티커 선택창을 열지 않는다', async () => {
+    const controller = new AbortController();
+    const { page, controlClick } = createStickerPage({
+      abortAfterCaret: controller,
+    });
+    const adapter = new NaverStickerAdapter(page);
+
+    await expect(adapter.listStickerCategories(
+      paragraphs,
+      2,
+      'after',
+      controller.signal,
+    )).rejects.toMatchObject({
+      code: 'STICKER_OPERATION_INTERRUPTED',
+    });
+
+    expect(controlClick).not.toHaveBeenCalled();
+  });
+
+  it('묶음을 선택한 뒤 중단되면 스티커 항목을 클릭하지 않는다', async () => {
+    const controller = new AbortController();
+    const {
+      page,
+      categoryClicks,
+      itemClick,
+    } = createStickerPage({
+      abortAfterCategoryClick: controller,
+      categoryLabels: ['표정', '동물'],
+    });
+    const adapter = new NaverStickerAdapter(page);
+    const categoryResult = await adapter.listStickerCategories(
+      paragraphs,
+      1,
+      'after',
+    );
+
+    await expect(adapter.insertRandomSticker(
+      paragraphs,
+      1,
+      'after',
+      categoryResult.categories[1]!.id,
+      controller.signal,
+    )).rejects.toMatchObject({
+      code: 'STICKER_OPERATION_INTERRUPTED',
+    });
+
+    expect(categoryClicks[1]).toHaveBeenCalledOnce();
+    expect(itemClick).not.toHaveBeenCalled();
+  });
 
   it('전용 Chrome에 표시된 스티커 묶음을 불러온다', async () => {
     const { page, controlClick } = createStickerPage({

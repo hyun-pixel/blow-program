@@ -814,6 +814,7 @@ export class NaverConnectionAdapter {
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverStickerPosition,
+    signal?: AbortSignal,
   ): Promise<NaverStickerCategoryResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -826,6 +827,7 @@ export class NaverConnectionAdapter {
       expectedParagraphs,
       paragraphNumber,
       position,
+      signal,
     );
   }
 
@@ -835,6 +837,7 @@ export class NaverConnectionAdapter {
     paragraphNumber: number,
     position: NaverStickerPosition,
     categoryId: string,
+    signal?: AbortSignal,
   ): Promise<NaverStickerInsertionResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -848,6 +851,7 @@ export class NaverConnectionAdapter {
       paragraphNumber,
       position,
       categoryId,
+      signal,
     );
   }
 

@@ -1228,6 +1228,7 @@ export function ConnectionScreen() {
   const stickerError = error
     ? [
         'INVALID_STICKER_REQUEST',
+        'STICKER_OPERATION_INTERRUPTED',
         'STICKER_ANCHOR_NOT_FOUND',
         'STICKER_ANCHOR_MISMATCH',
         'STICKER_SELECTION_FAILED',

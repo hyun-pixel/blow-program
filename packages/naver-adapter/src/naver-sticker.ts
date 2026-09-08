@@ -39,6 +39,7 @@ export type NaverStickerPosition = 'before' | 'after';
 
 export type NaverStickerFailureCode =
   | 'INVALID_STICKER_REQUEST'
+  | 'STICKER_OPERATION_INTERRUPTED'
   | 'STICKER_ANCHOR_NOT_FOUND'
   | 'STICKER_ANCHOR_MISMATCH'
   | 'STICKER_SELECTION_FAILED'
@@ -85,6 +86,15 @@ export class NaverStickerError extends Error {
   ) {
     super(message, options);
     this.name = 'NaverStickerError';
+  }
+}
+
+function throwIfStickerInterrupted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new NaverStickerError(
+      'STICKER_OPERATION_INTERRUPTED',
+      '사용자 조작을 감지해 남은 스티커 작업을 중단했습니다.',
+    );
   }
 }
 
@@ -526,6 +536,7 @@ async function findStickerCategories(
 
 async function waitForStickerCategories(
   page: Page,
+  signal?: AbortSignal,
 ): Promise<readonly StickerCategoryCandidate[]> {
   const maxAttempts = Math.ceil(
     STICKER_VERIFY_TIMEOUT_MS / STICKER_VERIFY_INTERVAL_MS,
@@ -535,7 +546,9 @@ async function waitForStickerCategories(
   let stableAttempts = 0;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    throwIfStickerInterrupted(signal);
     const categories = await findStickerCategories(page);
+    throwIfStickerInterrupted(signal);
     const signature = categories.map((category) => category.id).join('|');
 
     if (categories.length > 0 && signature === previousSignature) {
@@ -550,6 +563,7 @@ async function waitForStickerCategories(
     }
 
     await page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+    throwIfStickerInterrupted(signal);
   }
 
   throw new NaverStickerError(
@@ -561,13 +575,16 @@ async function waitForStickerCategories(
 async function waitForStickerItems(
   page: Page,
   itemPrefix?: string,
+  signal?: AbortSignal,
 ): Promise<readonly StickerItemCandidate[]> {
   const maxAttempts = Math.ceil(
     STICKER_VERIFY_TIMEOUT_MS / STICKER_VERIFY_INTERVAL_MS,
   );
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    throwIfStickerInterrupted(signal);
     const items = await findStickerItems(page);
+    throwIfStickerInterrupted(signal);
     const matchingItems = itemPrefix
       ? items.filter((item) => item.identity.startsWith(itemPrefix + '-'))
       : items;
@@ -577,6 +594,7 @@ async function waitForStickerItems(
     }
 
     await page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+    throwIfStickerInterrupted(signal);
   }
 
   throw new NaverStickerError(
@@ -654,6 +672,7 @@ async function measureStickerPosition(
 async function waitForStickerCount(
   page: Page,
   expectedCount: number,
+  signal?: AbortSignal,
 ): Promise<number> {
   const maxAttempts = Math.ceil(
     STICKER_VERIFY_TIMEOUT_MS / STICKER_VERIFY_INTERVAL_MS,
@@ -665,7 +684,9 @@ async function waitForStickerCount(
     actualCount !== expectedCount && attempt < maxAttempts;
     attempt += 1
   ) {
+    throwIfStickerInterrupted(signal);
     await page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+    throwIfStickerInterrupted(signal);
     actualCount = await getVisibleStickerCount(page);
   }
 
@@ -685,6 +706,7 @@ export class NaverStickerAdapter {
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverStickerPosition,
+    signal?: AbortSignal,
   ): Promise<NaverStickerCategoryResult> {
     const request = validateStickerRequest(
       expectedParagraphs,
@@ -693,22 +715,30 @@ export class NaverStickerAdapter {
     );
 
     try {
+      throwIfStickerInterrupted(signal);
       const paragraphs = await requireMatchingParagraphs(
         this.page,
         request.expectedParagraphs,
       );
+      throwIfStickerInterrupted(signal);
       const anchor = paragraphs[request.paragraphNumber - 1]!;
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      throwIfStickerInterrupted(signal);
       await this.page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+      throwIfStickerInterrupted(signal);
       const visibleCategories = await findStickerCategories(this.page);
+      throwIfStickerInterrupted(signal);
 
       if (visibleCategories.length === 0) {
         const control = await requireUniqueStickerControl(this.page);
+        throwIfStickerInterrupted(signal);
         await control.click();
+        throwIfStickerInterrupted(signal);
       }
 
-      const categories = await waitForStickerCategories(this.page);
+      const categories = await waitForStickerCategories(this.page, signal);
+      throwIfStickerInterrupted(signal);
       this.categoryCache.clear();
 
       for (const category of categories) {
@@ -741,12 +771,14 @@ export class NaverStickerAdapter {
     paragraphNumber: number,
     position: NaverStickerPosition,
     categoryId: string,
+    signal?: AbortSignal,
   ): Promise<NaverStickerInsertionResult> {
     const request = validateStickerRequest(
       expectedParagraphs,
       paragraphNumber,
       position,
     );
+    throwIfStickerInterrupted(signal);
     const category = this.categoryCache.get(categoryId);
 
     if (!category) {
@@ -757,25 +789,35 @@ export class NaverStickerAdapter {
     }
 
     try {
+      throwIfStickerInterrupted(signal);
       const paragraphs = await requireMatchingParagraphs(
         this.page,
         request.expectedParagraphs,
       );
+      throwIfStickerInterrupted(signal);
       const anchor = paragraphs[request.paragraphNumber - 1]!;
       const beforeCount = await getVisibleStickerCount(this.page);
+      throwIfStickerInterrupted(signal);
       const beforePosition = await measureStickerPosition(anchor);
+      throwIfStickerInterrupted(signal);
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      throwIfStickerInterrupted(signal);
       await this.page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+      throwIfStickerInterrupted(signal);
 
       let visibleCategories = await findStickerCategories(this.page);
+      throwIfStickerInterrupted(signal);
 
       if (visibleCategories.length === 0) {
         const control = await requireUniqueStickerControl(this.page);
+        throwIfStickerInterrupted(signal);
         await control.click();
+        throwIfStickerInterrupted(signal);
       }
 
-      visibleCategories = await waitForStickerCategories(this.page);
+      visibleCategories = await waitForStickerCategories(this.page, signal);
+      throwIfStickerInterrupted(signal);
       const liveCategory = visibleCategories.find(
         (candidate) => candidate.id === categoryId,
       );
@@ -788,14 +830,19 @@ export class NaverStickerAdapter {
       }
 
       if (!liveCategory.isSelected) {
+        throwIfStickerInterrupted(signal);
         await liveCategory.locator.click();
+        throwIfStickerInterrupted(signal);
         await this.page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS * 2);
+        throwIfStickerInterrupted(signal);
       }
 
       const items = await waitForStickerItems(
         this.page,
         liveCategory.itemPrefix,
+        signal,
       );
+      throwIfStickerInterrupted(signal);
       const previousIdentity = this.lastStickerIdentityByCategory.get(
         categoryId,
       );
@@ -810,12 +857,16 @@ export class NaverStickerAdapter {
         Math.floor(randomValue * selectableItems.length)
       ]!;
 
+      throwIfStickerInterrupted(signal);
       await stickerItem.locator.click();
+      throwIfStickerInterrupted(signal);
 
       const afterCount = await waitForStickerCount(
         this.page,
         beforeCount + 1,
+        signal,
       );
+      throwIfStickerInterrupted(signal);
 
       if (afterCount !== beforeCount + 1) {
         throw new NaverStickerError(

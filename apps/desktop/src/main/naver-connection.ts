@@ -104,6 +104,7 @@ export type NaverRunnerFailureCode =
   | 'QUOTE_INSERT_UNCONFIRMED'
   | 'QUOTE_POSITION_MISMATCH'
   | 'INVALID_STICKER_REQUEST'
+  | 'STICKER_OPERATION_INTERRUPTED'
   | 'STICKER_ANCHOR_NOT_FOUND'
   | 'STICKER_ANCHOR_MISMATCH'
   | 'STICKER_SELECTION_FAILED'
@@ -360,6 +361,7 @@ export class NaverConnectionSession {
   async listStickerCategories(
     paragraphNumber: number,
     position: NaverStickerPosition,
+    signal?: AbortSignal,
   ): Promise<NaverStickerCategoryResult> {
     const content = this.enteredContent;
 
@@ -376,6 +378,7 @@ export class NaverConnectionSession {
         content.paragraphs,
         paragraphNumber,
         position,
+        signal,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
@@ -388,6 +391,7 @@ export class NaverConnectionSession {
     paragraphNumber: number,
     position: NaverStickerPosition,
     categoryId: string,
+    signal?: AbortSignal,
   ): Promise<NaverStickerInsertionResult> {
     const content = this.enteredContent;
 
@@ -405,6 +409,7 @@ export class NaverConnectionSession {
         paragraphNumber,
         position,
         categoryId,
+        signal,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
