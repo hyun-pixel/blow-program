@@ -18,6 +18,16 @@ export interface WriterNavigationRepeatResult
   readonly chromeVersion: string;
 }
 
+export interface SlowNetworkTestResult {
+  readonly stage: 'SLOW_NETWORK_CONFIRMED';
+  readonly message: string;
+  readonly latencyMs: number;
+  readonly delayedNavigationCount: number;
+  readonly blogHomeReached: boolean;
+  readonly writerReached: boolean;
+  readonly chromeVersion: string;
+}
+
 export function getWindowsDisplayName(systemVersion: string): string {
   const parts = systemVersion.split('.');
   const major = Number(parts[0]);

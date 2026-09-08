@@ -4,6 +4,7 @@ import {
   Circle,
   ExternalLink,
   FileText,
+  Gauge,
   ImagePlus,
   Images,
   Keyboard,
@@ -51,6 +52,7 @@ import type {
 } from '@blow/naver-adapter';
 import type {
   CompatibilityEnvironmentResult,
+  SlowNetworkTestResult,
   WriterNavigationRepeatProgress,
   WriterNavigationRepeatResult,
 } from '../shared/compatibility-environment.js';
@@ -75,6 +77,7 @@ type ActionName =
   | 'force-exit-test'
   | 'environment-inspection'
   | 'writer-navigation-repeat'
+  | 'slow-network-test'
   | 'select-images'
   | 'images'
   | 'focus';
@@ -334,6 +337,9 @@ export function ConnectionScreen() {
     useState<WriterNavigationRepeatResult | null>(null);
   const [writerNavigationError, setWriterNavigationError] =
     useState<string | null>(null);
+  const [slowNetworkResult, setSlowNetworkResult] =
+    useState<SlowNetworkTestResult | null>(null);
+  const [slowNetworkError, setSlowNetworkError] = useState<string | null>(null);
   const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
   const [dividerPosition, setDividerPosition] =
     useState<NaverDividerPosition>('after');
@@ -495,6 +501,8 @@ export function ConnectionScreen() {
           setWriterNavigationProgress({ completedRuns: 0, totalRuns: 20 });
           setWriterNavigationResult(null);
           setWriterNavigationError(null);
+          setSlowNetworkResult(null);
+          setSlowNetworkError(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -625,6 +633,8 @@ export function ConnectionScreen() {
       setWriterNavigationProgress({ completedRuns: 0, totalRuns: 20 });
       setWriterNavigationResult(null);
       setWriterNavigationError(null);
+      setSlowNetworkResult(null);
+      setSlowNetworkError(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -1324,6 +1334,50 @@ export function ConnectionScreen() {
 
       setWriterNavigationError(
         '글쓰기 화면 반복 진입을 완료하지 못했습니다. 다시 시도해 주세요.',
+      );
+    } finally {
+      finishOperation(operationVersion);
+    }
+  };
+
+  const testSlowNetwork = async (): Promise<void> => {
+    const operationVersion = beginOperation('slow-network-test');
+    setSlowNetworkResult(null);
+    setSlowNetworkError(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.testSlowNetwork();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      if (response.ok) {
+        setSlowNetworkResult(response.result);
+      } else {
+        setSlowNetworkError(response.error.message);
+
+        if (
+          response.error.code === 'BROWSER_CLOSED' ||
+          response.error.code === 'NAVER_AUTH_REQUIRED' ||
+          response.error.code === 'NAVER_NETWORK_ERROR'
+        ) {
+          if (response.error.code === 'BROWSER_CLOSED') {
+            setBrowserOpen(false);
+            setStatus(null);
+          }
+
+          setError(response.error);
+        }
+      }
+    } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      setSlowNetworkError(
+        '느린 네트워크 대응을 확인하지 못했습니다. 전용 Chrome을 확인해 주세요.',
       );
     } finally {
       finishOperation(operationVersion);
@@ -2462,6 +2516,110 @@ export function ConnectionScreen() {
           </div>
         </section>
       ) : null}
+      {status?.stage === 'WRITER_READY' ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="slow-network-test-heading"
+          aria-busy={activeAction === 'slow-network-test'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="slow-network-test-heading">느린 네트워크 진입 테스트</h2>
+              <p>
+                검증용 탭의 페이지 이동마다 1.5초 지연을 적용해 블로그 홈과 글쓰기 진입을 검사합니다.
+              </p>
+            </div>
+            <span className="document-state" aria-live="polite">
+              {slowNetworkResult
+                ? '저속 환경 확인 완료'
+                : activeAction === 'slow-network-test'
+                  ? '지연 적용 중'
+                  : '테스트 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  현재 편집기는 그대로 유지합니다. 별도의 검증용 탭에만 지연을 적용하며, 테스트가 끝나면 지연 설정과 탭을 자동으로 정리합니다.
+                </p>
+              </div>
+
+              {slowNetworkError ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>느린 네트워크 테스트를 완료하지 못했습니다</strong>
+                    <p>{slowNetworkError}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={isUiBusy}
+                onClick={() => void testSlowNetwork()}
+              >
+                {activeAction === 'slow-network-test' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : slowNetworkResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Gauge aria-hidden="true" />
+                )}
+                {activeAction === 'slow-network-test'
+                  ? '느린 네트워크 확인 중…'
+                  : slowNetworkResult
+                    ? '느린 네트워크 확인 완료'
+                    : '느린 네트워크 테스트 시작'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="느린 네트워크 테스트 결과"
+            >
+              <Gauge aria-hidden="true" />
+              <div>
+                <h3>
+                  {slowNetworkResult ? '처리 결과' : '이번 단계에서 확인할 내용'}
+                </h3>
+                {slowNetworkResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>페이지 이동 지연</dt>
+                      <dd>{(slowNetworkResult.latencyMs / 1_000).toFixed(1)}초</dd>
+                    </div>
+                    <div>
+                      <dt>지연된 페이지 이동</dt>
+                      <dd>{slowNetworkResult.delayedNavigationCount}회</dd>
+                    </div>
+                    <div>
+                      <dt>블로그 홈</dt>
+                      <dd>{slowNetworkResult.blogHomeReached ? '완료' : '미확인'}</dd>
+                    </div>
+                    <div>
+                      <dt>글쓰기 진입</dt>
+                      <dd>{slowNetworkResult.writerReached ? '완료' : '미확인'}</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>별도의 검증용 탭 열기</li>
+                    <li>블로그와 글쓰기 페이지 이동에 1.5초 지연 적용</li>
+                    <li>중복 클릭 없이 각 화면이 열릴 때까지 대기</li>
+                    <li>입력·저장·발행 없이 검증용 탭 정리</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+
       {status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"

@@ -65,6 +65,7 @@ const ipcChannels = {
   naverInspectCompatibilityEnvironment: 'naver:inspect-compatibility-environment',
   naverTestWriterNavigationRepeat: 'naver:test-writer-navigation-repeat',
   naverWriterNavigationProgress: 'naver:writer-navigation-progress',
+  naverTestSlowNetwork: 'naver:test-slow-network',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -2184,6 +2185,59 @@ function registerNaverIpc(): void {
           error: {
             code: 'WRITER_NAVIGATION_REPEAT_FAILED',
             message: '글쓰기 화면 반복 진입을 완료하지 못했습니다. 다시 시도해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverTestSlowNetwork,
+    async (event) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.testSlowNetwork(1_500),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'SLOW_NETWORK_TEST_FAILED',
+            message: '느린 네트워크 대응을 확인하지 못했습니다. 다시 시도해 주세요.',
           },
         };
       } finally {

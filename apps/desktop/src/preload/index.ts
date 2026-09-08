@@ -29,6 +29,7 @@ import type {
 } from '@blow/naver-adapter';
 import type {
   CompatibilityEnvironmentResult,
+  SlowNetworkTestResult,
   WriterNavigationRepeatProgress,
   WriterNavigationRepeatResult,
 } from '../shared/compatibility-environment.js';
@@ -242,6 +243,19 @@ type WriterNavigationRepeatResponse =
       };
     };
 
+type SlowNetworkResponse =
+  | {
+      readonly ok: true;
+      readonly result: SlowNetworkTestResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 const ipcChannels = {
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
@@ -267,6 +281,7 @@ const ipcChannels = {
   naverInspectCompatibilityEnvironment: 'naver:inspect-compatibility-environment',
   naverTestWriterNavigationRepeat: 'naver:test-writer-navigation-repeat',
   naverWriterNavigationProgress: 'naver:writer-navigation-progress',
+  naverTestSlowNetwork: 'naver:test-slow-network',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -384,6 +399,8 @@ const blowNaverApi = {
     ipcRenderer.invoke(ipcChannels.naverInspectCompatibilityEnvironment),
   testWriterNavigationRepeat: (): Promise<WriterNavigationRepeatResponse> =>
     ipcRenderer.invoke(ipcChannels.naverTestWriterNavigationRepeat),
+  testSlowNetwork: (): Promise<SlowNetworkResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverTestSlowNetwork),
   onWriterNavigationProgress: (
     listener: (progress: WriterNavigationRepeatProgress) => void,
   ) => {

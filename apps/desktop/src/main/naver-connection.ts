@@ -37,8 +37,10 @@ import {
   chromium,
   type BrowserContext,
   type Page,
+  type Route,
 } from 'playwright-core';
 import type {
+  SlowNetworkTestResult,
   WriterNavigationRepeatProgress,
   WriterNavigationRepeatResult,
 } from '../shared/compatibility-environment.js';
@@ -133,6 +135,7 @@ export type NaverRunnerFailureCode =
   | 'STRUCTURE_TEST_UNCONFIRMED'
   | 'CHROME_VERSION_UNCONFIRMED'
   | 'WRITER_NAVIGATION_REPEAT_FAILED'
+  | 'SLOW_NETWORK_TEST_FAILED'
   | 'NAVER_CONNECTION_FAILED';
 
 export interface NaverRunnerFailure {
@@ -746,6 +749,134 @@ export class NaverConnectionSession {
       totalRuns,
       chromeVersion,
     };
+  }
+
+  async testSlowNetwork(
+    latencyMs = 1_500,
+  ): Promise<SlowNetworkTestResult> {
+    const context = this.context;
+
+    if (!context) {
+      throw new NaverConnectionRunnerError({
+        code: 'BROWSER_CLOSED',
+        message: '전용 Chrome이 닫혔습니다. 다시 열어 주세요.',
+      });
+    }
+
+    if (!Number.isInteger(latencyMs) || latencyMs < 500 || latencyMs > 5_000) {
+      throw new NaverConnectionRunnerError({
+        code: 'SLOW_NETWORK_TEST_FAILED',
+        message: '느린 네트워크 지연 시간 설정이 올바르지 않습니다.',
+      });
+    }
+
+    const writerHref = this.writerHref;
+
+    if (!writerHref) {
+      throw new NaverConnectionRunnerError({
+        code: 'SLOW_NETWORK_TEST_FAILED',
+        message: '먼저 등록 블로그와 글쓰기 이동 경로를 확인해 주세요.',
+      });
+    }
+
+    let testPage: Page | undefined;
+    let testAdapter: NaverConnectionAdapter | undefined;
+    let delayedNavigationCount = 0;
+    const throttledPages = new Set<Page>();
+    const slowNavigation = async (route: Route): Promise<void> => {
+      try {
+        const request = route.request();
+        const requestPage = request.frame().page();
+        let shouldDelay = throttledPages.has(requestPage);
+
+        if (!shouldDelay) {
+          const opener = await requestPage.opener();
+
+          if (opener && throttledPages.has(opener)) {
+            throttledPages.add(requestPage);
+            shouldDelay = true;
+          }
+        }
+
+        if (shouldDelay && request.resourceType() === 'document') {
+          delayedNavigationCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, latencyMs));
+        }
+
+        await route.continue();
+      } catch {
+        await route.continue().catch(() => undefined);
+      }
+    };
+
+    try {
+      testPage = await context.newPage();
+      throttledPages.add(testPage);
+      await context.route('**/*', slowNavigation);
+      testAdapter = new NaverConnectionAdapter(testPage);
+
+      const homeStatus = await testAdapter.openHome(this.profile);
+
+      if (homeStatus.stage === 'LOGIN_REQUIRED') {
+        throw new NaverConnectionError(
+          'NAVER_AUTH_REQUIRED',
+          '네이버 로그인이 만료되었습니다. Chrome에서 다시 로그인해 주세요.',
+        );
+      }
+
+      const writerStatus = await testAdapter.openWriter(
+        this.profile,
+        writerHref,
+      );
+
+      if (writerStatus.stage === 'LOGIN_REQUIRED') {
+        throw new NaverConnectionError(
+          'NAVER_AUTH_REQUIRED',
+          '네이버 로그인이 만료되었습니다. Chrome에서 다시 로그인해 주세요.',
+        );
+      }
+
+      if (writerStatus.stage !== 'WRITER_READY') {
+        throw new NaverConnectionRunnerError({
+          code: 'SLOW_NETWORK_TEST_FAILED',
+          message: '느린 네트워크에서 글쓰기 화면 진입을 확인하지 못했습니다.',
+        });
+      }
+
+      if (delayedNavigationCount < 2) {
+        throw new NaverConnectionRunnerError({
+          code: 'SLOW_NETWORK_TEST_FAILED',
+          message: '페이지 이동 지연이 충분히 적용됐는지 확인하지 못했습니다.',
+        });
+      }
+
+      return {
+        stage: 'SLOW_NETWORK_CONFIRMED',
+        message: '느린 네트워크에서도 블로그 홈과 글쓰기 화면 진입을 완료했습니다.',
+        latencyMs,
+        delayedNavigationCount,
+        blogHomeReached: true,
+        writerReached: true,
+        chromeVersion: this.getChromeVersion(),
+      };
+    } catch (error) {
+      if (error instanceof NaverConnectionRunnerError) {
+        throw error;
+      }
+
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    } finally {
+      await context.unroute('**/*', slowNavigation).catch(() => undefined);
+      await testAdapter?.closePage().catch(() => undefined);
+
+      if (testPage && !testPage.isClosed()) {
+        await testPage.close().catch(() => undefined);
+      }
+
+      await this.adapter.bringToFront().catch(() => undefined);
+    }
   }
 
   getChromeVersion(): string {

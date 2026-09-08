@@ -25,6 +25,7 @@ import type {
 } from '@blow/naver-adapter';
 import type {
   CompatibilityEnvironmentResult,
+  SlowNetworkTestResult,
   WriterNavigationRepeatProgress,
   WriterNavigationRepeatResult,
 } from '../shared/compatibility-environment.js';
@@ -138,6 +139,11 @@ interface WriterNavigationRepeatSuccessResponse {
   readonly result: WriterNavigationRepeatResult;
 }
 
+interface SlowNetworkSuccessResponse {
+  readonly ok: true;
+  readonly result: SlowNetworkTestResult;
+}
+
 interface BasicSuccessResponse {
   readonly ok: true;
 }
@@ -215,6 +221,9 @@ declare global {
       >;
       testWriterNavigationRepeat(): Promise<
         NaverErrorResponse | WriterNavigationRepeatSuccessResponse
+      >;
+      testSlowNetwork(): Promise<
+        NaverErrorResponse | SlowNetworkSuccessResponse
       >;
       onWriterNavigationProgress(
         listener: (progress: WriterNavigationRepeatProgress) => void,
