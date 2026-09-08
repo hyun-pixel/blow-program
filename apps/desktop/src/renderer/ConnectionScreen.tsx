@@ -37,6 +37,7 @@ import type {
   NaverImageAttachmentResult,
   NaverImageLayout,
   NaverNetworkInterruptionTestResult,
+  NaverStructureChangeTestResult,
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
@@ -65,6 +66,7 @@ type ActionName =
   | 'save-draft'
   | 'interaction-monitor'
   | 'network-test'
+  | 'structure-test'
   | 'select-images'
   | 'images'
   | 'focus';
@@ -308,6 +310,9 @@ export function ConnectionScreen() {
   const [networkTestResult, setNetworkTestResult] =
     useState<NaverNetworkInterruptionTestResult | null>(null);
   const [networkTestError, setNetworkTestError] = useState<string | null>(null);
+  const [structureTestResult, setStructureTestResult] =
+    useState<NaverStructureChangeTestResult | null>(null);
+  const [structureTestError, setStructureTestError] = useState<string | null>(null);
   const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
   const [dividerPosition, setDividerPosition] =
     useState<NaverDividerPosition>('after');
@@ -454,6 +459,8 @@ export function ConnectionScreen() {
           setInteractionError(null);
           setNetworkTestResult(null);
           setNetworkTestError(null);
+          setStructureTestResult(null);
+          setStructureTestError(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -577,6 +584,8 @@ export function ConnectionScreen() {
       setInteractionError(null);
       setNetworkTestResult(null);
       setNetworkTestError(null);
+      setStructureTestResult(null);
+      setStructureTestError(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -1132,6 +1141,8 @@ export function ConnectionScreen() {
     const operationVersion = beginOperation('network-test');
     setNetworkTestResult(null);
     setNetworkTestError(null);
+    setStructureTestResult(null);
+    setStructureTestError(null);
     setError(null);
 
     try {
@@ -1159,6 +1170,54 @@ export function ConnectionScreen() {
 
       setNetworkTestError(
         '네트워크 끊김 감지를 완료하지 못했습니다. 전용 Chrome을 확인해 주세요.',
+      );
+    } finally {
+      finishOperation(operationVersion);
+    }
+  };
+
+  const testStructureChange = async (): Promise<void> => {
+    const operationVersion = beginOperation('structure-test');
+    setStructureTestResult(null);
+    setStructureTestError(null);
+    setNetworkTestResult(null);
+    setNetworkTestError(null);
+    setInteractionResult(null);
+    setInteractionError(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.testStructureChange();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      if (response.ok) {
+        setStructureTestResult(response.result);
+      } else {
+        setStructureTestError(response.error.message);
+
+        if (
+          response.error.code === 'BROWSER_CLOSED' ||
+          response.error.code === 'NAVER_AUTH_REQUIRED' ||
+          response.error.code === 'NAVER_NETWORK_ERROR'
+        ) {
+          if (response.error.code === 'BROWSER_CLOSED') {
+            setBrowserOpen(false);
+            setStatus(null);
+          }
+
+          setError(response.error);
+        }
+      }
+    } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      setStructureTestError(
+        '화면 구조 변경 시 안전 중단을 확인하지 못했습니다. 전용 Chrome을 확인해 주세요.',
       );
     } finally {
       finishOperation(operationVersion);
@@ -1480,7 +1539,17 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
-      {networkTestResult ? (
+      {structureTestResult ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>화면 구조 변경 안전 중단을 확인했습니다</h2>
+            <p>
+              누락되거나 중복된 화면 요소를 추측해서 조작하지 않았습니다.
+            </p>
+          </div>
+        </section>
+      ) : networkTestResult ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
@@ -1855,6 +1924,106 @@ export function ConnectionScreen() {
                     <li>오프라인 상태에서 자동 입력 시작 차단 확인</li>
                     <li>검증 직후 전용 Chrome 네트워크 복구</li>
                     <li>게시물과 로그인 정보는 변경하지 않음</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+
+      {status?.stage === 'WRITER_READY' ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="structure-test-heading"
+          aria-busy={activeAction === 'structure-test'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="structure-test-heading">화면 구조 변경 안전 중단 테스트</h2>
+              <p>
+                네이버 화면의 요소가 사라지거나 중복돼도 임의로 조작하지 않는지 확인합니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {structureTestResult
+                ? '안전 중단 확인 완료'
+                : activeAction === 'structure-test'
+                  ? '확인 중'
+                  : '테스트 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  실제 화면을 바꾸지 않고 읽기 방식으로만 검사합니다. 게시물 클릭과 입력은 실행하지 않습니다.
+                </p>
+              </div>
+
+              {structureTestError ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>화면 구조 변경 안전 중단을 확인하지 못했습니다</strong>
+                    <p>{structureTestError}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={isUiBusy || Boolean(structureTestResult)}
+                onClick={() => void testStructureChange()}
+              >
+                {activeAction === 'structure-test' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : structureTestResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <PanelsTopLeft aria-hidden="true" />
+                )}
+                {activeAction === 'structure-test'
+                  ? '구조 변경 안전 중단 확인 중…'
+                  : structureTestResult
+                    ? '구조 변경 감지 완료'
+                    : '구조 변경 감지 시작'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="화면 구조 변경 안전 중단 범위"
+            >
+              <PanelsTopLeft aria-hidden="true" />
+              <div>
+                <h3>
+                  {structureTestResult ? '처리 결과' : '이번 단계에서 확인할 내용'}
+                </h3>
+                {structureTestResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>누락 요소 차단</dt>
+                      <dd>완료</dd>
+                    </div>
+                    <div>
+                      <dt>중복 요소 차단</dt>
+                      <dd>완료</dd>
+                    </div>
+                    <div>
+                      <dt>자동 클릭·입력</dt>
+                      <dd>{structureTestResult.automatedActionCount}회</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>검증용 누락 요소를 찾지 못하면 즉시 중단</li>
+                    <li>검증용 요소가 둘 이상이면 임의 선택 없이 중단</li>
+                    <li>버튼 클릭과 편집기 입력이 0회인지 확인</li>
+                    <li>현재 게시물과 로그인 상태는 변경하지 않음</li>
                   </ol>
                 )}
               </div>

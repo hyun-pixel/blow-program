@@ -8,12 +8,14 @@ export {
   NaverEditorAdapter,
   NaverEditorError,
   normalizeEditorParagraphs,
+  probeNaverEditorStructureSafety,
   normalizeEditorTitle,
   validateDraftContent,
 } from './naver-editor.js';
 export type {
   NaverEditorFailureCode,
   NaverEditorInputResult,
+  NaverEditorStructureProbeResult,
 } from './naver-editor.js';
 export {
   NaverDraftSaveAdapter,
@@ -95,6 +97,7 @@ export type {
   NaverConnectionStage,
   NaverConnectionStatus,
   NaverNetworkInterruptionTestResult,
+  NaverStructureChangeTestResult,
   NaverUserInteractionMonitorOptions,
   NaverUserInteractionResult,
   NaverUserInteractionType,

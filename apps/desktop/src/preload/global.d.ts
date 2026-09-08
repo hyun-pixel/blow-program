@@ -12,6 +12,7 @@ import type {
   NaverImageAttachmentResult,
   NaverImageLayout,
   NaverNetworkInterruptionTestResult,
+  NaverStructureChangeTestResult,
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
@@ -107,6 +108,11 @@ interface NaverNetworkInterruptionSuccessResponse {
   readonly result: NaverNetworkInterruptionTestResult;
 }
 
+interface NaverStructureChangeSuccessResponse {
+  readonly ok: true;
+  readonly result: NaverStructureChangeTestResult;
+}
+
 interface NaverUserInteractionSuccessResponse {
   readonly ok: true;
   readonly result: NaverUserInteractionResult;
@@ -177,6 +183,9 @@ declare global {
       >;
       testNetworkInterruption(): Promise<
         NaverErrorResponse | NaverNetworkInterruptionSuccessResponse
+      >;
+      testStructureChange(): Promise<
+        NaverErrorResponse | NaverStructureChangeSuccessResponse
       >;
       focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
       close(): Promise<BasicSuccessResponse>;

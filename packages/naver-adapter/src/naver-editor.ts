@@ -53,6 +53,12 @@ export interface NaverEditorInputResult {
   readonly paragraphCount: number;
 }
 
+export interface NaverEditorStructureProbeResult {
+  readonly missingTargetBlocked: boolean;
+  readonly ambiguousTargetBlocked: boolean;
+  readonly automatedActionCount: 0;
+}
+
 export class NaverEditorError extends Error {
   constructor(
     readonly code: NaverEditorFailureCode,
@@ -207,6 +213,36 @@ async function findUniqueEditable(
   }
 
   return null;
+}
+
+export async function probeNaverEditorStructureSafety(
+  page: Page,
+): Promise<NaverEditorStructureProbeResult> {
+  const missingTarget = await findUniqueEditable(
+    page,
+    '제목',
+    ['[data-blow-structure-safety-probe="missing"]'],
+  );
+  let ambiguousTargetBlocked = false;
+
+  try {
+    await findUniqueEditable(page, '제목', ['html, body']);
+  } catch (error) {
+    if (
+      error instanceof NaverEditorError &&
+      error.code === 'EDITOR_FIELD_AMBIGUOUS'
+    ) {
+      ambiguousTargetBlocked = true;
+    } else {
+      throw error;
+    }
+  }
+
+  return {
+    missingTargetBlocked: missingTarget === null,
+    ambiguousTargetBlocked,
+    automatedActionCount: 0,
+  };
 }
 
 async function findVisibleEditables(

@@ -6,6 +6,7 @@ import type {
 import type { DraftContent } from './contracts.js';
 import {
   NaverEditorAdapter,
+  probeNaverEditorStructureSafety,
   type NaverEditorInputResult,
 } from './naver-editor.js';
 import {
@@ -67,6 +68,7 @@ export type NaverConnectionFailureCode =
   | 'NAVER_AUTH_REQUIRED'
   | 'NAVER_NETWORK_ERROR'
   | 'NAVER_PAGE_UNKNOWN'
+  | 'STRUCTURE_TEST_UNCONFIRMED'
   | 'WRITER_LINK_NOT_FOUND'
   | 'WRITER_LINK_AMBIGUOUS'
   | 'WRITER_NOT_READY';
@@ -113,6 +115,15 @@ export interface NaverNetworkInterruptionTestResult {
   readonly message: string;
   readonly offlineDetected: true;
   readonly networkRestored: true;
+  readonly currentUrl: string;
+}
+
+export interface NaverStructureChangeTestResult {
+  readonly stage: 'STRUCTURE_CHANGE_SAFETY_CONFIRMED';
+  readonly message: string;
+  readonly missingTargetBlocked: true;
+  readonly ambiguousTargetBlocked: true;
+  readonly automatedActionCount: 0;
   readonly currentUrl: string;
 }
 
@@ -987,6 +998,34 @@ export class NaverConnectionAdapter {
 
     const imageAdapter = new NaverImageAdapter(this.page);
     return imageAdapter.attachImages(imagePaths, layout, signal);
+  }
+
+  async testStructureChangeSafety(
+    profile: NaverBlogProfile,
+  ): Promise<NaverStructureChangeTestResult> {
+    await requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 화면 구조 안전 검사를 시작하지 않았습니다.',
+    );
+
+    const probe = await probeNaverEditorStructureSafety(this.page);
+
+    if (!probe.missingTargetBlocked || !probe.ambiguousTargetBlocked) {
+      throw new NaverConnectionError(
+        'STRUCTURE_TEST_UNCONFIRMED',
+        '화면 구조가 달라졌을 때 자동 조작이 차단되는지 확인하지 못했습니다.',
+      );
+    }
+
+    return {
+      stage: 'STRUCTURE_CHANGE_SAFETY_CONFIRMED',
+      message: '누락되거나 중복된 화면 요소를 추측해서 조작하지 않고 안전하게 중단했습니다.',
+      missingTargetBlocked: true,
+      ambiguousTargetBlocked: true,
+      automatedActionCount: 0,
+      currentUrl: this.page.url(),
+    };
   }
 
   async isNetworkAvailable(): Promise<boolean> {

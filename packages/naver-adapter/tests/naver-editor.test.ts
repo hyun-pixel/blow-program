@@ -13,6 +13,7 @@ import {
   NaverEditorError,
   normalizeEditorParagraphs,
   normalizeEditorTitle,
+  probeNaverEditorStructureSafety,
   validateDraftContent,
 } from '../src/naver-editor.js';
 
@@ -130,6 +131,39 @@ describe('네이버 편집기 입력값 정규화', () => {
         paragraphs: ['가'.repeat(10_001)],
       }),
     ).toThrowError(NaverEditorError);
+  });
+});
+
+describe('네이버 편집기 구조 변경 안전 검사', () => {
+  it('누락되거나 중복된 요소를 발견하면 아무 조작도 하지 않는다', async () => {
+    const firstCandidate = createEditable();
+    const secondCandidate = createEditable();
+    const emptyCollection = createCollection([]);
+    const ambiguousCollection = createCollection([
+      firstCandidate.locator,
+      secondCandidate.locator,
+    ]);
+    const page = {
+      frames: vi.fn().mockReturnValue([
+        {
+          locator: vi.fn((selector: string) => (
+            selector === 'html, body'
+              ? ambiguousCollection
+              : emptyCollection
+          )),
+        },
+      ]),
+    } as unknown as Page;
+
+    await expect(probeNaverEditorStructureSafety(page)).resolves.toEqual({
+      missingTargetBlocked: true,
+      ambiguousTargetBlocked: true,
+      automatedActionCount: 0,
+    });
+    expect(firstCandidate.locator.click).not.toHaveBeenCalled();
+    expect(firstCandidate.locator.fill).not.toHaveBeenCalled();
+    expect(secondCandidate.locator.click).not.toHaveBeenCalled();
+    expect(secondCandidate.locator.fill).not.toHaveBeenCalled();
   });
 });
 

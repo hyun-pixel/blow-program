@@ -53,6 +53,7 @@ const ipcChannels = {
   naverAttachImages: 'naver:attach-images',
   naverMonitorUserInteraction: 'naver:monitor-user-interaction',
   naverTestNetworkInterruption: 'naver:test-network-interruption',
+  naverTestStructureChange: 'naver:test-structure-change',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -1893,6 +1894,59 @@ function registerNaverIpc(): void {
           error: {
             code: 'NETWORK_TEST_UNCONFIRMED',
             message: '네트워크 끊김 감지를 확인하지 못했습니다. 다시 시도해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverTestStructureChange,
+    async (event) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.testStructureChangeSafety(),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'STRUCTURE_TEST_UNCONFIRMED',
+            message: '화면 구조 변경 시 안전 중단을 확인하지 못했습니다. 다시 시도해 주세요.',
           },
         };
       } finally {

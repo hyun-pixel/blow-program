@@ -23,6 +23,7 @@ import {
   type NaverImageAttachmentResult,
   type NaverImageLayout,
   type NaverNetworkInterruptionTestResult,
+  type NaverStructureChangeTestResult,
   type NaverQuoteInsertionResult,
   type NaverQuotePosition,
   type NaverQuoteStyleResult,
@@ -124,6 +125,7 @@ export type NaverRunnerFailureCode =
   | 'NAVER_NETWORK_ERROR'
   | 'NETWORK_TEST_UNCONFIRMED'
   | 'NETWORK_TEST_RESTORE_FAILED'
+  | 'STRUCTURE_TEST_UNCONFIRMED'
   | 'NAVER_CONNECTION_FAILED';
 
 export interface NaverRunnerFailure {
@@ -619,6 +621,16 @@ export class NaverConnectionSession {
       networkRestored: true,
       currentUrl: this.adapter.currentUrl(),
     };
+  }
+
+  async testStructureChangeSafety(): Promise<NaverStructureChangeTestResult> {
+    try {
+      return await this.adapter.testStructureChangeSafety(this.profile);
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
   }
 
   async waitForUserInteraction(
