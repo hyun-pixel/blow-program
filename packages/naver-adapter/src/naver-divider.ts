@@ -43,6 +43,7 @@ export type NaverDividerStyleSelection = NaverDividerStyleId | 'random';
 
 export type NaverDividerFailureCode =
   | 'INVALID_DIVIDER_REQUEST'
+  | 'DIVIDER_OPERATION_INTERRUPTED'
   | 'DIVIDER_ANCHOR_NOT_FOUND'
   | 'DIVIDER_ANCHOR_MISMATCH'
   | 'DIVIDER_SELECTION_FAILED'
@@ -90,6 +91,15 @@ export class NaverDividerError extends Error {
   ) {
     super(message, options);
     this.name = 'NaverDividerError';
+  }
+}
+
+function throwIfDividerInterrupted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new NaverDividerError(
+      'DIVIDER_OPERATION_INTERRUPTED',
+      '사용자 조작을 감지해 남은 구분선 작업을 중단했습니다.',
+    );
   }
 }
 
@@ -635,6 +645,7 @@ async function placeCaretAtParagraphEdge(
 async function waitForDividerCount(
   page: Page,
   expectedCount: number,
+  signal?: AbortSignal,
 ): Promise<number> {
   const maxAttempts = Math.ceil(
     DIVIDER_VERIFY_TIMEOUT_MS / DIVIDER_VERIFY_INTERVAL_MS,
@@ -646,7 +657,9 @@ async function waitForDividerCount(
     actualCount !== expectedCount && attempt < maxAttempts;
     attempt += 1
   ) {
+    throwIfDividerInterrupted(signal);
     await page.waitForTimeout(DIVIDER_VERIFY_INTERVAL_MS);
+    throwIfDividerInterrupted(signal);
     actualCount = await getVisibleDividerCount(page);
   }
 
@@ -663,6 +676,7 @@ export class NaverDividerAdapter {
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverDividerPosition,
+    signal?: AbortSignal,
   ): Promise<NaverDividerStyleResult> {
     const request = validateDividerRequest(
       expectedParagraphs,
@@ -671,15 +685,20 @@ export class NaverDividerAdapter {
     );
 
     try {
+      throwIfDividerInterrupted(signal);
       const paragraphs = await requireMatchingParagraphs(
         this.page,
         request.expectedParagraphs,
       );
+      throwIfDividerInterrupted(signal);
       const anchor = paragraphs[request.paragraphNumber - 1]!;
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      throwIfDividerInterrupted(signal);
       await this.page.waitForTimeout(DIVIDER_VERIFY_INTERVAL_MS);
+      throwIfDividerInterrupted(signal);
       const styles = await ensureDividerStyles(this.page);
+      throwIfDividerInterrupted(signal);
 
       return {
         stage: 'DIVIDER_STYLES_READY',
@@ -707,6 +726,7 @@ export class NaverDividerAdapter {
     paragraphNumber: number,
     position: NaverDividerPosition,
     styleSelection?: NaverDividerStyleSelection,
+    signal?: AbortSignal,
   ): Promise<NaverDividerInsertionResult> {
     const request = validateDividerRequest(
       expectedParagraphs,
@@ -718,34 +738,44 @@ export class NaverDividerAdapter {
       : validateDividerStyleSelection(styleSelection);
 
     try {
+      throwIfDividerInterrupted(signal);
       const paragraphs = await requireMatchingParagraphs(
         this.page,
         request.expectedParagraphs,
       );
+      throwIfDividerInterrupted(signal);
       const anchor = paragraphs[request.paragraphNumber - 1]!;
       const beforeCount = await getVisibleDividerCount(this.page);
+      throwIfDividerInterrupted(signal);
       const beforePosition = await measureDividerPosition(anchor);
+      throwIfDividerInterrupted(signal);
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      throwIfDividerInterrupted(signal);
       await this.page.waitForTimeout(DIVIDER_VERIFY_INTERVAL_MS);
+      throwIfDividerInterrupted(signal);
 
       let selectedStyle: DividerStyleCandidate | undefined;
       let beforeStyleCount = 0;
 
       if (validatedStyle === undefined) {
         const control = await requireUniqueDividerControl(this.page);
+        throwIfDividerInterrupted(signal);
 
         try {
           await control.click();
         } catch (error) {
+          throwIfDividerInterrupted(signal);
           throw new NaverDividerError(
             'DIVIDER_INSERT_UNCONFIRMED',
             '네이버 편집기의 구분선 버튼을 실행하지 못했습니다. Chrome 화면에서 다른 메뉴나 팝업이 열려 있는지 확인해 주세요.',
             { cause: error },
           );
         }
+        throwIfDividerInterrupted(signal);
       } else {
         const styles = await ensureDividerStyles(this.page);
+        throwIfDividerInterrupted(signal);
         const requestedStyleId = validatedStyle === 'random'
           ? styles[
               Math.floor(
@@ -767,22 +797,27 @@ export class NaverDividerAdapter {
           this.page,
           selectedStyle.id,
         );
+        throwIfDividerInterrupted(signal);
 
         try {
           await selectedStyle.locator.click();
         } catch (error) {
+          throwIfDividerInterrupted(signal);
           throw new NaverDividerError(
             'DIVIDER_INSERT_UNCONFIRMED',
             '선택한 구분선 디자인을 실행하지 못했습니다. Chrome 화면을 확인해 주세요.',
             { cause: error },
           );
         }
+        throwIfDividerInterrupted(signal);
       }
 
       const afterCount = await waitForDividerCount(
         this.page,
         beforeCount + 1,
+        signal,
       );
+      throwIfDividerInterrupted(signal);
 
       if (afterCount !== beforeCount + 1) {
         throw new NaverDividerError(
@@ -796,6 +831,7 @@ export class NaverDividerAdapter {
           this.page,
           selectedStyle.id,
         );
+        throwIfDividerInterrupted(signal);
 
         if (afterStyleCount !== beforeStyleCount + 1) {
           throw new NaverDividerError(
@@ -809,9 +845,11 @@ export class NaverDividerAdapter {
         this.page,
         request.expectedParagraphs,
       );
+      throwIfDividerInterrupted(signal);
       const anchorAfterInsertion =
         paragraphsAfterInsertion[request.paragraphNumber - 1]!;
       const afterPosition = await measureDividerPosition(anchorAfterInsertion);
+      throwIfDividerInterrupted(signal);
       const isCorrectPosition = request.position === 'before'
         ? afterPosition.before === beforePosition.before + 1 &&
           afterPosition.after === beforePosition.after

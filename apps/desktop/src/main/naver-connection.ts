@@ -65,6 +65,7 @@ export type NaverRunnerFailureCode =
   | 'DRAFT_SAVE_UNCONFIRMED'
   | 'DRAFT_SAVE_NAVIGATION_UNEXPECTED'
   | 'INVALID_DIVIDER_REQUEST'
+  | 'DIVIDER_OPERATION_INTERRUPTED'
   | 'DIVIDER_ANCHOR_NOT_FOUND'
   | 'DIVIDER_ANCHOR_MISMATCH'
   | 'DIVIDER_SELECTION_FAILED'
@@ -299,6 +300,7 @@ export class NaverConnectionSession {
   async listDividerStyles(
     paragraphNumber: number,
     position: NaverDividerPosition,
+    signal?: AbortSignal,
   ): Promise<NaverDividerStyleResult> {
     const content = this.enteredContent;
 
@@ -315,6 +317,7 @@ export class NaverConnectionSession {
         content.paragraphs,
         paragraphNumber,
         position,
+        signal,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
@@ -327,6 +330,7 @@ export class NaverConnectionSession {
     paragraphNumber: number,
     position: NaverDividerPosition,
     styleSelection?: NaverDividerStyleSelection,
+    signal?: AbortSignal,
   ): Promise<NaverDividerInsertionResult> {
     const content = this.enteredContent;
 
@@ -344,6 +348,7 @@ export class NaverConnectionSession {
         paragraphNumber,
         position,
         styleSelection,
+        signal,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {

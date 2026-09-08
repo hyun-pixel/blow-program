@@ -1179,6 +1179,7 @@ export function ConnectionScreen() {
   const dividerError = error
     ? [
         'INVALID_DIVIDER_REQUEST',
+        'DIVIDER_OPERATION_INTERRUPTED',
         'DIVIDER_ANCHOR_NOT_FOUND',
         'DIVIDER_ANCHOR_MISMATCH',
         'DIVIDER_SELECTION_FAILED',
