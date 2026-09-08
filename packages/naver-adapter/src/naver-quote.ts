@@ -42,6 +42,7 @@ export type NaverQuoteStyleSelection = NaverQuoteStyleId | 'random';
 
 export type NaverQuoteFailureCode =
   | 'INVALID_QUOTE_REQUEST'
+  | 'QUOTE_OPERATION_INTERRUPTED'
   | 'QUOTE_ANCHOR_NOT_FOUND'
   | 'QUOTE_ANCHOR_MISMATCH'
   | 'QUOTE_SELECTION_FAILED'
@@ -89,6 +90,15 @@ export class NaverQuoteError extends Error {
   ) {
     super(message, options);
     this.name = 'NaverQuoteError';
+  }
+}
+
+function throwIfQuoteInterrupted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new NaverQuoteError(
+      'QUOTE_OPERATION_INTERRUPTED',
+      '사용자 조작을 감지해 남은 인용구 작업을 중단했습니다.',
+    );
   }
 }
 
@@ -638,6 +648,7 @@ async function placeCaretAtParagraphEdge(
 async function waitForQuoteCount(
   page: Page,
   expectedCount: number,
+  signal?: AbortSignal,
 ): Promise<number> {
   const maxAttempts = Math.ceil(
     QUOTE_VERIFY_TIMEOUT_MS / QUOTE_VERIFY_INTERVAL_MS,
@@ -649,7 +660,9 @@ async function waitForQuoteCount(
     actualCount !== expectedCount && attempt < maxAttempts;
     attempt += 1
   ) {
+    throwIfQuoteInterrupted(signal);
     await page.waitForTimeout(QUOTE_VERIFY_INTERVAL_MS);
+    throwIfQuoteInterrupted(signal);
     actualCount = await getVisibleQuoteCount(page);
   }
 
@@ -666,6 +679,7 @@ export class NaverQuoteAdapter {
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverQuotePosition,
+    signal?: AbortSignal,
   ): Promise<NaverQuoteStyleResult> {
     const request = validateQuoteRequest(
       expectedParagraphs,
@@ -674,15 +688,20 @@ export class NaverQuoteAdapter {
     );
 
     try {
+      throwIfQuoteInterrupted(signal);
       const paragraphs = await requireMatchingParagraphs(
         this.page,
         request.expectedParagraphs,
       );
+      throwIfQuoteInterrupted(signal);
       const anchor = paragraphs[request.paragraphNumber - 1]!;
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      throwIfQuoteInterrupted(signal);
       await this.page.waitForTimeout(QUOTE_VERIFY_INTERVAL_MS);
+      throwIfQuoteInterrupted(signal);
       const styles = await ensureQuoteStyles(this.page);
+      throwIfQuoteInterrupted(signal);
 
       return {
         stage: 'QUOTE_STYLES_READY',
@@ -710,6 +729,7 @@ export class NaverQuoteAdapter {
     paragraphNumber: number,
     position: NaverQuotePosition,
     styleSelection?: NaverQuoteStyleSelection,
+    signal?: AbortSignal,
   ): Promise<NaverQuoteInsertionResult> {
     const request = validateQuoteRequest(
       expectedParagraphs,
@@ -721,34 +741,44 @@ export class NaverQuoteAdapter {
       : validateQuoteStyleSelection(styleSelection);
 
     try {
+      throwIfQuoteInterrupted(signal);
       const paragraphs = await requireMatchingParagraphs(
         this.page,
         request.expectedParagraphs,
       );
+      throwIfQuoteInterrupted(signal);
       const anchor = paragraphs[request.paragraphNumber - 1]!;
       const beforeCount = await getVisibleQuoteCount(this.page);
+      throwIfQuoteInterrupted(signal);
       const beforePosition = await measureQuotePosition(anchor);
+      throwIfQuoteInterrupted(signal);
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
+      throwIfQuoteInterrupted(signal);
       await this.page.waitForTimeout(QUOTE_VERIFY_INTERVAL_MS);
+      throwIfQuoteInterrupted(signal);
 
       let selectedStyle: QuoteStyleCandidate | undefined;
       let beforeStyleCount = 0;
 
       if (validatedStyle === undefined) {
         const control = await requireUniqueQuoteControl(this.page);
+        throwIfQuoteInterrupted(signal);
 
         try {
           await control.click();
         } catch (error) {
+          throwIfQuoteInterrupted(signal);
           throw new NaverQuoteError(
             'QUOTE_INSERT_UNCONFIRMED',
             '네이버 편집기의 인용구 버튼을 실행하지 못했습니다. Chrome 화면에서 다른 메뉴나 팝업이 열려 있는지 확인해 주세요.',
             { cause: error },
           );
         }
+        throwIfQuoteInterrupted(signal);
       } else {
         const styles = await ensureQuoteStyles(this.page);
+        throwIfQuoteInterrupted(signal);
         const requestedStyleId = validatedStyle === 'random'
           ? styles[
               Math.floor(
@@ -770,22 +800,27 @@ export class NaverQuoteAdapter {
           this.page,
           selectedStyle.id,
         );
+        throwIfQuoteInterrupted(signal);
 
         try {
           await selectedStyle.locator.click();
         } catch (error) {
+          throwIfQuoteInterrupted(signal);
           throw new NaverQuoteError(
             'QUOTE_INSERT_UNCONFIRMED',
             '선택한 인용구 디자인을 실행하지 못했습니다. Chrome 화면을 확인해 주세요.',
             { cause: error },
           );
         }
+        throwIfQuoteInterrupted(signal);
       }
 
       const afterCount = await waitForQuoteCount(
         this.page,
         beforeCount + 1,
+        signal,
       );
+      throwIfQuoteInterrupted(signal);
 
       if (afterCount !== beforeCount + 1) {
         throw new NaverQuoteError(
@@ -799,6 +834,7 @@ export class NaverQuoteAdapter {
           this.page,
           selectedStyle.id,
         );
+        throwIfQuoteInterrupted(signal);
 
         if (afterStyleCount !== beforeStyleCount + 1) {
           throw new NaverQuoteError(

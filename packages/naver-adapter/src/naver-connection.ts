@@ -860,6 +860,7 @@ export class NaverConnectionAdapter {
     expectedParagraphs: readonly string[],
     paragraphNumber: number,
     position: NaverQuotePosition,
+    signal?: AbortSignal,
   ): Promise<NaverQuoteStyleResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -873,6 +874,7 @@ export class NaverConnectionAdapter {
       expectedParagraphs,
       paragraphNumber,
       position,
+      signal,
     );
   }
 
@@ -882,6 +884,7 @@ export class NaverConnectionAdapter {
     paragraphNumber: number,
     position: NaverQuotePosition,
     styleSelection?: NaverQuoteStyleSelection,
+    signal?: AbortSignal,
   ): Promise<NaverQuoteInsertionResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -896,6 +899,7 @@ export class NaverConnectionAdapter {
       paragraphNumber,
       position,
       styleSelection,
+      signal,
     );
   }
 

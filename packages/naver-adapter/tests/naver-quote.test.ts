@@ -19,6 +19,8 @@ import {
 } from '../src/naver-quote.js';
 
 interface QuotePageOptions {
+  readonly abortAfterCaret?: AbortController;
+  readonly abortAfterStyleMenu?: AbortController;
   readonly paragraphs?: readonly string[];
   readonly controlCount?: number;
   readonly controlLabel?: string;
@@ -88,6 +90,7 @@ function createQuotePage(options: QuotePageOptions = {}): {
         pendingParagraphIndex = paragraphIndex;
         pendingPosition = argument;
         styleMenuOpen = false;
+        options.abortAfterCaret?.abort();
         return true;
       }
 
@@ -141,6 +144,7 @@ function createQuotePage(options: QuotePageOptions = {}): {
 
   const styleMenuClick = vi.fn(async () => {
     styleMenuOpen = true;
+    options.abortAfterStyleMenu?.abort();
   });
   const styleMenuControls = Array.from(
     { length: styleMenuControlCount },
@@ -266,6 +270,60 @@ describe('네이버 인용구 요청 검사', () => {
 });
 
 describe('네이버 인용구 디자인', () => {
+  it('중단 신호를 받으면 디자인 선택창을 열지 않는다', async () => {
+    const controller = new AbortController();
+    const { page, styleMenuClick } = createQuotePage({
+      abortAfterCaret: controller,
+    });
+    const adapter = new NaverQuoteAdapter(page);
+
+    await expect(adapter.listQuoteStyles(
+      [
+        '첫 번째 문단입니다.',
+        '두 번째 문단입니다.',
+        '세 번째 문단입니다.',
+      ],
+      2,
+      'after',
+      controller.signal,
+    )).rejects.toMatchObject({
+      code: 'QUOTE_OPERATION_INTERRUPTED',
+    });
+
+    expect(styleMenuClick).not.toHaveBeenCalled();
+  });
+
+  it('디자인 선택창을 연 뒤 중단되면 디자인을 클릭하지 않는다', async () => {
+    const controller = new AbortController();
+    const {
+      page,
+      styleMenuClick,
+      styleOptionClicks,
+    } = createQuotePage({
+      abortAfterStyleMenu: controller,
+    });
+    const adapter = new NaverQuoteAdapter(page);
+
+    await expect(adapter.insertQuote(
+      [
+        '첫 번째 문단입니다.',
+        '두 번째 문단입니다.',
+        '세 번째 문단입니다.',
+      ],
+      1,
+      'before',
+      'quotation_postit',
+      controller.signal,
+    )).rejects.toMatchObject({
+      code: 'QUOTE_OPERATION_INTERRUPTED',
+    });
+
+    expect(styleMenuClick).toHaveBeenCalledOnce();
+    expect(
+      styleOptionClicks.get('quotation_postit'),
+    ).not.toHaveBeenCalled();
+  });
+
   it('현재 편집기에 표시된 6종 디자인을 순서대로 불러온다', async () => {
     const {
       page,

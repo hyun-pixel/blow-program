@@ -1205,6 +1205,7 @@ export function ConnectionScreen() {
   const quoteError = error
     ? [
         'INVALID_QUOTE_REQUEST',
+        'QUOTE_OPERATION_INTERRUPTED',
         'QUOTE_ANCHOR_NOT_FOUND',
         'QUOTE_ANCHOR_MISMATCH',
         'QUOTE_SELECTION_FAILED',

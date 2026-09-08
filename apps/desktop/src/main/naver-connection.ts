@@ -90,6 +90,7 @@ export type NaverRunnerFailureCode =
   | 'IMAGE_LAYOUT_CONTROL_AMBIGUOUS'
   | 'IMAGE_LAYOUT_MISMATCH'
   | 'INVALID_QUOTE_REQUEST'
+  | 'QUOTE_OPERATION_INTERRUPTED'
   | 'QUOTE_ANCHOR_NOT_FOUND'
   | 'QUOTE_ANCHOR_MISMATCH'
   | 'QUOTE_SELECTION_FAILED'
@@ -448,6 +449,7 @@ export class NaverConnectionSession {
   async listQuoteStyles(
     paragraphNumber: number,
     position: NaverQuotePosition,
+    signal?: AbortSignal,
   ): Promise<NaverQuoteStyleResult> {
     const content = this.enteredContent;
 
@@ -464,6 +466,7 @@ export class NaverConnectionSession {
         content.paragraphs,
         paragraphNumber,
         position,
+        signal,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
@@ -476,6 +479,7 @@ export class NaverConnectionSession {
     paragraphNumber: number,
     position: NaverQuotePosition,
     styleSelection?: NaverQuoteStyleSelection,
+    signal?: AbortSignal,
   ): Promise<NaverQuoteInsertionResult> {
     const content = this.enteredContent;
 
@@ -493,6 +497,7 @@ export class NaverConnectionSession {
         paragraphNumber,
         position,
         styleSelection,
+        signal,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
