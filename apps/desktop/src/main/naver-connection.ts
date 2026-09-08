@@ -126,6 +126,7 @@ export type NaverRunnerFailureCode =
   | 'NETWORK_TEST_UNCONFIRMED'
   | 'NETWORK_TEST_RESTORE_FAILED'
   | 'STRUCTURE_TEST_UNCONFIRMED'
+  | 'CHROME_VERSION_UNCONFIRMED'
   | 'NAVER_CONNECTION_FAILED';
 
 export interface NaverRunnerFailure {
@@ -631,6 +632,28 @@ export class NaverConnectionSession {
         cause: error,
       });
     }
+  }
+
+  getChromeVersion(): string {
+    const context = this.context;
+
+    if (!context) {
+      throw new NaverConnectionRunnerError({
+        code: 'BROWSER_CLOSED',
+        message: '전용 Chrome이 닫혔습니다. 다시 열어 주세요.',
+      });
+    }
+
+    const version = context.browser()?.version().trim();
+
+    if (!version) {
+      throw new NaverConnectionRunnerError({
+        code: 'CHROME_VERSION_UNCONFIRMED',
+        message: '전용 Chrome 버전을 확인하지 못했습니다. Chrome을 다시 열어 주세요.',
+      });
+    }
+
+    return version;
   }
 
   async waitForUserInteraction(

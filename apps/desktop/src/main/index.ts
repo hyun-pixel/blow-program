@@ -6,6 +6,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  screen,
   type IpcMainInvokeEvent,
   type OpenDialogOptions,
   type WebContents,
@@ -30,6 +31,11 @@ import {
   NaverConnectionRunnerError,
   NaverConnectionSession,
 } from './naver-connection.js';
+import {
+  getWindowsDisplayName,
+  toDisplayScalePercent,
+  type CompatibilityEnvironmentResult,
+} from '../shared/compatibility-environment.js';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -55,6 +61,7 @@ const ipcChannels = {
   naverTestNetworkInterruption: 'naver:test-network-interruption',
   naverTestStructureChange: 'naver:test-structure-change',
   naverForceExitTest: 'naver:force-exit-test',
+  naverInspectCompatibilityEnvironment: 'naver:inspect-compatibility-environment',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -2050,6 +2057,75 @@ function registerNaverIpc(): void {
     setTimeout(() => app.exit(0), 150);
     return { ok: true, canceled: false };
   });
+
+  ipcMain.handle(
+    ipcChannels.naverInspectCompatibilityEnvironment,
+    async (event) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      if (process.platform !== 'win32') {
+        return {
+          ok: false,
+          error: {
+            code: 'UNSUPPORTED_PLATFORM',
+            message: '현재 기술검증은 Windows에서만 진행할 수 있습니다.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        const appWindow = BrowserWindow.fromWebContents(event.sender);
+        const display = appWindow && !appWindow.isDestroyed()
+          ? screen.getDisplayMatching(appWindow.getBounds())
+          : screen.getPrimaryDisplay();
+        const systemVersion = process.getSystemVersion();
+        const result: CompatibilityEnvironmentResult = {
+          stage: 'COMPATIBILITY_ENVIRONMENT_RECORDED',
+          message: '현재 테스트 환경을 확인했습니다.',
+          operatingSystem: getWindowsDisplayName(systemVersion),
+          chromeVersion: session.getChromeVersion(),
+          displayScalePercent: toDisplayScalePercent(display.scaleFactor),
+        };
+
+        return { ok: true, result };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'COMPATIBILITY_ENVIRONMENT_UNCONFIRMED',
+            message: '현재 테스트 환경을 확인하지 못했습니다. 다시 시도해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
 
   ipcMain.handle(ipcChannels.naverFocus, async (event) => {
     requireTrustedSender(event);

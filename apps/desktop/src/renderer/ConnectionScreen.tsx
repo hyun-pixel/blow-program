@@ -49,6 +49,7 @@ import type {
   NaverUserInteractionResult,
   NaverUserInteractionType,
 } from '@blow/naver-adapter';
+import type { CompatibilityEnvironmentResult } from '../shared/compatibility-environment.js';
 
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
@@ -68,6 +69,7 @@ type ActionName =
   | 'network-test'
   | 'structure-test'
   | 'force-exit-test'
+  | 'environment-inspection'
   | 'select-images'
   | 'images'
   | 'focus';
@@ -314,6 +316,10 @@ export function ConnectionScreen() {
   const [structureTestResult, setStructureTestResult] =
     useState<NaverStructureChangeTestResult | null>(null);
   const [structureTestError, setStructureTestError] = useState<string | null>(null);
+  const [compatibilityEnvironment, setCompatibilityEnvironment] =
+    useState<CompatibilityEnvironmentResult | null>(null);
+  const [compatibilityEnvironmentError, setCompatibilityEnvironmentError] =
+    useState<string | null>(null);
   const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
   const [dividerPosition, setDividerPosition] =
     useState<NaverDividerPosition>('after');
@@ -462,6 +468,8 @@ export function ConnectionScreen() {
           setNetworkTestError(null);
           setStructureTestResult(null);
           setStructureTestError(null);
+          setCompatibilityEnvironment(null);
+          setCompatibilityEnvironmentError(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -587,6 +595,8 @@ export function ConnectionScreen() {
       setNetworkTestError(null);
       setStructureTestResult(null);
       setStructureTestError(null);
+      setCompatibilityEnvironment(null);
+      setCompatibilityEnvironmentError(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -1206,6 +1216,43 @@ export function ConnectionScreen() {
         code: 'FORCE_EXIT_TEST_FAILED',
         message: '강제 종료 테스트를 시작하지 못했습니다. 다시 시도해 주세요.',
       });
+      finishOperation(operationVersion);
+    }
+  };
+
+  const inspectCompatibilityEnvironment = async (): Promise<void> => {
+    const operationVersion = beginOperation('environment-inspection');
+    setCompatibilityEnvironment(null);
+    setCompatibilityEnvironmentError(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.inspectCompatibilityEnvironment();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      if (response.ok) {
+        setCompatibilityEnvironment(response.result);
+      } else {
+        setCompatibilityEnvironmentError(response.error.message);
+
+        if (response.error.code === 'BROWSER_CLOSED') {
+          setBrowserOpen(false);
+          setStatus(null);
+          setError(response.error);
+        }
+      }
+    } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      setCompatibilityEnvironmentError(
+        '현재 테스트 환경을 확인하지 못했습니다. 다시 시도해 주세요.',
+      );
+    } finally {
       finishOperation(operationVersion);
     }
   };
@@ -2123,6 +2170,102 @@ export function ConnectionScreen() {
                   <li>BLOW를 다시 실행</li>
                   <li>블로그 주소와 진행 단계가 초기화됐는지 확인</li>
                 </ol>
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+
+      {status?.stage === 'WRITER_READY' ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="compatibility-environment-heading"
+          aria-busy={activeAction === 'environment-inspection'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="compatibility-environment-heading">현재 호환성 환경 확인</h2>
+              <p>
+                현재 Windows·전용 Chrome·화면 배율을 확인해 반복 테스트의 기준을 기록합니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {compatibilityEnvironment
+                ? '환경 기록 완료'
+                : activeAction === 'environment-inspection'
+                  ? '확인 중'
+                  : '확인 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  버전과 화면 배율만 확인하며 로그인 정보와 게시물 내용은 읽지 않습니다. 표시된 값은 지원 확정이 아니라 이후 반복 검증에 사용할 현재 기준입니다.
+                </p>
+              </div>
+
+              {compatibilityEnvironmentError ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>현재 환경을 확인하지 못했습니다</strong>
+                    <p>{compatibilityEnvironmentError}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={isUiBusy}
+                onClick={() => void inspectCompatibilityEnvironment()}
+              >
+                {activeAction === 'environment-inspection' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : (
+                  <PanelsTopLeft aria-hidden="true" />
+                )}
+                {activeAction === 'environment-inspection'
+                  ? '현재 환경 확인 중…'
+                  : '현재 환경 확인'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="현재 호환성 환경 확인 결과"
+            >
+              <PanelsTopLeft aria-hidden="true" />
+              <div>
+                <h3>
+                  {compatibilityEnvironment ? '확인 결과' : '이번 단계에서 확인할 내용'}
+                </h3>
+                {compatibilityEnvironment ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>운영체제</dt>
+                      <dd>{compatibilityEnvironment.operatingSystem}</dd>
+                    </div>
+                    <div>
+                      <dt>전용 Chrome</dt>
+                      <dd>{compatibilityEnvironment.chromeVersion}</dd>
+                    </div>
+                    <div>
+                      <dt>화면 배율</dt>
+                      <dd>{compatibilityEnvironment.displayScalePercent}%</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>현재 Windows 버전 확인</li>
+                    <li>실행 중인 전용 Chrome 버전 확인</li>
+                    <li>BLOW 창이 표시된 화면의 배율 확인</li>
+                    <li>다음 반복 테스트의 기준 환경으로 기록</li>
+                  </ol>
+                )}
               </div>
             </aside>
           </div>

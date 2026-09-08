@@ -27,6 +27,7 @@ import type {
   NaverStickerPosition,
   NaverUserInteractionResult,
 } from '@blow/naver-adapter';
+import type { CompatibilityEnvironmentResult } from '../shared/compatibility-environment.js';
 
 type NaverStateResponse =
   | {
@@ -211,6 +212,19 @@ type NaverUserInteractionResponse =
       };
     };
 
+type CompatibilityEnvironmentResponse =
+  | {
+      readonly ok: true;
+      readonly result: CompatibilityEnvironmentResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 const ipcChannels = {
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
@@ -233,6 +247,7 @@ const ipcChannels = {
   naverTestNetworkInterruption: 'naver:test-network-interruption',
   naverTestStructureChange: 'naver:test-structure-change',
   naverForceExitTest: 'naver:force-exit-test',
+  naverInspectCompatibilityEnvironment: 'naver:inspect-compatibility-environment',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -346,6 +361,8 @@ const blowNaverApi = {
   testStructureChange: (): Promise<NaverStructureChangeResponse> =>
     ipcRenderer.invoke(ipcChannels.naverTestStructureChange),
   forceExitTest: () => ipcRenderer.invoke(ipcChannels.naverForceExitTest),
+  inspectCompatibilityEnvironment: (): Promise<CompatibilityEnvironmentResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverInspectCompatibilityEnvironment),
   focus: () => ipcRenderer.invoke(ipcChannels.naverFocus),
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };

@@ -23,6 +23,7 @@ import type {
   NaverStickerPosition,
   NaverUserInteractionResult,
 } from '@blow/naver-adapter';
+import type { CompatibilityEnvironmentResult } from '../shared/compatibility-environment.js';
 
 interface PocErrorResponse {
   readonly ok: false;
@@ -123,6 +124,11 @@ interface ForceExitTestSuccessResponse {
   readonly canceled: boolean;
 }
 
+interface CompatibilityEnvironmentSuccessResponse {
+  readonly ok: true;
+  readonly result: CompatibilityEnvironmentResult;
+}
+
 interface BasicSuccessResponse {
   readonly ok: true;
 }
@@ -194,6 +200,9 @@ declare global {
       >;
       forceExitTest(): Promise<
         NaverErrorResponse | ForceExitTestSuccessResponse
+      >;
+      inspectCompatibilityEnvironment(): Promise<
+        NaverErrorResponse | CompatibilityEnvironmentSuccessResponse
       >;
       focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
       close(): Promise<BasicSuccessResponse>;
