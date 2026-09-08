@@ -15,6 +15,7 @@ import type {
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
+  NaverNetworkInterruptionTestResult,
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
@@ -170,6 +171,19 @@ type NaverImageResponse =
       };
     };
 
+type NaverNetworkInterruptionResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverNetworkInterruptionTestResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 type NaverUserInteractionResponse =
   | {
       readonly ok: true;
@@ -202,6 +216,7 @@ const ipcChannels = {
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
   naverMonitorUserInteraction: 'naver:monitor-user-interaction',
+  naverTestNetworkInterruption: 'naver:test-network-interruption',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -310,6 +325,8 @@ const blowNaverApi = {
     ipcRenderer.invoke(ipcChannels.naverAttachImages, { imageIds, layout }),
   monitorUserInteraction: (): Promise<NaverUserInteractionResponse> =>
     ipcRenderer.invoke(ipcChannels.naverMonitorUserInteraction),
+  testNetworkInterruption: (): Promise<NaverNetworkInterruptionResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverTestNetworkInterruption),
   focus: () => ipcRenderer.invoke(ipcChannels.naverFocus),
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };

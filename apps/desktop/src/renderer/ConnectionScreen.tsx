@@ -17,6 +17,7 @@ import {
   Save,
   ShieldCheck,
   Sticker,
+  WifiOff,
   X,
   XCircle,
 } from 'lucide-react';
@@ -35,6 +36,7 @@ import type {
   NaverEditorInputResult,
   NaverImageAttachmentResult,
   NaverImageLayout,
+  NaverNetworkInterruptionTestResult,
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
   NaverQuotePosition,
@@ -62,6 +64,7 @@ type ActionName =
   | 'quote'
   | 'save-draft'
   | 'interaction-monitor'
+  | 'network-test'
   | 'select-images'
   | 'images'
   | 'focus';
@@ -302,6 +305,9 @@ export function ConnectionScreen() {
   const [interactionResult, setInteractionResult] =
     useState<NaverUserInteractionResult | null>(null);
   const [interactionError, setInteractionError] = useState<string | null>(null);
+  const [networkTestResult, setNetworkTestResult] =
+    useState<NaverNetworkInterruptionTestResult | null>(null);
+  const [networkTestError, setNetworkTestError] = useState<string | null>(null);
   const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
   const [dividerPosition, setDividerPosition] =
     useState<NaverDividerPosition>('after');
@@ -446,6 +452,8 @@ export function ConnectionScreen() {
           setDraftSaveResult(null);
           setInteractionResult(null);
           setInteractionError(null);
+          setNetworkTestResult(null);
+          setNetworkTestError(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -567,6 +575,8 @@ export function ConnectionScreen() {
       setDraftSaveResult(null);
       setInteractionResult(null);
       setInteractionError(null);
+      setNetworkTestResult(null);
+      setNetworkTestError(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -1118,6 +1128,43 @@ export function ConnectionScreen() {
     }
   };
 
+  const testNetworkInterruption = async (): Promise<void> => {
+    const operationVersion = beginOperation('network-test');
+    setNetworkTestResult(null);
+    setNetworkTestError(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.testNetworkInterruption();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      if (response.ok) {
+        setNetworkTestResult(response.result);
+      } else {
+        setNetworkTestError(response.error.message);
+
+        if (response.error.code === 'BROWSER_CLOSED') {
+          setBrowserOpen(false);
+          setStatus(null);
+          setError(response.error);
+        }
+      }
+    } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      setNetworkTestError(
+        '네트워크 끊김 감지를 완료하지 못했습니다. 전용 Chrome을 확인해 주세요.',
+      );
+    } finally {
+      finishOperation(operationVersion);
+    }
+  };
+
   const monitorUserInteraction = async (): Promise<void> => {
     const operationVersion = beginOperation('interaction-monitor');
     setInteractionResult(null);
@@ -1412,7 +1459,9 @@ export function ConnectionScreen() {
                 ? '자동 입력을 안전하게 멈췄습니다'
                 : requiresReauthentication
                   ? '네이버 인증이 필요합니다'
-                  : draftSaveError
+                  : error.code === 'NAVER_NETWORK_ERROR'
+                    ? '인터넷 연결을 확인해 주세요'
+                    : draftSaveError
                 ? '임시저장 상태를 확인해 주세요'
                 : quoteError
                 ? '인용구 상태를 확인해 주세요'
@@ -1431,7 +1480,17 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
-      {interactionResult?.detected ? (
+      {networkTestResult ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>네트워크 끊김 감지를 확인했습니다</h2>
+            <p>
+              전용 Chrome의 오프라인 상태를 감지했고 테스트 직후 연결 상태를 복구했습니다.
+            </p>
+          </div>
+        </section>
+      ) : interactionResult?.detected ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
@@ -1703,6 +1762,106 @@ export function ConnectionScreen() {
           </ol>
         </aside>
       </section>
+
+      {status?.stage === 'WRITER_READY' ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="network-test-heading"
+          aria-busy={activeAction === 'network-test'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="network-test-heading">네트워크 끊김 감지 테스트</h2>
+              <p>
+                PC의 인터넷은 유지하고 전용 Chrome만 잠시 오프라인으로 전환해 안전 중단을 확인합니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {networkTestResult
+                ? '차단·복구 확인 완료'
+                : activeAction === 'network-test'
+                  ? '확인 중'
+                  : '테스트 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  게시물 내용과 로그인 정보는 건드리지 않습니다. 테스트가 끝나면 전용 Chrome의 네트워크를 즉시 복구합니다.
+                </p>
+              </div>
+
+              {networkTestError ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>네트워크 끊김 감지를 확인하지 못했습니다</strong>
+                    <p>{networkTestError}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={isUiBusy || Boolean(networkTestResult)}
+                onClick={() => void testNetworkInterruption()}
+              >
+                {activeAction === 'network-test' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : networkTestResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <WifiOff aria-hidden="true" />
+                )}
+                {activeAction === 'network-test'
+                  ? '네트워크 차단·복구 확인 중…'
+                  : networkTestResult
+                    ? '네트워크 감지 완료'
+                    : '네트워크 감지 시작'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="네트워크 끊김 감지 범위"
+            >
+              <WifiOff aria-hidden="true" />
+              <div>
+                <h3>
+                  {networkTestResult ? '처리 결과' : '이번 단계에서 확인할 내용'}
+                </h3>
+                {networkTestResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>오프라인 감지</dt>
+                      <dd>완료</dd>
+                    </div>
+                    <div>
+                      <dt>네트워크 복구</dt>
+                      <dd>완료</dd>
+                    </div>
+                    <div>
+                      <dt>게시물 조작</dt>
+                      <dd>없음</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>전용 Chrome만 일시적으로 네트워크 차단</li>
+                    <li>오프라인 상태에서 자동 입력 시작 차단 확인</li>
+                    <li>검증 직후 전용 Chrome 네트워크 복구</li>
+                    <li>게시물과 로그인 정보는 변경하지 않음</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
 
       {status?.stage === 'WRITER_READY' ? (
         <section

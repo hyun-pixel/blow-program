@@ -52,6 +52,7 @@ const ipcChannels = {
   naverSelectImages: 'naver:select-images',
   naverAttachImages: 'naver:attach-images',
   naverMonitorUserInteraction: 'naver:monitor-user-interaction',
+  naverTestNetworkInterruption: 'naver:test-network-interruption',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -1842,6 +1843,59 @@ function registerNaverIpc(): void {
           appWindow.off('blur', recordAppBlur);
         }
 
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverTestNetworkInterruption,
+    async (event) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        return {
+          ok: true,
+          result: await session.testNetworkInterruption(),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'NETWORK_TEST_UNCONFIRMED',
+            message: '네트워크 끊김 감지를 확인하지 못했습니다. 다시 시도해 주세요.',
+          },
+        };
+      } finally {
         activeRun = false;
       }
     },

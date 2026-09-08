@@ -94,6 +94,7 @@ export type {
   NaverConnectionFailureCode,
   NaverConnectionStage,
   NaverConnectionStatus,
+  NaverNetworkInterruptionTestResult,
   NaverUserInteractionMonitorOptions,
   NaverUserInteractionResult,
   NaverUserInteractionType,

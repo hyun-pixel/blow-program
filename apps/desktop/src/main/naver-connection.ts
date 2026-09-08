@@ -22,6 +22,7 @@ import {
   type NaverEditorInputResult,
   type NaverImageAttachmentResult,
   type NaverImageLayout,
+  type NaverNetworkInterruptionTestResult,
   type NaverQuoteInsertionResult,
   type NaverQuotePosition,
   type NaverQuoteStyleResult,
@@ -121,6 +122,8 @@ export type NaverRunnerFailureCode =
   | 'STICKER_POSITION_MISMATCH'
   | 'CONTENT_INPUT_REQUIRED'
   | 'NAVER_NETWORK_ERROR'
+  | 'NETWORK_TEST_UNCONFIRMED'
+  | 'NETWORK_TEST_RESTORE_FAILED'
   | 'NAVER_CONNECTION_FAILED';
 
 export interface NaverRunnerFailure {
@@ -551,6 +554,71 @@ export class NaverConnectionSession {
         cause: error,
       });
     }
+  }
+
+  async testNetworkInterruption(): Promise<NaverNetworkInterruptionTestResult> {
+    const context = this.context;
+
+    if (!context) {
+      throw new NaverConnectionRunnerError({
+        code: 'BROWSER_CLOSED',
+        message: '전용 Chrome이 닫혔습니다. 다시 열어 주세요.',
+      });
+    }
+
+    let testFailure: NaverConnectionRunnerError | null = null;
+    let offlineDetected = false;
+
+    try {
+      await context.setOffline(true);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      offlineDetected = !(await this.adapter.isNetworkAvailable());
+
+      if (!offlineDetected) {
+        testFailure = new NaverConnectionRunnerError({
+          code: 'NETWORK_TEST_UNCONFIRMED',
+          message: '전용 Chrome의 네트워크 차단 상태를 확인하지 못했습니다. 다시 시도해 주세요.',
+        });
+      }
+    } catch (error) {
+      testFailure = error instanceof NaverConnectionRunnerError
+        ? error
+        : new NaverConnectionRunnerError(classifyFailure(error), {
+            cause: error,
+          });
+    }
+
+    try {
+      await context.setOffline(false);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      if (!(await this.adapter.isNetworkAvailable())) {
+        throw new NaverConnectionRunnerError({
+          code: 'NETWORK_TEST_RESTORE_FAILED',
+          message: '전용 Chrome의 네트워크 상태를 복구하지 못했습니다. 작업을 중단하고 Chrome을 다시 열어 주세요.',
+        });
+      }
+    } catch (error) {
+      throw new NaverConnectionRunnerError(
+        {
+          code: 'NETWORK_TEST_RESTORE_FAILED',
+          message: '전용 Chrome의 네트워크 상태를 복구하지 못했습니다. 작업을 중단하고 Chrome을 다시 열어 주세요.',
+        },
+        { cause: error },
+      );
+    }
+
+    if (testFailure) {
+      throw testFailure;
+    }
+
+    return {
+      stage: 'NETWORK_INTERRUPTION_CONFIRMED',
+      message: '전용 Chrome의 네트워크 차단을 감지하고 연결 상태를 복구했습니다.',
+      offlineDetected: true,
+      networkRestored: true,
+      currentUrl: this.adapter.currentUrl(),
+    };
   }
 
   async waitForUserInteraction(

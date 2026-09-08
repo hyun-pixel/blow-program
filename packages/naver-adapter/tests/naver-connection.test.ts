@@ -113,6 +113,45 @@ describe('자동 입력 전 인증 상태 확인', () => {
     });
   });
 });
+
+describe('자동 입력 전 네트워크 상태 확인', () => {
+  const profile = {
+    blogId: 'green_fork',
+    canonicalUrl: 'https://blog.naver.com/green_fork',
+  };
+  const content = {
+    title: '테스트 제목',
+    paragraphs: ['테스트 본문'],
+  };
+
+  it('오프라인 상태에서는 자동 입력과 임시저장을 시작하지 않는다', async () => {
+    const page = {
+      url: vi.fn().mockReturnValue(
+        'https://blog.naver.com/green_fork?Redirect=Write&categoryNo=1',
+      ),
+      evaluate: vi.fn().mockResolvedValue(false),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(page);
+
+    await expect(adapter.enterContent(profile, content)).rejects.toMatchObject({
+      code: 'NAVER_NETWORK_ERROR',
+    });
+    await expect(adapter.saveDraft(profile, content)).rejects.toMatchObject({
+      code: 'NAVER_NETWORK_ERROR',
+    });
+    expect(page.evaluate).toHaveBeenCalledTimes(2);
+  });
+
+  it('온라인 상태는 사용 가능한 네트워크로 확인한다', async () => {
+    const page = {
+      evaluate: vi.fn().mockResolvedValue(true),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(page);
+
+    await expect(adapter.isNetworkAvailable()).resolves.toBe(true);
+  });
+});
+
 describe('글쓰기 최종 주소 판별', () => {
   it('등록 블로그의 기존·신규 편집기 주소를 허용한다', () => {
     expect(

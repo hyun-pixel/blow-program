@@ -65,6 +65,7 @@ export type NaverConnectionFailureCode =
   | 'INVALID_BLOG_URL'
   | 'LOGIN_WAIT_TIMEOUT'
   | 'NAVER_AUTH_REQUIRED'
+  | 'NAVER_NETWORK_ERROR'
   | 'NAVER_PAGE_UNKNOWN'
   | 'WRITER_LINK_NOT_FOUND'
   | 'WRITER_LINK_AMBIGUOUS'
@@ -105,6 +106,14 @@ export interface NaverUserInteractionResult {
 export interface NaverUserInteractionMonitorOptions {
   readonly timeoutMs?: number;
   readonly pollIntervalMs?: number;
+}
+
+export interface NaverNetworkInterruptionTestResult {
+  readonly stage: 'NETWORK_INTERRUPTION_CONFIRMED';
+  readonly message: string;
+  readonly offlineDetected: true;
+  readonly networkRestored: true;
+  readonly currentUrl: string;
 }
 
 export class NaverConnectionError extends Error {
@@ -397,11 +406,19 @@ export function isNaverWriterUrl(
   }
 }
 
-function requireNaverWriterAccess(
+async function readNaverNetworkAvailability(page: Page): Promise<boolean> {
+  try {
+    return await page.evaluate(() => navigator.onLine);
+  } catch {
+    return true;
+  }
+}
+
+async function requireNaverWriterAccess(
   page: Page,
   profile: NaverBlogProfile,
   notReadyMessage: string,
-): void {
+): Promise<void> {
   const currentUrl = page.url();
 
   if (isNaverLoginUrl(currentUrl)) {
@@ -413,6 +430,13 @@ function requireNaverWriterAccess(
 
   if (!isNaverWriterUrl(currentUrl, profile.blogId)) {
     throw new NaverConnectionError('WRITER_NOT_READY', notReadyMessage);
+  }
+
+  if (!(await readNaverNetworkAvailability(page))) {
+    throw new NaverConnectionError(
+      'NAVER_NETWORK_ERROR',
+      '인터넷 연결이 끊겨 자동 입력을 시작하지 않았습니다. 연결을 복구한 뒤 다시 시도해 주세요.',
+    );
   }
 }
 
@@ -750,7 +774,7 @@ export class NaverConnectionAdapter {
     content: DraftContent,
     signal?: AbortSignal,
   ): Promise<NaverEditorInputResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 입력을 시작하지 않았습니다.',
@@ -767,7 +791,7 @@ export class NaverConnectionAdapter {
     position: NaverDividerPosition,
     signal?: AbortSignal,
   ): Promise<NaverDividerStyleResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 구분선 디자인 확인을 시작하지 않았습니다.',
@@ -790,7 +814,7 @@ export class NaverConnectionAdapter {
     styleSelection?: NaverDividerStyleSelection,
     signal?: AbortSignal,
   ): Promise<NaverDividerInsertionResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 구분선 삽입을 시작하지 않았습니다.',
@@ -812,7 +836,7 @@ export class NaverConnectionAdapter {
     paragraphNumber: number,
     position: NaverStickerPosition,
   ): Promise<NaverStickerInsertionResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 스티커 삽입을 시작하지 않았습니다.',
@@ -832,7 +856,7 @@ export class NaverConnectionAdapter {
     position: NaverStickerPosition,
     signal?: AbortSignal,
   ): Promise<NaverStickerCategoryResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 스티커 묶음을 불러오지 않았습니다.',
@@ -854,7 +878,7 @@ export class NaverConnectionAdapter {
     categoryId: string,
     signal?: AbortSignal,
   ): Promise<NaverStickerInsertionResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 스티커 삽입을 시작하지 않았습니다.',
@@ -876,7 +900,7 @@ export class NaverConnectionAdapter {
     position: NaverQuotePosition,
     signal?: AbortSignal,
   ): Promise<NaverQuoteStyleResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 인용구 디자인 확인을 시작하지 않았습니다.',
@@ -899,7 +923,7 @@ export class NaverConnectionAdapter {
     styleSelection?: NaverQuoteStyleSelection,
     signal?: AbortSignal,
   ): Promise<NaverQuoteInsertionResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 인용구 삽입을 시작하지 않았습니다.',
@@ -920,7 +944,7 @@ export class NaverConnectionAdapter {
     content: DraftContent,
     signal?: AbortSignal,
   ): Promise<NaverDraftSaveResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 임시저장을 시작하지 않았습니다.',
@@ -955,7 +979,7 @@ export class NaverConnectionAdapter {
     layout: NaverImageLayout,
     signal?: AbortSignal,
   ): Promise<NaverImageAttachmentResult> {
-    requireNaverWriterAccess(
+    await requireNaverWriterAccess(
       this.page,
       profile,
       '네이버 글쓰기 화면이 아니어서 이미지 첨부를 시작하지 않았습니다.',
@@ -963,6 +987,14 @@ export class NaverConnectionAdapter {
 
     const imageAdapter = new NaverImageAdapter(this.page);
     return imageAdapter.attachImages(imagePaths, layout, signal);
+  }
+
+  async isNetworkAvailable(): Promise<boolean> {
+    return readNaverNetworkAvailability(this.page);
+  }
+
+  currentUrl(): string {
+    return this.page.url();
   }
 
   async waitForUserInteraction(
