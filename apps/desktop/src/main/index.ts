@@ -54,6 +54,7 @@ const ipcChannels = {
   naverMonitorUserInteraction: 'naver:monitor-user-interaction',
   naverTestNetworkInterruption: 'naver:test-network-interruption',
   naverTestStructureChange: 'naver:test-structure-change',
+  naverForceExitTest: 'naver:force-exit-test',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -2018,6 +2019,37 @@ function registerNaverIpc(): void {
       }
     },
   );
+
+  ipcMain.handle(ipcChannels.naverForceExitTest, async (event) => {
+    requireTrustedSender(event);
+
+    if (activeRun) {
+      return busyResponse();
+    }
+
+    const appWindow = BrowserWindow.fromWebContents(event.sender);
+    const options = {
+      type: 'warning' as const,
+      title: '앱 강제 종료 테스트',
+      message: 'BLOW를 즉시 종료하시겠습니까?',
+      detail: '저장되지 않은 현재 작업은 복구하지 않습니다. 네이버 편집기에 남은 내용은 자동으로 삭제하지 않습니다.',
+      buttons: ['취소', '테스트 종료'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    };
+    const result = appWindow && !appWindow.isDestroyed()
+      ? await dialog.showMessageBox(appWindow, options)
+      : await dialog.showMessageBox(options);
+
+    if (result.response !== 1) {
+      return { ok: true, canceled: true };
+    }
+
+    quitting = true;
+    setTimeout(() => app.exit(0), 150);
+    return { ok: true, canceled: false };
+  });
 
   ipcMain.handle(ipcChannels.naverFocus, async (event) => {
     requireTrustedSender(event);

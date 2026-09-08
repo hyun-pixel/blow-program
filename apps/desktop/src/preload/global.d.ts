@@ -118,6 +118,11 @@ interface NaverUserInteractionSuccessResponse {
   readonly result: NaverUserInteractionResult;
 }
 
+interface ForceExitTestSuccessResponse {
+  readonly ok: true;
+  readonly canceled: boolean;
+}
+
 interface BasicSuccessResponse {
   readonly ok: true;
 }
@@ -186,6 +191,9 @@ declare global {
       >;
       testStructureChange(): Promise<
         NaverErrorResponse | NaverStructureChangeSuccessResponse
+      >;
+      forceExitTest(): Promise<
+        NaverErrorResponse | ForceExitTestSuccessResponse
       >;
       focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
       close(): Promise<BasicSuccessResponse>;

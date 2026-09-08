@@ -232,6 +232,7 @@ const ipcChannels = {
   naverMonitorUserInteraction: 'naver:monitor-user-interaction',
   naverTestNetworkInterruption: 'naver:test-network-interruption',
   naverTestStructureChange: 'naver:test-structure-change',
+  naverForceExitTest: 'naver:force-exit-test',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -344,6 +345,7 @@ const blowNaverApi = {
     ipcRenderer.invoke(ipcChannels.naverTestNetworkInterruption),
   testStructureChange: (): Promise<NaverStructureChangeResponse> =>
     ipcRenderer.invoke(ipcChannels.naverTestStructureChange),
+  forceExitTest: () => ipcRenderer.invoke(ipcChannels.naverForceExitTest),
   focus: () => ipcRenderer.invoke(ipcChannels.naverFocus),
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };

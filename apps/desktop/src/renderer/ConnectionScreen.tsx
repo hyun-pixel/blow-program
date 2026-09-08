@@ -67,6 +67,7 @@ type ActionName =
   | 'interaction-monitor'
   | 'network-test'
   | 'structure-test'
+  | 'force-exit-test'
   | 'select-images'
   | 'images'
   | 'focus';
@@ -1176,6 +1177,39 @@ export function ConnectionScreen() {
     }
   };
 
+  const forceExitTest = async (): Promise<void> => {
+    const operationVersion = beginOperation('force-exit-test');
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.forceExitTest();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      if (!response.ok) {
+        setError(response.error);
+        finishOperation(operationVersion);
+        return;
+      }
+
+      if (response.canceled) {
+        finishOperation(operationVersion);
+      }
+    } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      setError({
+        code: 'FORCE_EXIT_TEST_FAILED',
+        message: '강제 종료 테스트를 시작하지 못했습니다. 다시 시도해 주세요.',
+      });
+      finishOperation(operationVersion);
+    }
+  };
+
   const testStructureChange = async (): Promise<void> => {
     const operationVersion = beginOperation('structure-test');
     setStructureTestResult(null);
@@ -2026,6 +2060,69 @@ export function ConnectionScreen() {
                     <li>현재 게시물과 로그인 상태는 변경하지 않음</li>
                   </ol>
                 )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+
+      {status?.stage === 'WRITER_READY' ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="force-exit-test-heading"
+          aria-busy={activeAction === 'force-exit-test'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="force-exit-test-heading">앱 강제 종료·초기화 테스트</h2>
+              <p>
+                BLOW를 즉시 종료한 뒤 다음 실행에서 이전 작업을 복구하지 않는지 확인합니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {activeAction === 'force-exit-test' ? '종료 중' : '테스트 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  확인창에서 테스트 종료를 선택한 경우에만 BLOW가 닫힙니다. 네이버 편집기에 남은 내용은 자동으로 삭제하지 않습니다.
+                </p>
+              </div>
+
+              <button
+                className="button danger divider-insert-button"
+                type="button"
+                disabled={isUiBusy}
+                onClick={() => void forceExitTest()}
+              >
+                {activeAction === 'force-exit-test' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : (
+                  <X aria-hidden="true" />
+                )}
+                {activeAction === 'force-exit-test'
+                  ? 'BLOW 종료 중…'
+                  : '강제 종료 테스트'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="앱 강제 종료 후 초기화 확인 순서"
+            >
+              <X aria-hidden="true" />
+              <div>
+                <h3>이번 단계에서 확인할 내용</h3>
+                <ol>
+                  <li>확인창에서 테스트 종료 선택</li>
+                  <li>BLOW가 즉시 닫히는지 확인</li>
+                  <li>BLOW를 다시 실행</li>
+                  <li>블로그 주소와 진행 단계가 초기화됐는지 확인</li>
+                </ol>
               </div>
             </aside>
           </div>
