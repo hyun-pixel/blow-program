@@ -64,6 +64,7 @@ export type NaverConnectionStage =
 export type NaverConnectionFailureCode =
   | 'INVALID_BLOG_URL'
   | 'LOGIN_WAIT_TIMEOUT'
+  | 'NAVER_AUTH_REQUIRED'
   | 'NAVER_PAGE_UNKNOWN'
   | 'WRITER_LINK_NOT_FOUND'
   | 'WRITER_LINK_AMBIGUOUS'
@@ -393,6 +394,25 @@ export function isNaverWriterUrl(
     return false;
   } catch {
     return false;
+  }
+}
+
+function requireNaverWriterAccess(
+  page: Page,
+  profile: NaverBlogProfile,
+  notReadyMessage: string,
+): void {
+  const currentUrl = page.url();
+
+  if (isNaverLoginUrl(currentUrl)) {
+    throw new NaverConnectionError(
+      'NAVER_AUTH_REQUIRED',
+      '네이버 로그인이 만료되었거나 추가 인증이 필요합니다. Chrome에서 인증을 완료한 뒤 연결을 다시 확인해 주세요.',
+    );
+  }
+
+  if (!isNaverWriterUrl(currentUrl, profile.blogId)) {
+    throw new NaverConnectionError('WRITER_NOT_READY', notReadyMessage);
   }
 }
 
@@ -730,12 +750,11 @@ export class NaverConnectionAdapter {
     content: DraftContent,
     signal?: AbortSignal,
   ): Promise<NaverEditorInputResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 입력을 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 입력을 시작하지 않았습니다.',
+    );
 
     const editor = new NaverEditorAdapter(this.page);
     return editor.enterAndVerify(content, signal);
@@ -748,12 +767,11 @@ export class NaverConnectionAdapter {
     position: NaverDividerPosition,
     signal?: AbortSignal,
   ): Promise<NaverDividerStyleResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 구분선 디자인 확인을 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 구분선 디자인 확인을 시작하지 않았습니다.',
+    );
 
     const dividerAdapter = new NaverDividerAdapter(this.page);
     return dividerAdapter.listDividerStyles(
@@ -772,12 +790,11 @@ export class NaverConnectionAdapter {
     styleSelection?: NaverDividerStyleSelection,
     signal?: AbortSignal,
   ): Promise<NaverDividerInsertionResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 구분선 삽입을 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 구분선 삽입을 시작하지 않았습니다.',
+    );
 
     const dividerAdapter = new NaverDividerAdapter(this.page);
     return dividerAdapter.insertDivider(
@@ -795,12 +812,11 @@ export class NaverConnectionAdapter {
     paragraphNumber: number,
     position: NaverStickerPosition,
   ): Promise<NaverStickerInsertionResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 스티커 삽입을 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 스티커 삽입을 시작하지 않았습니다.',
+    );
 
     return this.stickerAdapter.insertDefaultSticker(
       expectedParagraphs,
@@ -816,12 +832,11 @@ export class NaverConnectionAdapter {
     position: NaverStickerPosition,
     signal?: AbortSignal,
   ): Promise<NaverStickerCategoryResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 스티커 묶음을 불러오지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 스티커 묶음을 불러오지 않았습니다.',
+    );
 
     return this.stickerAdapter.listStickerCategories(
       expectedParagraphs,
@@ -839,12 +854,11 @@ export class NaverConnectionAdapter {
     categoryId: string,
     signal?: AbortSignal,
   ): Promise<NaverStickerInsertionResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 스티커 삽입을 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 스티커 삽입을 시작하지 않았습니다.',
+    );
 
     return this.stickerAdapter.insertRandomSticker(
       expectedParagraphs,
@@ -862,12 +876,11 @@ export class NaverConnectionAdapter {
     position: NaverQuotePosition,
     signal?: AbortSignal,
   ): Promise<NaverQuoteStyleResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 인용구 디자인 확인을 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 인용구 디자인 확인을 시작하지 않았습니다.',
+    );
 
     const quoteAdapter = new NaverQuoteAdapter(this.page);
     return quoteAdapter.listQuoteStyles(
@@ -886,12 +899,11 @@ export class NaverConnectionAdapter {
     styleSelection?: NaverQuoteStyleSelection,
     signal?: AbortSignal,
   ): Promise<NaverQuoteInsertionResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 인용구 삽입을 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 인용구 삽입을 시작하지 않았습니다.',
+    );
 
     const quoteAdapter = new NaverQuoteAdapter(this.page);
     return quoteAdapter.insertQuote(
@@ -908,18 +920,24 @@ export class NaverConnectionAdapter {
     content: DraftContent,
     signal?: AbortSignal,
   ): Promise<NaverDraftSaveResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 임시저장을 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 임시저장을 시작하지 않았습니다.',
+    );
 
     const editor = new NaverEditorAdapter(this.page);
     await editor.verifyCurrent(content);
 
     const draftSaveAdapter = new NaverDraftSaveAdapter(this.page);
     const result = await draftSaveAdapter.saveAndVerify(signal);
+
+    if (isNaverLoginUrl(result.currentUrl)) {
+      throw new NaverConnectionError(
+        'NAVER_AUTH_REQUIRED',
+        '임시저장 버튼 조작 후 네이버 인증 화면으로 이동했습니다. Chrome에서 저장 여부와 인증 상태를 확인해 주세요.',
+      );
+    }
 
     if (!isNaverWriterUrl(result.currentUrl, profile.blogId)) {
       throw new NaverDraftSaveError(
@@ -937,12 +955,11 @@ export class NaverConnectionAdapter {
     layout: NaverImageLayout,
     signal?: AbortSignal,
   ): Promise<NaverImageAttachmentResult> {
-    if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
-      throw new NaverConnectionError(
-        'WRITER_NOT_READY',
-        '네이버 글쓰기 화면이 아니어서 이미지 첨부를 시작하지 않았습니다.',
-      );
-    }
+    requireNaverWriterAccess(
+      this.page,
+      profile,
+      '네이버 글쓰기 화면이 아니어서 이미지 첨부를 시작하지 않았습니다.',
+    );
 
     const imageAdapter = new NaverImageAdapter(this.page);
     return imageAdapter.attachImages(imagePaths, layout, signal);

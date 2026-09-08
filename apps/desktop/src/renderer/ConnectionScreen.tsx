@@ -350,7 +350,9 @@ export function ConnectionScreen() {
 
   const isActivelyRunning = activeAction !== null || isStopping;
   const isInteractionPaused = error?.code === 'USER_INTERACTION_DETECTED';
-  const isUiBusy = isActivelyRunning || isInteractionPaused;
+  const requiresReauthentication = error?.code === 'NAVER_AUTH_REQUIRED';
+  const isUiBusy =
+    isActivelyRunning || isInteractionPaused || requiresReauthentication;
   const isAutoChecking =
     browserOpen &&
     !error &&
@@ -479,6 +481,14 @@ export function ConnectionScreen() {
       void runConnectionCommand(
         'open',
         () => window.blowNaver.open(blogUrl),
+      );
+      return;
+    }
+
+    if (requiresReauthentication) {
+      void runConnectionCommand(
+        'verify',
+        () => window.blowNaver.verify(),
       );
       return;
     }
@@ -1152,7 +1162,9 @@ export function ConnectionScreen() {
         ? '글쓰기 화면 확인 중…'
         : isAutoChecking
           ? '로그인·블로그 자동 확인 중…'
-          : !browserOpen
+          : requiresReauthentication
+            ? '연결 다시 확인'
+            : !browserOpen
           ? '전용 Chrome 열기'
           : status?.stage === 'WRITER_LINK_READY'
             ? '글쓰기 화면 열기'
@@ -1398,7 +1410,9 @@ export function ConnectionScreen() {
             <h2>
               {isInteractionPaused
                 ? '자동 입력을 안전하게 멈췄습니다'
-                : draftSaveError
+                : requiresReauthentication
+                  ? '네이버 인증이 필요합니다'
+                  : draftSaveError
                 ? '임시저장 상태를 확인해 주세요'
                 : quoteError
                 ? '인용구 상태를 확인해 주세요'
@@ -1594,13 +1608,16 @@ export function ConnectionScreen() {
               className="button primary connection-primary"
               type="submit"
               disabled={
-                isUiBusy ||
+                isActivelyRunning ||
+                isInteractionPaused ||
                 isAutoChecking ||
-                status?.stage === 'WRITER_READY'
+                (status?.stage === 'WRITER_READY' && !requiresReauthentication)
               }
             >
-              {isUiBusy || isAutoChecking ? (
+              {isActivelyRunning || isAutoChecking ? (
                 <LoaderCircle className="is-spinning" aria-hidden="true" />
+              ) : requiresReauthentication ? (
+                <ExternalLink aria-hidden="true" />
               ) : status?.stage === 'WRITER_LINK_READY' ? (
                 <MousePointerClick aria-hidden="true" />
               ) : status?.stage === 'WRITER_READY' ? (

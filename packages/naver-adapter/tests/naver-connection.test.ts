@@ -75,6 +75,44 @@ describe('네이버 현재 주소 판별', () => {
   });
 });
 
+describe('자동 입력 전 인증 상태 확인', () => {
+  const profile = {
+    blogId: 'green_fork',
+    canonicalUrl: 'https://blog.naver.com/green_fork',
+  };
+  const content = {
+    title: '테스트 제목',
+    paragraphs: ['테스트 본문'],
+  };
+
+  it.each([
+    'https://nid.naver.com/nidlogin.login',
+    'https://nid.naver.com/login/ext/auth',
+  ])('인증 화면에서는 자동 입력을 시작하지 않는다: %s', async (url) => {
+    const page = {
+      url: vi.fn().mockReturnValue(url),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(page);
+
+    await expect(adapter.enterContent(profile, content)).rejects.toMatchObject({
+      code: 'NAVER_AUTH_REQUIRED',
+    });
+    await expect(adapter.saveDraft(profile, content)).rejects.toMatchObject({
+      code: 'NAVER_AUTH_REQUIRED',
+    });
+  });
+
+  it('인증 화면이 아닌 다른 화면은 기존 글쓰기 화면 오류로 구분한다', async () => {
+    const page = {
+      url: vi.fn().mockReturnValue('https://blog.naver.com/green_fork'),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(page);
+
+    await expect(adapter.enterContent(profile, content)).rejects.toMatchObject({
+      code: 'WRITER_NOT_READY',
+    });
+  });
+});
 describe('글쓰기 최종 주소 판별', () => {
   it('등록 블로그의 기존·신규 편집기 주소를 허용한다', () => {
     expect(
