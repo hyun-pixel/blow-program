@@ -922,6 +922,7 @@ export class NaverConnectionAdapter {
     profile: NaverBlogProfile,
     imagePaths: readonly string[],
     layout: NaverImageLayout,
+    signal?: AbortSignal,
   ): Promise<NaverImageAttachmentResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -931,7 +932,7 @@ export class NaverConnectionAdapter {
     }
 
     const imageAdapter = new NaverImageAdapter(this.page);
-    return imageAdapter.attachImages(imagePaths, layout);
+    return imageAdapter.attachImages(imagePaths, layout, signal);
   }
 
   async waitForUserInteraction(

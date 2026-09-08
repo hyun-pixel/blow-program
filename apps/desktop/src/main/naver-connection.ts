@@ -81,6 +81,7 @@ export type NaverRunnerFailureCode =
   | 'INVALID_IMAGE_SELECTION'
   | 'IMAGE_INPUT_NOT_FOUND'
   | 'IMAGE_INPUT_AMBIGUOUS'
+  | 'IMAGE_UPLOAD_INTERRUPTED'
   | 'IMAGE_UPLOAD_FAILED'
   | 'IMAGE_PARTIAL_UPLOAD'
   | 'IMAGE_COUNT_MISMATCH'
@@ -512,6 +513,7 @@ export class NaverConnectionSession {
   async attachImages(
     imagePaths: readonly string[],
     layout: NaverImageLayout,
+    signal?: AbortSignal,
   ): Promise<NaverImageAttachmentResult> {
     if (!this.enteredContent) {
       throw new NaverConnectionRunnerError({
@@ -525,6 +527,7 @@ export class NaverConnectionSession {
         this.profile,
         imagePaths,
         layout,
+        signal,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {

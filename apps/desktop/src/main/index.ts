@@ -1376,11 +1376,54 @@ function registerNaverIpc(): void {
 
       activeRun = true;
 
+      const appWindow = BrowserWindow.fromWebContents(event.sender);
+      const imageAbortController = new AbortController();
+      let userLeftApp =
+        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      const recordAppBlur = (): void => {
+        userLeftApp = true;
+        imageAbortController.abort();
+      };
+      const userInteractionResponse = () => {
+        if (appWindow && !appWindow.isDestroyed()) {
+          appWindow.show();
+          appWindow.focus();
+        }
+
+        return {
+          ok: false as const,
+          error: {
+            code: 'USER_INTERACTION_DETECTED',
+            message: '이미지 첨부 중 BLOW 화면을 벗어난 것을 감지해 남은 작업을 멈췄습니다. 자동으로 다시 첨부하지 말고 Chrome에서 결과를 확인한 뒤 작업 중단으로 새 작업을 시작해 주세요.',
+          },
+        };
+      };
+
+      if (appWindow && !appWindow.isDestroyed()) {
+        appWindow.on('blur', recordAppBlur);
+      }
+
       try {
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
         const result = await session.attachImages(
           selectedImages.map((image) => image!.path),
           request.layout,
+          imageAbortController.signal,
         );
+
+        if (userLeftApp) {
+          return userInteractionResponse();
+        }
+
         selectedNaverImages.clear();
         return { ok: true, result };
       } catch (error) {
@@ -1389,10 +1432,18 @@ function registerNaverIpc(): void {
             activeNaverSession = null;
           }
 
+          if (userLeftApp) {
+            return userInteractionResponse();
+          }
+
           return {
             ok: false,
             error: error.failure,
           };
+        }
+
+        if (userLeftApp) {
+          return userInteractionResponse();
         }
 
         return {
@@ -1403,6 +1454,10 @@ function registerNaverIpc(): void {
           },
         };
       } finally {
+        if (appWindow && !appWindow.isDestroyed()) {
+          appWindow.off('blur', recordAppBlur);
+        }
+
         activeRun = false;
       }
     },

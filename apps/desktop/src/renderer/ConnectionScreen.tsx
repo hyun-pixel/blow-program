@@ -1249,6 +1249,7 @@ export function ConnectionScreen() {
         'INVALID_IMAGE_SELECTION',
         'IMAGE_INPUT_NOT_FOUND',
         'IMAGE_INPUT_AMBIGUOUS',
+        'IMAGE_UPLOAD_INTERRUPTED',
         'IMAGE_UPLOAD_FAILED',
         'IMAGE_PARTIAL_UPLOAD',
         'IMAGE_COUNT_MISMATCH',

@@ -66,6 +66,7 @@ export type NaverImageFailureCode =
   | 'INVALID_IMAGE_SELECTION'
   | 'IMAGE_INPUT_NOT_FOUND'
   | 'IMAGE_INPUT_AMBIGUOUS'
+  | 'IMAGE_UPLOAD_INTERRUPTED'
   | 'IMAGE_UPLOAD_FAILED'
   | 'IMAGE_PARTIAL_UPLOAD'
   | 'IMAGE_COUNT_MISMATCH'
@@ -96,6 +97,15 @@ export class NaverImageError extends Error {
   ) {
     super(message, options);
     this.name = 'NaverImageError';
+  }
+}
+
+function throwIfImageInterrupted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new NaverImageError(
+      'IMAGE_UPLOAD_INTERRUPTED',
+      '사용자 조작을 감지해 남은 이미지 첨부 작업을 중단했습니다.',
+    );
   }
 }
 
@@ -227,11 +237,15 @@ async function readGroupedLayoutSnapshot(
 async function uploadImages(
   page: Page,
   imagePaths: readonly string[],
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfImageInterrupted(signal);
   const input = await findUniqueControl(page, imageInputSelectors, false);
+  throwIfImageInterrupted(signal);
 
   if (input) {
     await input.setInputFiles([...imagePaths]);
+    throwIfImageInterrupted(signal);
     return;
   }
 
@@ -240,6 +254,7 @@ async function uploadImages(
     imageToolbarSelectors,
     true,
   );
+  throwIfImageInterrupted(signal);
 
   if (!toolbarButton) {
     throw new NaverImageError(
@@ -252,7 +267,9 @@ async function uploadImages(
     page.waitForEvent('filechooser', { timeout: 5_000 }),
     toolbarButton.click(),
   ]);
+  throwIfImageInterrupted(signal);
   await fileChooser.setFiles([...imagePaths]);
+  throwIfImageInterrupted(signal);
 }
 
 async function findLayoutControlOnce(
@@ -308,11 +325,14 @@ async function findLayoutControlOnce(
 async function waitForLayoutControl(
   page: Page,
   layout: NaverImageLayout,
+  signal?: AbortSignal,
 ): Promise<Locator> {
   const deadline = Date.now() + IMAGE_LAYOUT_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
+    throwIfImageInterrupted(signal);
     const control = await findLayoutControlOnce(page, layout);
+    throwIfImageInterrupted(signal);
 
     if (control) {
       return control;
@@ -321,6 +341,7 @@ async function waitForLayoutControl(
     await page.waitForTimeout(IMAGE_UPLOAD_POLL_MS);
   }
 
+  throwIfImageInterrupted(signal);
   throw new NaverImageError(
     'IMAGE_LAYOUT_CONTROL_NOT_FOUND',
     `이미지는 첨부됐지만 ${imageLayoutLabels[layout]} 선택 버튼을 확인하지 못했습니다. 중복 입력을 막기 위해 빈 새 글에서 다시 시작해 주세요.`,
@@ -330,15 +351,20 @@ async function waitForLayoutControl(
 async function waitForIndividualControlOrInsertion(
   page: Page,
   expectedImageCount: number,
+  signal?: AbortSignal,
 ): Promise<Locator | null> {
   const deadline = Date.now() + IMAGE_LAYOUT_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
+    throwIfImageInterrupted(signal);
+
     if (await countInsertedImages(page) >= expectedImageCount) {
+      throwIfImageInterrupted(signal);
       return null;
     }
 
     const control = await findLayoutControlOnce(page, 'individual');
+    throwIfImageInterrupted(signal);
 
     if (control) {
       return control;
@@ -347,6 +373,7 @@ async function waitForIndividualControlOrInsertion(
     await page.waitForTimeout(IMAGE_UPLOAD_POLL_MS);
   }
 
+  throwIfImageInterrupted(signal);
   throw new NaverImageError(
     'IMAGE_LAYOUT_CONTROL_NOT_FOUND',
     '이미지는 첨부됐지만 개별 사진 선택 버튼을 확인하지 못했습니다. 중복 입력을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
@@ -356,13 +383,18 @@ async function waitForIndividualControlOrInsertion(
 async function waitForImageCount(
   page: Page,
   expectedCount: number,
+  signal?: AbortSignal,
 ): Promise<number> {
   const deadline = Date.now() + IMAGE_UPLOAD_TIMEOUT_MS;
+  throwIfImageInterrupted(signal);
   let actualCount = await countInsertedImages(page);
+  throwIfImageInterrupted(signal);
 
   while (actualCount < expectedCount && Date.now() < deadline) {
     await page.waitForTimeout(IMAGE_UPLOAD_POLL_MS);
+    throwIfImageInterrupted(signal);
     actualCount = await countInsertedImages(page);
+    throwIfImageInterrupted(signal);
   }
 
   return actualCount;
@@ -373,9 +405,12 @@ async function waitForGroupedLayout(
   layout: Exclude<NaverImageLayout, 'individual'>,
   expectedComponentCount: number,
   expectedImageCount: number,
+  signal?: AbortSignal,
 ): Promise<GroupedLayoutSnapshot> {
   const deadline = Date.now() + IMAGE_UPLOAD_TIMEOUT_MS;
+  throwIfImageInterrupted(signal);
   let snapshot = await readGroupedLayoutSnapshot(page, layout);
+  throwIfImageInterrupted(signal);
 
   while (
     (snapshot.componentCount < expectedComponentCount ||
@@ -383,7 +418,9 @@ async function waitForGroupedLayout(
     Date.now() < deadline
   ) {
     await page.waitForTimeout(IMAGE_UPLOAD_POLL_MS);
+    throwIfImageInterrupted(signal);
     snapshot = await readGroupedLayoutSnapshot(page, layout);
+    throwIfImageInterrupted(signal);
   }
 
   return snapshot;
@@ -395,40 +432,50 @@ export class NaverImageAdapter {
   async attachImages(
     inputPaths: readonly string[],
     layout: NaverImageLayout,
+    signal?: AbortSignal,
   ): Promise<NaverImageAttachmentResult> {
+    throwIfImageInterrupted(signal);
     const imagePaths = validateImagePaths(inputPaths);
     validateLayoutImageCount(layout, imagePaths.length);
+    throwIfImageInterrupted(signal);
 
     if (layout === 'individual') {
-      return this.attachIndividualImages(imagePaths);
+      return this.attachIndividualImages(imagePaths, signal);
     }
 
-    return this.attachGroupedImages(imagePaths, layout);
+    return this.attachGroupedImages(imagePaths, layout, signal);
   }
 
   async attachIndividualImages(
     inputPaths: readonly string[],
+    signal?: AbortSignal,
   ): Promise<NaverImageAttachmentResult> {
+    throwIfImageInterrupted(signal);
     const imagePaths = validateImagePaths(inputPaths);
     const initialCount = await countInsertedImages(this.page);
+    throwIfImageInterrupted(signal);
 
     try {
-      await uploadImages(this.page, imagePaths);
+      await uploadImages(this.page, imagePaths, signal);
 
       if (imagePaths.length > 1) {
         const layoutControl = await waitForIndividualControlOrInsertion(
           this.page,
           initialCount + imagePaths.length,
+          signal,
         );
 
         if (layoutControl) {
+          throwIfImageInterrupted(signal);
           await layoutControl.click();
+          throwIfImageInterrupted(signal);
         }
       }
 
       const actualCount = await waitForImageCount(
         this.page,
         initialCount + imagePaths.length,
+        signal,
       );
       const insertedCount = Math.max(0, actualCount - initialCount);
 
@@ -484,20 +531,30 @@ export class NaverImageAdapter {
   private async attachGroupedImages(
     imagePaths: readonly string[],
     layout: Exclude<NaverImageLayout, 'individual'>,
+    signal?: AbortSignal,
   ): Promise<NaverImageAttachmentResult> {
+    throwIfImageInterrupted(signal);
     const initialGroup = await readGroupedLayoutSnapshot(this.page, layout);
     const initialIndividualCount = await countInsertedImages(this.page);
+    throwIfImageInterrupted(signal);
 
     try {
-      await uploadImages(this.page, imagePaths);
-      const layoutControl = await waitForLayoutControl(this.page, layout);
+      await uploadImages(this.page, imagePaths, signal);
+      const layoutControl = await waitForLayoutControl(
+        this.page,
+        layout,
+        signal,
+      );
+      throwIfImageInterrupted(signal);
       await layoutControl.click();
+      throwIfImageInterrupted(signal);
 
       const actualGroup = await waitForGroupedLayout(
         this.page,
         layout,
         initialGroup.componentCount + 1,
         initialGroup.imageCount + imagePaths.length,
+        signal,
       );
       const insertedComponentCount =
         actualGroup.componentCount - initialGroup.componentCount;

@@ -14,6 +14,7 @@ function createCollection(locators: readonly Locator[]) {
 }
 
 function createImagePage(options?: {
+  readonly abortAfterUpload?: AbortController;
   readonly inputCount?: number;
   readonly layout?: NaverImageLayout;
   readonly layoutControlCount?: number;
@@ -34,10 +35,12 @@ function createImagePage(options?: {
 
     if (options?.layout) {
       pendingImageCount = fileCount;
+      options.abortAfterUpload?.abort();
       return;
     }
 
     insertedIndividualCount += fileCount;
+    options?.abortAfterUpload?.abort();
   };
   const input = {
     isEnabled: vi.fn().mockResolvedValue(true),
@@ -276,6 +279,26 @@ describe('네이버 사진 배치 첨부', () => {
     await expect(
       adapter.attachImages(['C:\\images\\one.jpg'], 'individual'),
     ).rejects.toMatchObject({ code: 'IMAGE_INPUT_AMBIGUOUS' });
+  });
+
+  it('중단 신호를 받으면 업로드 이후 배치 선택을 진행하지 않는다', async () => {
+    const controller = new AbortController();
+    const { input, layoutControl, page } = createImagePage({
+      abortAfterUpload: controller,
+      layout: 'individual',
+    });
+    const adapter = new NaverImageAdapter(page);
+
+    await expect(adapter.attachImages(
+      ['C:\\images\\one.jpg', 'C:\\images\\two.png'],
+      'individual',
+      controller.signal,
+    )).rejects.toMatchObject({
+      code: 'IMAGE_UPLOAD_INTERRUPTED',
+    });
+
+    expect(input.setInputFiles).toHaveBeenCalledOnce();
+    expect(layoutControl.click).not.toHaveBeenCalled();
   });
 
   it('일부만 삽입된 뒤 입력이 끊기면 중복 재시도를 막는다', async () => {
