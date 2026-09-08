@@ -49,7 +49,11 @@ import type {
   NaverUserInteractionResult,
   NaverUserInteractionType,
 } from '@blow/naver-adapter';
-import type { CompatibilityEnvironmentResult } from '../shared/compatibility-environment.js';
+import type {
+  CompatibilityEnvironmentResult,
+  WriterNavigationRepeatProgress,
+  WriterNavigationRepeatResult,
+} from '../shared/compatibility-environment.js';
 
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
@@ -70,6 +74,7 @@ type ActionName =
   | 'structure-test'
   | 'force-exit-test'
   | 'environment-inspection'
+  | 'writer-navigation-repeat'
   | 'select-images'
   | 'images'
   | 'focus';
@@ -320,6 +325,15 @@ export function ConnectionScreen() {
     useState<CompatibilityEnvironmentResult | null>(null);
   const [compatibilityEnvironmentError, setCompatibilityEnvironmentError] =
     useState<string | null>(null);
+  const [writerNavigationProgress, setWriterNavigationProgress] =
+    useState<WriterNavigationRepeatProgress>({
+      completedRuns: 0,
+      totalRuns: 20,
+    });
+  const [writerNavigationResult, setWriterNavigationResult] =
+    useState<WriterNavigationRepeatResult | null>(null);
+  const [writerNavigationError, setWriterNavigationError] =
+    useState<string | null>(null);
   const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
   const [dividerPosition, setDividerPosition] =
     useState<NaverDividerPosition>('after');
@@ -423,6 +437,14 @@ export function ConnectionScreen() {
     });
   }, []);
 
+  useEffect(() => {
+    return window.blowNaver.onWriterNavigationProgress((progress) => {
+      if (!sessionStoppedRef.current) {
+        setWriterNavigationProgress(progress);
+      }
+    });
+  }, []);
+
   const runConnectionCommand = async (
     action: 'open' | 'verify' | 'writer',
     command: () => ReturnType<typeof window.blowNaver.open>,
@@ -470,6 +492,9 @@ export function ConnectionScreen() {
           setStructureTestError(null);
           setCompatibilityEnvironment(null);
           setCompatibilityEnvironmentError(null);
+          setWriterNavigationProgress({ completedRuns: 0, totalRuns: 20 });
+          setWriterNavigationResult(null);
+          setWriterNavigationError(null);
           setSelectedImages([]);
           setImageLayout('individual');
           setImageResult(null);
@@ -597,6 +622,9 @@ export function ConnectionScreen() {
       setStructureTestError(null);
       setCompatibilityEnvironment(null);
       setCompatibilityEnvironmentError(null);
+      setWriterNavigationProgress({ completedRuns: 0, totalRuns: 20 });
+      setWriterNavigationResult(null);
+      setWriterNavigationError(null);
       setSelectedImages([]);
       setImageLayout('individual');
       setImageResult(null);
@@ -1251,6 +1279,51 @@ export function ConnectionScreen() {
 
       setCompatibilityEnvironmentError(
         '현재 테스트 환경을 확인하지 못했습니다. 다시 시도해 주세요.',
+      );
+    } finally {
+      finishOperation(operationVersion);
+    }
+  };
+
+  const testWriterNavigationRepeat = async (): Promise<void> => {
+    const operationVersion = beginOperation('writer-navigation-repeat');
+    setWriterNavigationProgress({ completedRuns: 0, totalRuns: 20 });
+    setWriterNavigationResult(null);
+    setWriterNavigationError(null);
+    setError(null);
+
+    try {
+      const response = await window.blowNaver.testWriterNavigationRepeat();
+
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      if (response.ok) {
+        setWriterNavigationResult(response.result);
+        setWriterNavigationProgress(response.result);
+      } else {
+        setWriterNavigationError(response.error.message);
+
+        if (
+          response.error.code === 'BROWSER_CLOSED' ||
+          response.error.code === 'NAVER_AUTH_REQUIRED'
+        ) {
+          if (response.error.code === 'BROWSER_CLOSED') {
+            setBrowserOpen(false);
+            setStatus(null);
+          }
+
+          setError(response.error);
+        }
+      }
+    } catch {
+      if (!isOperationCurrent(operationVersion)) {
+        return;
+      }
+
+      setWriterNavigationError(
+        '글쓰기 화면 반복 진입을 완료하지 못했습니다. 다시 시도해 주세요.',
       );
     } finally {
       finishOperation(operationVersion);
@@ -2272,6 +2345,123 @@ export function ConnectionScreen() {
         </section>
       ) : null}
 
+      {status?.stage === 'WRITER_READY' ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="writer-navigation-repeat-heading"
+          aria-busy={activeAction === 'writer-navigation-repeat'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="writer-navigation-repeat-heading">글쓰기 진입 20회 반복 테스트</h2>
+              <p>
+                현재 Chrome에서 등록 블로그 확인과 글쓰기 화면 진입을 20회 연속 검증합니다.
+              </p>
+            </div>
+            <span className="document-state" aria-live="polite">
+              {writerNavigationResult
+                ? '20회 완료'
+                : activeAction === 'writer-navigation-repeat'
+                  ? `${writerNavigationProgress.completedRuns}/20 진행 중`
+                  : '테스트 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  현재 편집기는 그대로 유지합니다. 회차마다 별도의 검증용 탭을 열고 진입 결과를 확인한 뒤 자동으로 닫습니다. 진행 중에는 Chrome을 직접 조작하지 마세요.
+                </p>
+              </div>
+
+              {!compatibilityEnvironment ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>현재 환경 확인이 필요합니다</strong>
+                    <p>바로 위에서 현재 환경 확인을 먼저 완료해 주세요.</p>
+                  </div>
+                </div>
+              ) : writerNavigationError ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>연속 진입 테스트를 중단했습니다</strong>
+                    <p>{writerNavigationError}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={isUiBusy || !compatibilityEnvironment}
+                onClick={() => void testWriterNavigationRepeat()}
+              >
+                {activeAction === 'writer-navigation-repeat' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : (
+                  <PanelsTopLeft aria-hidden="true" />
+                )}
+                {activeAction === 'writer-navigation-repeat'
+                  ? `${writerNavigationProgress.completedRuns}/20 확인 중…`
+                  : writerNavigationResult
+                    ? '20회 다시 테스트'
+                    : '20회 연속 테스트 시작'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="글쓰기 화면 반복 진입 결과"
+            >
+              <PanelsTopLeft aria-hidden="true" />
+              <div>
+                <h3>
+                  {writerNavigationResult ||
+                  activeAction === 'writer-navigation-repeat' ||
+                  writerNavigationProgress.completedRuns > 0
+                    ? '처리 결과'
+                    : '이번 단계에서 확인할 내용'}
+                </h3>
+                {writerNavigationResult ||
+                activeAction === 'writer-navigation-repeat' ||
+                writerNavigationProgress.completedRuns > 0 ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>전용 Chrome</dt>
+                      <dd>{compatibilityEnvironment?.chromeVersion ?? '확인 중'}</dd>
+                    </div>
+                    <div>
+                      <dt>글쓰기 진입</dt>
+                      <dd aria-live="polite">
+                        {writerNavigationProgress.completedRuns}/{writerNavigationProgress.totalRuns}회
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>검증용 탭</dt>
+                      <dd>{writerNavigationResult ? '모두 정리됨' : '회차마다 자동 정리'}</dd>
+                    </div>
+                    <div>
+                      <dt>최종 발행</dt>
+                      <dd>조작 없음</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>현재 환경 기록 완료</li>
+                    <li>등록 블로그와 글쓰기 경로 20회 재확인</li>
+                    <li>각 회차에서 글쓰기 화면 진입 확인</li>
+                    <li>실패 시 해당 회차에서 즉시 중단</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
       {status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"

@@ -23,7 +23,11 @@ import type {
   NaverStickerPosition,
   NaverUserInteractionResult,
 } from '@blow/naver-adapter';
-import type { CompatibilityEnvironmentResult } from '../shared/compatibility-environment.js';
+import type {
+  CompatibilityEnvironmentResult,
+  WriterNavigationRepeatProgress,
+  WriterNavigationRepeatResult,
+} from '../shared/compatibility-environment.js';
 
 interface PocErrorResponse {
   readonly ok: false;
@@ -129,6 +133,11 @@ interface CompatibilityEnvironmentSuccessResponse {
   readonly result: CompatibilityEnvironmentResult;
 }
 
+interface WriterNavigationRepeatSuccessResponse {
+  readonly ok: true;
+  readonly result: WriterNavigationRepeatResult;
+}
+
 interface BasicSuccessResponse {
   readonly ok: true;
 }
@@ -204,6 +213,12 @@ declare global {
       inspectCompatibilityEnvironment(): Promise<
         NaverErrorResponse | CompatibilityEnvironmentSuccessResponse
       >;
+      testWriterNavigationRepeat(): Promise<
+        NaverErrorResponse | WriterNavigationRepeatSuccessResponse
+      >;
+      onWriterNavigationProgress(
+        listener: (progress: WriterNavigationRepeatProgress) => void,
+      ): () => void;
       focus(): Promise<NaverErrorResponse | BasicSuccessResponse>;
       close(): Promise<BasicSuccessResponse>;
     };

@@ -728,10 +728,24 @@ export class NaverConnectionAdapter {
     const popupPromise = originPage
       .waitForEvent('popup', { timeout: 5_000 })
       .catch(() => null);
+    let clickError: unknown;
 
-    await target.locator.click({ noWaitAfter: true });
+    try {
+      await target.locator.click({ noWaitAfter: true });
+    } catch (error) {
+      clickError = error;
+    }
 
     const popupPage = await popupPromise;
+
+    if (clickError && !popupPage) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '글쓰기 버튼 조작을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+        { cause: clickError },
+      );
+    }
+
     this.page = popupPage ?? originPage;
     this.stickerAdapter = new NaverStickerAdapter(this.page);
 
@@ -1100,6 +1114,12 @@ export class NaverConnectionAdapter {
       await Promise.all(
         [...armedFrames].map((frame) => cleanupUserInteractionFrame(frame)),
       );
+    }
+  }
+
+  async closePage(): Promise<void> {
+    if (!this.page.isClosed()) {
+      await this.page.close();
     }
   }
 

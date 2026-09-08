@@ -496,3 +496,46 @@ describe('로그인 직후 이동 충돌 복구', () => {
     expect(status.stage).toBe('WRITER_LINK_READY');
   });
 });
+describe('글쓰기 새 탭 클릭 완료 신호', () => {
+  it('클릭 완료 신호가 끊겨도 열린 새 탭을 검증한다', async () => {
+    const popupPage = {
+      url: vi.fn().mockReturnValue(
+        'https://blog.naver.com/PostWriteForm.naver?blogId=green_fork',
+      ),
+      waitForURL: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Page;
+    const writerLink = {
+      click: vi.fn().mockRejectedValue(new Error('Target page changed.')),
+      getAttribute: vi.fn().mockResolvedValue(
+        'https://blog.naver.com/GoBlogWrite.naver',
+      ),
+      innerText: vi.fn().mockResolvedValue('글쓰기'),
+      isVisible: vi.fn().mockResolvedValue(true),
+    };
+    const writerLinks = {
+      count: vi.fn().mockResolvedValue(1),
+      nth: vi.fn().mockReturnValue(writerLink),
+    };
+    const originPage = {
+      frames: vi.fn().mockReturnValue([
+        {
+          locator: vi.fn().mockReturnValue(writerLinks),
+        },
+      ]),
+      waitForEvent: vi.fn().mockResolvedValue(popupPage),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(originPage);
+
+    const status = await adapter.openWriter(
+      {
+        blogId: 'green_fork',
+        canonicalUrl: 'https://blog.naver.com/green_fork',
+      },
+      'https://blog.naver.com/GoBlogWrite.naver',
+    );
+
+    expect(writerLink.click).toHaveBeenCalledOnce();
+    expect(popupPage.waitForURL).toHaveBeenCalledOnce();
+    expect(status.stage).toBe('WRITER_READY');
+  });
+});

@@ -36,7 +36,12 @@ import {
 import {
   chromium,
   type BrowserContext,
+  type Page,
 } from 'playwright-core';
+import type {
+  WriterNavigationRepeatProgress,
+  WriterNavigationRepeatResult,
+} from '../shared/compatibility-environment.js';
 
 export interface NaverConnectionOptions {
   readonly profilePath: string;
@@ -127,6 +132,7 @@ export type NaverRunnerFailureCode =
   | 'NETWORK_TEST_RESTORE_FAILED'
   | 'STRUCTURE_TEST_UNCONFIRMED'
   | 'CHROME_VERSION_UNCONFIRMED'
+  | 'WRITER_NAVIGATION_REPEAT_FAILED'
   | 'NAVER_CONNECTION_FAILED';
 
 export interface NaverRunnerFailure {
@@ -632,6 +638,114 @@ export class NaverConnectionSession {
         cause: error,
       });
     }
+  }
+
+  async testWriterNavigationRepetition(
+    totalRuns = 20,
+    onProgress?: (progress: WriterNavigationRepeatProgress) => void,
+  ): Promise<WriterNavigationRepeatResult> {
+    const context = this.context;
+
+    if (!context) {
+      throw new NaverConnectionRunnerError({
+        code: 'BROWSER_CLOSED',
+        message: '전용 Chrome이 닫혔습니다. 다시 열어 주세요.',
+      });
+    }
+
+    if (!Number.isInteger(totalRuns) || totalRuns < 1 || totalRuns > 20) {
+      throw new NaverConnectionRunnerError({
+        code: 'WRITER_NAVIGATION_REPEAT_FAILED',
+        message: '반복 횟수는 1회부터 20회까지 설정할 수 있습니다.',
+      });
+    }
+
+    const chromeVersion = this.getChromeVersion();
+    const writerHref = this.writerHref;
+
+    if (!writerHref) {
+      throw new NaverConnectionRunnerError({
+        code: 'WRITER_NAVIGATION_REPEAT_FAILED',
+        message: '먼저 등록 블로그와 글쓰기 이동 경로를 확인해 주세요.',
+      });
+    }
+    let completedRuns = 0;
+
+    try {
+      for (let runNumber = 1; runNumber <= totalRuns; runNumber += 1) {
+        let testPage: Page | undefined;
+        let testAdapter: NaverConnectionAdapter | undefined;
+        let testStep = '검증용 탭 열기';
+
+        try {
+          testPage = await context.newPage();
+          testStep = '네이버 블로그 홈 확인';
+          testAdapter = new NaverConnectionAdapter(testPage);
+          const homeStatus = await testAdapter.openHome(this.profile);
+
+          if (homeStatus.stage === 'LOGIN_REQUIRED') {
+            throw new NaverConnectionError(
+              'NAVER_AUTH_REQUIRED',
+              '네이버 로그인이 만료되었습니다. Chrome에서 다시 로그인해 주세요.',
+            );
+          }
+
+          testStep = '글쓰기 링크 클릭';
+          const writerStatus = await testAdapter.openWriter(
+            this.profile,
+            writerHref,
+          );
+
+          if (writerStatus.stage === 'LOGIN_REQUIRED') {
+            throw new NaverConnectionError(
+              'NAVER_AUTH_REQUIRED',
+              '네이버 로그인이 만료되었습니다. Chrome에서 다시 로그인해 주세요.',
+            );
+          }
+
+          if (writerStatus.stage !== 'WRITER_READY') {
+            throw new NaverConnectionRunnerError({
+              code: 'WRITER_NAVIGATION_REPEAT_FAILED',
+              message: '네이버 글쓰기 화면 진입을 확인하지 못했습니다.',
+            });
+          }
+
+          testStep = '글쓰기 화면 주소 확인';
+          completedRuns = runNumber;
+          onProgress?.({ completedRuns, totalRuns });
+        } catch (error) {
+          const failure = error instanceof NaverConnectionRunnerError
+            ? error.failure
+            : classifyFailure(error);
+
+          throw new NaverConnectionRunnerError(
+            {
+              code: failure.code,
+              message: failure.code === 'NAVER_CONNECTION_FAILED'
+                ? `${runNumber}회차 ${testStep} 단계에서 연결 상태를 확인하지 못했습니다.`
+                : `${runNumber}회차에서 중단했습니다. ${failure.message}`,
+            },
+            { cause: error },
+          );
+        } finally {
+          await testAdapter?.closePage().catch(() => undefined);
+
+          if (testPage && !testPage.isClosed()) {
+            await testPage.close().catch(() => undefined);
+          }
+        }
+      }
+    } finally {
+      await this.adapter.bringToFront().catch(() => undefined);
+    }
+
+    return {
+      stage: 'WRITER_NAVIGATION_REPEAT_CONFIRMED',
+      message: `네이버 글쓰기 화면 진입을 ${totalRuns}회 연속 확인했습니다.`,
+      completedRuns,
+      totalRuns,
+      chromeVersion,
+    };
   }
 
   getChromeVersion(): string {

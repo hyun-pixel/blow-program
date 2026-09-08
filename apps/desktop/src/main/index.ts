@@ -35,6 +35,7 @@ import {
   getWindowsDisplayName,
   toDisplayScalePercent,
   type CompatibilityEnvironmentResult,
+  type WriterNavigationRepeatProgress,
 } from '../shared/compatibility-environment.js';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
@@ -62,6 +63,8 @@ const ipcChannels = {
   naverTestStructureChange: 'naver:test-structure-change',
   naverForceExitTest: 'naver:force-exit-test',
   naverInspectCompatibilityEnvironment: 'naver:inspect-compatibility-environment',
+  naverTestWriterNavigationRepeat: 'naver:test-writer-navigation-repeat',
+  naverWriterNavigationProgress: 'naver:writer-navigation-progress',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -2119,6 +2122,68 @@ function registerNaverIpc(): void {
           error: {
             code: 'COMPATIBILITY_ENVIRONMENT_UNCONFIRMED',
             message: '현재 테스트 환경을 확인하지 못했습니다. 다시 시도해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.naverTestWriterNavigationRepeat,
+    async (event) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const session = activeNaverSession;
+
+      if (!session) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      activeRun = true;
+
+      try {
+        const result = await session.testWriterNavigationRepetition(
+          20,
+          (progress: WriterNavigationRepeatProgress) => {
+            if (!event.sender.isDestroyed()) {
+              event.sender.send(
+                ipcChannels.naverWriterNavigationProgress,
+                progress,
+              );
+            }
+          },
+        );
+
+        return { ok: true, result };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'WRITER_NAVIGATION_REPEAT_FAILED',
+            message: '글쓰기 화면 반복 진입을 완료하지 못했습니다. 다시 시도해 주세요.',
           },
         };
       } finally {

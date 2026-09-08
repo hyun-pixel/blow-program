@@ -27,7 +27,11 @@ import type {
   NaverStickerPosition,
   NaverUserInteractionResult,
 } from '@blow/naver-adapter';
-import type { CompatibilityEnvironmentResult } from '../shared/compatibility-environment.js';
+import type {
+  CompatibilityEnvironmentResult,
+  WriterNavigationRepeatProgress,
+  WriterNavigationRepeatResult,
+} from '../shared/compatibility-environment.js';
 
 type NaverStateResponse =
   | {
@@ -225,6 +229,19 @@ type CompatibilityEnvironmentResponse =
       };
     };
 
+type WriterNavigationRepeatResponse =
+  | {
+      readonly ok: true;
+      readonly result: WriterNavigationRepeatResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 const ipcChannels = {
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
@@ -248,6 +265,8 @@ const ipcChannels = {
   naverTestStructureChange: 'naver:test-structure-change',
   naverForceExitTest: 'naver:force-exit-test',
   naverInspectCompatibilityEnvironment: 'naver:inspect-compatibility-environment',
+  naverTestWriterNavigationRepeat: 'naver:test-writer-navigation-repeat',
+  naverWriterNavigationProgress: 'naver:writer-navigation-progress',
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
@@ -363,6 +382,27 @@ const blowNaverApi = {
   forceExitTest: () => ipcRenderer.invoke(ipcChannels.naverForceExitTest),
   inspectCompatibilityEnvironment: (): Promise<CompatibilityEnvironmentResponse> =>
     ipcRenderer.invoke(ipcChannels.naverInspectCompatibilityEnvironment),
+  testWriterNavigationRepeat: (): Promise<WriterNavigationRepeatResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverTestWriterNavigationRepeat),
+  onWriterNavigationProgress: (
+    listener: (progress: WriterNavigationRepeatProgress) => void,
+  ) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      progress: WriterNavigationRepeatProgress,
+    ): void => {
+      listener(progress);
+    };
+
+    ipcRenderer.on(ipcChannels.naverWriterNavigationProgress, handler);
+
+    return () => {
+      ipcRenderer.removeListener(
+        ipcChannels.naverWriterNavigationProgress,
+        handler,
+      );
+    };
+  },
   focus: () => ipcRenderer.invoke(ipcChannels.naverFocus),
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };

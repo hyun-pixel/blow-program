@@ -6,6 +6,18 @@ export interface CompatibilityEnvironmentResult {
   readonly displayScalePercent: number;
 }
 
+export interface WriterNavigationRepeatProgress {
+  readonly completedRuns: number;
+  readonly totalRuns: number;
+}
+
+export interface WriterNavigationRepeatResult
+  extends WriterNavigationRepeatProgress {
+  readonly stage: 'WRITER_NAVIGATION_REPEAT_CONFIRMED';
+  readonly message: string;
+  readonly chromeVersion: string;
+}
+
 export function getWindowsDisplayName(systemVersion: string): string {
   const parts = systemVersion.split('.');
   const major = Number(parts[0]);
