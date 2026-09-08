@@ -19,6 +19,7 @@ const saveStatusSelector = [
 ].join(', ');
 
 export type NaverDraftSaveFailureCode =
+  | 'DRAFT_SAVE_OPERATION_INTERRUPTED'
   | 'DRAFT_SAVE_CONTROL_NOT_FOUND'
   | 'DRAFT_SAVE_CONTROL_AMBIGUOUS'
   | 'DRAFT_SAVE_CLICK_FAILED'
@@ -55,6 +56,17 @@ export class NaverDraftSaveError extends Error {
     super(message, options);
     this.name = 'NaverDraftSaveError';
   }
+}
+
+function throwIfDraftSaveInterrupted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw new NaverDraftSaveError(
+    'DRAFT_SAVE_OPERATION_INTERRUPTED',
+    '사용자 조작을 감지해 임시저장을 시작하지 않았습니다.',
+  );
 }
 
 interface SaveControlCandidate {
@@ -371,13 +383,16 @@ function hasDirectCompletionSignal(
 export class NaverDraftSaveAdapter {
   constructor(private readonly page: Page) {}
 
-  async saveAndVerify(): Promise<NaverDraftSaveResult> {
+  async saveAndVerify(signal?: AbortSignal): Promise<NaverDraftSaveResult> {
+    throwIfDraftSaveInterrupted(signal);
     const control = await requireUniqueSaveControl(this.page);
+    throwIfDraftSaveInterrupted(signal);
     const [beforeControl, beforeStatusTexts, beforeCount] = await Promise.all([
       readControlSnapshot(control),
       readVisibleStatusTexts(this.page),
       readVisibleDraftCount(this.page),
     ]);
+    throwIfDraftSaveInterrupted(signal);
     const beforeStatusSet = new Set(beforeStatusTexts);
     const signalIds = new Set<NaverDraftSaveSignalId>();
     let seenBusy = false;
@@ -390,9 +405,15 @@ export class NaverDraftSaveAdapter {
     this.page.on('response', onResponse);
 
     try {
+      throwIfDraftSaveInterrupted(signal);
       await control.click({ noWaitAfter: true });
     } catch (error) {
       this.page.off('response', onResponse);
+
+      if (error instanceof NaverDraftSaveError) {
+        throw error;
+      }
+
       throw new NaverDraftSaveError(
         'DRAFT_SAVE_CLICK_FAILED',
         '저장 버튼 조작이 완료됐는지 확실하지 않아 자동으로 다시 누르지 않았습니다. Chrome에서 저장 여부를 확인해 주세요.',

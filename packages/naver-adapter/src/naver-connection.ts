@@ -906,6 +906,7 @@ export class NaverConnectionAdapter {
   async saveDraft(
     profile: NaverBlogProfile,
     content: DraftContent,
+    signal?: AbortSignal,
   ): Promise<NaverDraftSaveResult> {
     if (!isNaverWriterUrl(this.page.url(), profile.blogId)) {
       throw new NaverConnectionError(
@@ -918,7 +919,7 @@ export class NaverConnectionAdapter {
     await editor.verifyCurrent(content);
 
     const draftSaveAdapter = new NaverDraftSaveAdapter(this.page);
-    const result = await draftSaveAdapter.saveAndVerify();
+    const result = await draftSaveAdapter.saveAndVerify(signal);
 
     if (!isNaverWriterUrl(result.currentUrl, profile.blogId)) {
       throw new NaverDraftSaveError(

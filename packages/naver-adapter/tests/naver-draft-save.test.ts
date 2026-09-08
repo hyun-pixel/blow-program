@@ -145,6 +145,40 @@ function createSavePage(
 }
 
 describe('네이버 임시저장', () => {
+  it('저장 버튼을 누르기 전에 작업이 중단되면 아무것도 누르지 않는다', async () => {
+    const control = createControl(() => ({ label: '저장' }));
+    const pageMock = createSavePage([control], () => []);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      new NaverDraftSaveAdapter(pageMock.page).saveAndVerify(
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({
+      code: 'DRAFT_SAVE_OPERATION_INTERRUPTED',
+    });
+    expect(control.click).not.toHaveBeenCalled();
+  });
+
+  it('저장 버튼 조작이 시작된 뒤 중단 신호가 와도 실행 결과를 숨기지 않는다', async () => {
+    const controller = new AbortController();
+    const control = createControl(
+      () => ({ label: '저장' }),
+      () => controller.abort(),
+    );
+    const pageMock = createSavePage([control], () => []);
+
+    await expect(
+      new NaverDraftSaveAdapter(pageMock.page).saveAndVerify(
+        controller.signal,
+      ),
+    ).resolves.toMatchObject({
+      stage: 'DRAFT_SAVE_COMPLETED',
+      signalCount: 1,
+    });
+    expect(control.click).toHaveBeenCalledOnce();
+  });
   it('정확한 임시저장 버튼을 한 번만 누르고 서로 다른 완료 신호를 확인한다', async () => {
     let saved = false;
     let pageMock: ReturnType<typeof createSavePage>;

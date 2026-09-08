@@ -1549,15 +1549,59 @@ function registerNaverIpc(): void {
 
     activeRun = true;
 
+    const appWindow = BrowserWindow.fromWebContents(event.sender);
+    const draftSaveAbortController = new AbortController();
+    let userLeftApp =
+      !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+    const recordAppBlur = (): void => {
+      userLeftApp = true;
+      draftSaveAbortController.abort();
+    };
+    const userInteractionResponse = () => {
+      if (appWindow && !appWindow.isDestroyed()) {
+        appWindow.show();
+        appWindow.focus();
+      }
+
+      return {
+        ok: false as const,
+        error: {
+          code: 'USER_INTERACTION_DETECTED',
+          message: '임시저장 실행 전에 BLOW 화면을 벗어난 것을 감지해 저장 버튼을 누르지 않고 멈췄습니다. 다시 실행하려면 작업 중단으로 새 작업을 시작해 주세요.',
+        },
+      };
+    };
+
+    if (appWindow && !appWindow.isDestroyed()) {
+      appWindow.on('blur', recordAppBlur);
+    }
+
     try {
+      if (userLeftApp) {
+        return userInteractionResponse();
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+      if (userLeftApp) {
+        return userInteractionResponse();
+      }
+
       return {
         ok: true,
-        result: await session.saveDraft(),
+        result: await session.saveDraft(draftSaveAbortController.signal),
       };
     } catch (error) {
       if (error instanceof NaverConnectionRunnerError) {
         if (error.failure.code === 'BROWSER_CLOSED') {
           activeNaverSession = null;
+        }
+
+        if (
+          userLeftApp &&
+          error.failure.code === 'DRAFT_SAVE_OPERATION_INTERRUPTED'
+        ) {
+          return userInteractionResponse();
         }
 
         return {
@@ -1574,6 +1618,10 @@ function registerNaverIpc(): void {
         },
       };
     } finally {
+      if (appWindow && !appWindow.isDestroyed()) {
+        appWindow.off('blur', recordAppBlur);
+      }
+
       activeRun = false;
     }
   });

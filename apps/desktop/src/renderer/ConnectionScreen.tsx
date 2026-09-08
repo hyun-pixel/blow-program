@@ -1275,6 +1275,7 @@ export function ConnectionScreen() {
   const selectedImageLayoutLabel = getImageLayoutLabel(imageLayout);
   const draftSaveError = error
     ? [
+        'DRAFT_SAVE_OPERATION_INTERRUPTED',
         'DRAFT_SAVE_CONTROL_NOT_FOUND',
         'DRAFT_SAVE_CONTROL_AMBIGUOUS',
         'DRAFT_SAVE_CLICK_FAILED',

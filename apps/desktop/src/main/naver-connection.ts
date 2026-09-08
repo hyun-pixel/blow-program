@@ -59,6 +59,7 @@ export type NaverRunnerFailureCode =
   | 'EDITOR_NOT_BLANK'
   | 'EDITOR_INPUT_INTERRUPTED'
   | 'EDITOR_INPUT_MISMATCH'
+  | 'DRAFT_SAVE_OPERATION_INTERRUPTED'
   | 'DRAFT_SAVE_CONTROL_NOT_FOUND'
   | 'DRAFT_SAVE_CONTROL_AMBIGUOUS'
   | 'DRAFT_SAVE_CLICK_FAILED'
@@ -506,7 +507,7 @@ export class NaverConnectionSession {
     }
   }
 
-  async saveDraft(): Promise<NaverDraftSaveResult> {
+  async saveDraft(signal?: AbortSignal): Promise<NaverDraftSaveResult> {
     const content = this.enteredContent;
 
     if (!content) {
@@ -517,7 +518,7 @@ export class NaverConnectionSession {
     }
 
     try {
-      return await this.adapter.saveDraft(this.profile, content);
+      return await this.adapter.saveDraft(this.profile, content, signal);
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
         cause: error,
