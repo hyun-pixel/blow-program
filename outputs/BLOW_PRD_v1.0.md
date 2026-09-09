@@ -4,7 +4,7 @@
 > 작성 기준일: 2026-09-09
 > 문서 상태: MVP 인터뷰·네이버 자동 입력 POC 반영본
 > 대상 독자: 서비스 기획자, UI·UX 디자이너, 데스크톱·백엔드 개발자, QA 담당자, 운영자
-> 관련 문서: `BLOW_NAVER_AUTOMATION_POC_RESULT_v1.0.md`, `BLOW_MVP_IMPLEMENTATION_PLAN_v1.0.md`
+> 관련 문서: `BLOW_NAVER_AUTOMATION_POC_RESULT_v1.0.md`, `BLOW_MVP_IMPLEMENTATION_PLAN_v1.0.md`, `BLOW_MVP_DECISION_001_NAVER_AUTOMATION_POLICY_v1.0.md`
 
 ---
 
@@ -1054,7 +1054,7 @@ Windows 알림은 네이버 임시저장 완료, 사용자 확인 또는 추가 
 11. 협조 사용자 5명 선행 배포
 12. 안정화 후 총 20명까지 확대
 
-네이버 편집기 자동 입력의 제한된 기술검증은 2026-09-09에 조건부 통과했다. 다음 관문은 네이버 정책·상용화 가능성 검토와 계정·이용권·보안 구조 확정이다. 자세한 판정 근거와 후속 조건은 `BLOW_NAVER_AUTOMATION_POC_RESULT_v1.0.md`를 따른다.
+네이버 편집기 자동 입력의 제한된 기술검증은 2026-09-09에 조건부 통과했다. 같은 날 공식 이용약관 검토에서 사전 허락 없는 자동화 콘텐츠 삽입 금지 조항을 확인했으므로, 네이버의 서면 허락 전까지 상용 자동 입력 개발·출시를 보류한다. 자세한 근거와 문의 절차는 `BLOW_MVP_DECISION_001_NAVER_AUTOMATION_POLICY_v1.0.md`를 따른다.
 
 ## 30. 출시 전 외부 확인 항목
 
