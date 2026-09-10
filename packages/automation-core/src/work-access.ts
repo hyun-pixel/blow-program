@@ -12,6 +12,54 @@ export type WorkAccessBlockReason =
   | 'DEVICE_REGISTRATION_REQUIRED'
   | 'DEVICE_MISMATCH';
 
+export type LicenseAccessBlockReason =
+  | 'LICENSE_INACTIVE'
+  | 'LICENSE_INVALID'
+  | 'LICENSE_NOT_STARTED'
+  | 'LICENSE_EXPIRED';
+
+export interface LicenseAccessInput {
+  readonly status: 'active' | 'inactive';
+  readonly startsAt: string;
+  readonly endsAt: string;
+  readonly now: string;
+}
+
+export type LicenseAccessDecision =
+  | { readonly allowed: true; readonly expiresAt: string }
+  | { readonly allowed: false; readonly reason: LicenseAccessBlockReason };
+
+export function decideLicenseAccess(
+  input: LicenseAccessInput,
+): LicenseAccessDecision {
+  if (input.status !== 'active') {
+    return { allowed: false, reason: 'LICENSE_INACTIVE' };
+  }
+
+  const now = Date.parse(input.now);
+  const startsAt = Date.parse(input.startsAt);
+  const endsAt = Date.parse(input.endsAt);
+
+  if (
+    !Number.isFinite(now) ||
+    !Number.isFinite(startsAt) ||
+    !Number.isFinite(endsAt) ||
+    endsAt <= startsAt
+  ) {
+    return { allowed: false, reason: 'LICENSE_INVALID' };
+  }
+
+  if (now < startsAt) {
+    return { allowed: false, reason: 'LICENSE_NOT_STARTED' };
+  }
+
+  if (now >= endsAt) {
+    return { allowed: false, reason: 'LICENSE_EXPIRED' };
+  }
+
+  return { allowed: true, expiresAt: input.endsAt };
+}
+
 export interface WorkAccessInput {
   readonly serverAvailable: boolean;
   readonly signedIn: boolean;
@@ -58,29 +106,15 @@ export function decideWorkAccess(
     return { allowed: false, reason: 'AUTOMATION_DISABLED' };
   }
 
-  if (input.licenseStatus !== 'active') {
-    return { allowed: false, reason: 'LICENSE_INACTIVE' };
-  }
+  const licenseDecision = decideLicenseAccess({
+    status: input.licenseStatus,
+    startsAt: input.licenseStartsAt,
+    endsAt: input.licenseEndsAt,
+    now: input.now,
+  });
 
-  const now = Date.parse(input.now);
-  const startsAt = Date.parse(input.licenseStartsAt);
-  const endsAt = Date.parse(input.licenseEndsAt);
-
-  if (
-    !Number.isFinite(now) ||
-    !Number.isFinite(startsAt) ||
-    !Number.isFinite(endsAt) ||
-    endsAt <= startsAt
-  ) {
-    return { allowed: false, reason: 'LICENSE_INVALID' };
-  }
-
-  if (now < startsAt) {
-    return { allowed: false, reason: 'LICENSE_NOT_STARTED' };
-  }
-
-  if (now >= endsAt) {
-    return { allowed: false, reason: 'LICENSE_EXPIRED' };
+  if (!licenseDecision.allowed) {
+    return licenseDecision;
   }
 
   if (!input.registeredDeviceHash || !input.currentDeviceHash) {
@@ -91,5 +125,5 @@ export function decideWorkAccess(
     return { allowed: false, reason: 'DEVICE_MISMATCH' };
   }
 
-  return { allowed: true, expiresAt: input.licenseEndsAt };
+  return licenseDecision;
 }

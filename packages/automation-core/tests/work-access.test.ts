@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  decideLicenseAccess,
   decideWorkAccess,
   type WorkAccessBlockReason,
   type WorkAccessInput,
@@ -19,6 +20,31 @@ const allowedInput: WorkAccessInput = {
   automationEnabled: true,
   now: '2026-09-10T12:00:00+09:00',
 };
+
+describe('decideLicenseAccess', () => {
+  it('현재 이용 기간 안의 활성 이용권만 허용한다', () => {
+    expect(
+      decideLicenseAccess({
+        status: 'active',
+        startsAt: allowedInput.licenseStartsAt,
+        endsAt: allowedInput.licenseEndsAt,
+        now: allowedInput.now,
+      }),
+    ).toEqual({
+      allowed: true,
+      expiresAt: allowedInput.licenseEndsAt,
+    });
+
+    expect(
+      decideLicenseAccess({
+        status: 'inactive',
+        startsAt: allowedInput.licenseStartsAt,
+        endsAt: allowedInput.licenseEndsAt,
+        now: allowedInput.now,
+      }),
+    ).toEqual({ allowed: false, reason: 'LICENSE_INACTIVE' });
+  });
+});
 
 describe('decideWorkAccess', () => {
   it('allows only an active, verified account with a valid license and matching device', () => {

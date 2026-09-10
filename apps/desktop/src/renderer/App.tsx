@@ -17,9 +17,11 @@ import {
   useMemo,
   useState,
 } from 'react';
-import type {
-  PocSnapshot,
-  PocState,
+import {
+  decideLicenseAccess,
+  type LicenseAccessBlockReason,
+  type PocSnapshot,
+  type PocState,
 } from '@blow/automation-core';
 import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './AuthScreen.js';
@@ -427,7 +429,21 @@ function SafetyScreen() {
   );
 }
 
-function Workspace({ session }: { readonly session: Session }) {
+function formatLicenseEndDate(value: string): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date(value));
+}
+
+function Workspace({
+  session,
+  licenseEndsAt,
+}: {
+  readonly session: Session;
+  readonly licenseEndsAt: string;
+}) {
   const [screen, setScreen] = useState<Screen>('connection');
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
@@ -509,7 +525,7 @@ function Workspace({ session }: { readonly session: Session }) {
                 {signOutError}
               </span>
             ) : (
-              <span>회원 정보 확인 완료</span>
+              <span>이용 종료 {formatLicenseEndDate(licenseEndsAt)}</span>
             )}
             <button
               type="button"
@@ -539,12 +555,35 @@ function Workspace({ session }: { readonly session: Session }) {
     </div>
   );
 }
+
 type AccountStatus =
   | 'checking'
   | 'active'
   | 'suspended'
   | 'unverified'
-  | 'unavailable';
+  | 'unavailable'
+  | 'license_inactive'
+  | 'license_invalid'
+  | 'license_not_started'
+  | 'license_expired';
+
+function getBlockedLicenseStatus(
+  reason: LicenseAccessBlockReason,
+): Exclude<AccountStatus, 'checking' | 'active'> {
+  const statuses: Readonly<
+    Record<
+      LicenseAccessBlockReason,
+      Exclude<AccountStatus, 'checking' | 'active'>
+    >
+  > = {
+    LICENSE_INACTIVE: 'license_inactive',
+    LICENSE_INVALID: 'license_invalid',
+    LICENSE_NOT_STARTED: 'license_not_started',
+    LICENSE_EXPIRED: 'license_expired',
+  };
+
+  return statuses[reason];
+}
 
 function AccountStatusScreen({
   status,
@@ -571,6 +610,22 @@ function AccountStatusScreen({
     unavailable: {
       title: '계정 정보를 확인하지 못했습니다',
       description: '네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+    },
+    license_inactive: {
+      title: '이용권이 준비되지 않았습니다',
+      description: '관리자가 베타 이용권을 등록한 뒤 다시 확인해 주세요.',
+    },
+    license_invalid: {
+      title: '이용권 정보를 확인해 주세요',
+      description: '등록된 이용 기간에 문제가 있습니다. 관리자에게 문의해 주세요.',
+    },
+    license_not_started: {
+      title: '아직 이용 기간이 시작되지 않았습니다',
+      description: '이용 시작일이 지난 뒤 다시 확인해 주세요.',
+    },
+    license_expired: {
+      title: '이용 기간이 종료되었습니다',
+      description: '계속 사용하려면 이용권 갱신이 필요합니다.',
     },
   }[status];
 
@@ -611,6 +666,7 @@ export function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [accountStatus, setAccountStatus] =
     useState<AccountStatus>('checking');
+  const [licenseEndsAt, setLicenseEndsAt] = useState<string | null>(null);
   const [checkVersion, setCheckVersion] = useState(0);
   const userId = session?.user.id;
   const emailConfirmedAt = session?.user.email_confirmed_at;
@@ -661,25 +717,49 @@ export function App() {
     let active = true;
     setAccountStatus('checking');
 
-    void client
-      .from('profiles')
-      .select('account_status')
-      .eq('id', userId)
-      .single()
-      .then(({ data, error }) => {
-        if (!active) {
-          return;
-        }
+    void Promise.all([
+      client
+        .from('profiles')
+        .select('account_status')
+        .eq('id', userId)
+        .single(),
+      client
+        .from('licenses')
+        .select('status, starts_at, ends_at')
+        .eq('user_id', userId)
+        .maybeSingle(),
+    ]).then(([profileResult, licenseResult]) => {
+      if (!active) {
+        return;
+      }
 
-        if (error || !data) {
-          setAccountStatus('unavailable');
-          return;
-        }
+      if (profileResult.error || licenseResult.error || !profileResult.data) {
+        setAccountStatus('unavailable');
+        return;
+      }
 
-        setAccountStatus(
-          data.account_status === 'active' ? 'active' : 'suspended',
-        );
+      if (profileResult.data.account_status !== 'active') {
+        setAccountStatus('suspended');
+        return;
+      }
+
+      const license = licenseResult.data;
+      const decision = decideLicenseAccess({
+        status: license?.status === 'active' ? 'active' : 'inactive',
+        startsAt: license?.starts_at ?? '',
+        endsAt: license?.ends_at ?? '',
+        now: new Date().toISOString(),
       });
+
+      if (decision.allowed) {
+        setLicenseEndsAt(decision.expiresAt);
+        setAccountStatus('active');
+        return;
+      }
+
+      setLicenseEndsAt(null);
+      setAccountStatus(getBlockedLicenseStatus(decision.reason));
+    });
 
     return () => {
       active = false;
@@ -694,19 +774,25 @@ export function App() {
     return <AuthScreen />;
   }
 
-  if (session === undefined || accountStatus !== 'active') {
+  if (
+    session === undefined ||
+    accountStatus !== 'active' ||
+    !licenseEndsAt
+  ) {
+    let screenStatus: Exclude<AccountStatus, 'active'> = 'checking';
+
+    if (session !== undefined && accountStatus !== 'active') {
+      screenStatus = accountStatus;
+    }
+
     return (
       <AccountStatusScreen
-        status={
-          session === undefined || accountStatus === 'active'
-            ? 'checking'
-            : accountStatus
-        }
+        status={screenStatus}
         onRetry={() => setCheckVersion((current) => current + 1)}
         onSignOut={signOut}
       />
     );
   }
 
-  return <Workspace session={session} />;
+  return <Workspace session={session} licenseEndsAt={licenseEndsAt} />;
 }
