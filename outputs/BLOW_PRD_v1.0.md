@@ -4,7 +4,7 @@
 > 작성 기준일: 2026-09-09
 > 문서 상태: MVP 인터뷰·네이버 자동 입력 POC 반영본
 > 대상 독자: 서비스 기획자, UI·UX 디자이너, 데스크톱·백엔드 개발자, QA 담당자, 운영자
-> 관련 문서: `BLOW_NAVER_AUTOMATION_POC_RESULT_v1.0.md`, `BLOW_MVP_IMPLEMENTATION_PLAN_v1.0.md`, `BLOW_MVP_DECISION_001_NAVER_AUTOMATION_POLICY_v1.0.md`, `BLOW_MVP_DECISION_002_BACKEND_HOSTING_v1.0.md`, `BLOW_MVP_DECISION_003_AUTH_EMAIL_v1.0.md`, `BLOW_MVP_DECISION_004_ADMIN_MFA_v1.0.md`, `BLOW_MVP_DECISION_005_LEGAL_REVIEW_v1.0.md`
+> 관련 문서: `BLOW_NAVER_AUTOMATION_POC_RESULT_v1.0.md`, `BLOW_MVP_IMPLEMENTATION_PLAN_v1.0.md`, `BLOW_MVP_DECISION_001_NAVER_AUTOMATION_POLICY_v1.0.md`, `BLOW_MVP_DECISION_002_BACKEND_HOSTING_v1.0.md`, `BLOW_MVP_DECISION_003_AUTH_EMAIL_v1.0.md`, `BLOW_MVP_DECISION_004_ADMIN_MFA_v1.0.md`, `BLOW_MVP_DECISION_005_LEGAL_REVIEW_v1.0.md`, `BLOW_MVP_DECISION_006_WINDOWS_CODE_SIGNING_v1.0.md`
 
 ---
 
@@ -843,7 +843,7 @@ Windows 알림은 네이버 임시저장 완료, 사용자 확인 또는 추가 
 - 설치된 최신 정식 Chrome 호환성은 POC에서 확인했으며, 직전 정식 버전은 출시 또는 초기 사용자 확대 전에 별도 기술검증 필수
 - 로컬 데이터: SQLite 또는 동등한 로컬 데이터베이스
 - 자격증명: Windows DPAPI 또는 OS 보안 저장소
-- 설치: Windows 코드 서명을 적용한 설치 패키지
+- 설치: 외부 배포 전 공개 신뢰(Public Trust) Windows 코드 서명을 적용한 설치 패키지(권장 공급자: Microsoft Artifact Signing, 사용자 승인 대기)
 
 선정 이유: UI 구현 생태계가 크고 Chrome 자동화 도구와 통합하기 쉬워 초기 MVP 위험이 상대적으로 낮다. 단, 설치 용량과 메모리 사용량이 커질 수 있으므로 성능 검수가 필요하다. Playwright 공식 문서는 자사 번들 Chromium에서 가장 안정적이며 다른 브라우저 버전은 동작이 보장되지 않는다고 안내하므로, 사용자 설치 Chrome 방식은 반드시 별도 기술검증을 통과해야 한다.
 
