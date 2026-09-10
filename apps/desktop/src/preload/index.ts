@@ -257,6 +257,7 @@ type SlowNetworkResponse =
     };
 
 const ipcChannels = {
+  systemDeviceHash: 'system:device-hash',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
   mockState: 'poc:state',
@@ -285,6 +286,11 @@ const ipcChannels = {
   naverClose: 'naver:close',
   naverFocus: 'naver:focus',
 } as const;
+
+const blowSystemApi = {
+  getDeviceHash: (): Promise<string> =>
+    ipcRenderer.invoke(ipcChannels.systemDeviceHash),
+};
 
 const blowPocApi = {
   start: () => ipcRenderer.invoke(ipcChannels.mockStart),
@@ -424,5 +430,6 @@ const blowNaverApi = {
   close: () => ipcRenderer.invoke(ipcChannels.naverClose),
 };
 
+contextBridge.exposeInMainWorld('blowSystem', blowSystemApi);
 contextBridge.exposeInMainWorld('blowPoc', blowPocApi);
 contextBridge.exposeInMainWorld('blowNaver', blowNaverApi);

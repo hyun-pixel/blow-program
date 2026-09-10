@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  decideDeviceAccess,
   decideLicenseAccess,
   decideWorkAccess,
   type WorkAccessBlockReason,
@@ -43,6 +44,24 @@ describe('decideLicenseAccess', () => {
         now: allowedInput.now,
       }),
     ).toEqual({ allowed: false, reason: 'LICENSE_INACTIVE' });
+  });
+});
+
+describe('decideDeviceAccess', () => {
+  it('등록된 기기와 현재 기기가 같을 때만 허용한다', () => {
+    expect(
+      decideDeviceAccess({
+        registeredDeviceHash: 'registered-device',
+        currentDeviceHash: 'registered-device',
+      }),
+    ).toEqual({ allowed: true });
+
+    expect(
+      decideDeviceAccess({
+        registeredDeviceHash: 'registered-device',
+        currentDeviceHash: 'other-device',
+      }),
+    ).toEqual({ allowed: false, reason: 'DEVICE_MISMATCH' });
   });
 });
 

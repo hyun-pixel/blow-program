@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import {
@@ -41,6 +42,7 @@ import {
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
 const ipcChannels = {
+  systemDeviceHash: 'system:device-hash',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
   mockState: 'poc:state',
@@ -112,6 +114,39 @@ function requireTrustedSender(event: IpcMainInvokeEvent): void {
   if (!isTrustedSender(event)) {
     throw new Error('허용되지 않은 화면에서 보낸 요청입니다.');
   }
+}
+
+function getWindowsDeviceHash(): string {
+  if (process.platform !== 'win32') {
+    throw new Error('Windows에서만 기기를 등록할 수 있습니다.');
+  }
+
+  const regPath = join(
+    process.env.SystemRoot ?? 'C:\\Windows',
+    'System32',
+    'reg.exe',
+  );
+  const output = execFileSync(
+    regPath,
+    [
+      'query',
+      'HKLM\\SOFTWARE\\Microsoft\\Cryptography',
+      '/v',
+      'MachineGuid',
+    ],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  const machineGuid = output.match(
+    /MachineGuid\s+REG_SZ\s+([^\r\n]+)/i,
+  )?.[1]?.trim();
+
+  if (!machineGuid) {
+    throw new Error('Windows 기기 식별값을 확인하지 못했습니다.');
+  }
+
+  return createHash('sha256')
+    .update(`blow-device-v1:${machineGuid.toLowerCase()}`)
+    .digest('hex');
 }
 
 function getPocPaths(): {
@@ -2275,6 +2310,10 @@ function registerNaverIpc(): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle(ipcChannels.systemDeviceHash, (event) => {
+    requireTrustedSender(event);
+    return getWindowsDeviceHash();
+  });
   registerMockIpc();
   registerNaverIpc();
 }

@@ -150,6 +150,9 @@ interface BasicSuccessResponse {
 
 declare global {
   interface Window {
+    readonly blowSystem: {
+      getDeviceHash(): Promise<string>;
+    };
     readonly blowPoc: {
       start(): Promise<PocErrorResponse | PocSuccessResponse>;
       closeBrowser(): Promise<BasicSuccessResponse>;

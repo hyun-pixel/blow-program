@@ -18,6 +18,7 @@ import {
   useState,
 } from 'react';
 import {
+  decideDeviceAccess,
   decideLicenseAccess,
   type LicenseAccessBlockReason,
   type PocSnapshot,
@@ -565,7 +566,9 @@ type AccountStatus =
   | 'license_inactive'
   | 'license_invalid'
   | 'license_not_started'
-  | 'license_expired';
+  | 'license_expired'
+  | 'device_unavailable'
+  | 'device_mismatch';
 
 function getBlockedLicenseStatus(
   reason: LicenseAccessBlockReason,
@@ -626,6 +629,15 @@ function AccountStatusScreen({
     license_expired: {
       title: '이용 기간이 종료되었습니다',
       description: '계속 사용하려면 이용권 갱신이 필요합니다.',
+    },
+    device_unavailable: {
+      title: '기기를 확인하지 못했습니다',
+      description: '프로그램을 다시 시작한 뒤 재시도해 주세요.',
+    },
+    device_mismatch: {
+      title: '등록되지 않은 기기입니다',
+      description:
+        '이 계정은 처음 등록한 Windows PC에서만 사용할 수 있습니다. 기기를 변경하려면 관리자에게 문의해 주세요.',
     },
   }[status];
 
@@ -716,6 +728,7 @@ export function App() {
 
     let active = true;
     setAccountStatus('checking');
+    setLicenseEndsAt(null);
 
     void Promise.all([
       client
@@ -728,12 +741,28 @@ export function App() {
         .select('status, starts_at, ends_at')
         .eq('user_id', userId)
         .maybeSingle(),
-    ]).then(([profileResult, licenseResult]) => {
+      client
+        .from('device_registrations')
+        .select('device_hash')
+        .eq('user_id', userId)
+        .maybeSingle(),
+      window.blowSystem.getDeviceHash(),
+    ]).then(async ([
+      profileResult,
+      licenseResult,
+      deviceResult,
+      currentDeviceHash,
+    ]) => {
       if (!active) {
         return;
       }
 
-      if (profileResult.error || licenseResult.error || !profileResult.data) {
+      if (
+        profileResult.error ||
+        licenseResult.error ||
+        deviceResult.error ||
+        !profileResult.data
+      ) {
         setAccountStatus('unavailable');
         return;
       }
@@ -752,13 +781,52 @@ export function App() {
       });
 
       if (decision.allowed) {
+        let registeredDeviceHash = deviceResult.data?.device_hash ?? null;
+
+        if (!registeredDeviceHash) {
+          const registrationResult = await client.rpc('register_device', {
+            requested_device_hash: currentDeviceHash,
+          });
+
+          if (!active) {
+            return;
+          }
+
+          if (
+            registrationResult.error ||
+            typeof registrationResult.data !== 'string'
+          ) {
+            setAccountStatus('device_unavailable');
+            return;
+          }
+
+          registeredDeviceHash = registrationResult.data;
+        }
+
+        const deviceDecision = decideDeviceAccess({
+          registeredDeviceHash,
+          currentDeviceHash,
+        });
+
+        if (!deviceDecision.allowed) {
+          setAccountStatus(
+            deviceDecision.reason === 'DEVICE_MISMATCH'
+              ? 'device_mismatch'
+              : 'device_unavailable',
+          );
+          return;
+        }
+
         setLicenseEndsAt(decision.expiresAt);
         setAccountStatus('active');
         return;
       }
 
-      setLicenseEndsAt(null);
       setAccountStatus(getBlockedLicenseStatus(decision.reason));
+    }).catch(() => {
+      if (active) {
+        setAccountStatus('device_unavailable');
+      }
     });
 
     return () => {

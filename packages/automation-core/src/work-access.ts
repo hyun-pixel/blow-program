@@ -29,6 +29,19 @@ export type LicenseAccessDecision =
   | { readonly allowed: true; readonly expiresAt: string }
   | { readonly allowed: false; readonly reason: LicenseAccessBlockReason };
 
+export type DeviceAccessBlockReason =
+  | 'DEVICE_REGISTRATION_REQUIRED'
+  | 'DEVICE_MISMATCH';
+
+export interface DeviceAccessInput {
+  readonly registeredDeviceHash: string | null;
+  readonly currentDeviceHash: string;
+}
+
+export type DeviceAccessDecision =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly reason: DeviceAccessBlockReason };
+
 export function decideLicenseAccess(
   input: LicenseAccessInput,
 ): LicenseAccessDecision {
@@ -58,6 +71,20 @@ export function decideLicenseAccess(
   }
 
   return { allowed: true, expiresAt: input.endsAt };
+}
+
+export function decideDeviceAccess(
+  input: DeviceAccessInput,
+): DeviceAccessDecision {
+  if (!input.registeredDeviceHash || !input.currentDeviceHash) {
+    return { allowed: false, reason: 'DEVICE_REGISTRATION_REQUIRED' };
+  }
+
+  if (input.registeredDeviceHash !== input.currentDeviceHash) {
+    return { allowed: false, reason: 'DEVICE_MISMATCH' };
+  }
+
+  return { allowed: true };
 }
 
 export interface WorkAccessInput {
@@ -117,12 +144,13 @@ export function decideWorkAccess(
     return licenseDecision;
   }
 
-  if (!input.registeredDeviceHash || !input.currentDeviceHash) {
-    return { allowed: false, reason: 'DEVICE_REGISTRATION_REQUIRED' };
-  }
+  const deviceDecision = decideDeviceAccess({
+    registeredDeviceHash: input.registeredDeviceHash,
+    currentDeviceHash: input.currentDeviceHash,
+  });
 
-  if (input.registeredDeviceHash !== input.currentDeviceHash) {
-    return { allowed: false, reason: 'DEVICE_MISMATCH' };
+  if (!deviceDecision.allowed) {
+    return deviceDecision;
   }
 
   return licenseDecision;
