@@ -4,7 +4,7 @@
 > 작성 기준일: 2026-09-09
 > 문서 상태: MVP 인터뷰·네이버 자동 입력 POC 반영본
 > 대상 독자: 서비스 기획자, UI·UX 디자이너, 데스크톱·백엔드 개발자, QA 담당자, 운영자
-> 관련 문서: `BLOW_NAVER_AUTOMATION_POC_RESULT_v1.0.md`, `BLOW_MVP_IMPLEMENTATION_PLAN_v1.0.md`, `BLOW_MVP_DECISION_001_NAVER_AUTOMATION_POLICY_v1.0.md`, `BLOW_MVP_DECISION_002_BACKEND_HOSTING_v1.0.md`, `BLOW_MVP_DECISION_003_AUTH_EMAIL_v1.0.md`, `BLOW_MVP_DECISION_004_ADMIN_MFA_v1.0.md`, `BLOW_MVP_DECISION_005_LEGAL_REVIEW_v1.0.md`, `BLOW_MVP_DECISION_006_WINDOWS_CODE_SIGNING_v1.0.md`
+> 관련 문서: `BLOW_NAVER_AUTOMATION_POC_RESULT_v1.0.md`, `BLOW_MVP_IMPLEMENTATION_PLAN_v1.0.md`, `BLOW_MVP_DECISION_001_NAVER_AUTOMATION_POLICY_v1.0.md`, `BLOW_MVP_DECISION_002_BACKEND_HOSTING_v1.0.md`, `BLOW_MVP_DECISION_003_AUTH_EMAIL_v1.0.md`, `BLOW_MVP_DECISION_004_ADMIN_MFA_v1.0.md`, `BLOW_MVP_DECISION_005_LEGAL_REVIEW_v1.0.md`, `BLOW_MVP_DECISION_006_WINDOWS_CODE_SIGNING_v1.0.md`, `BLOW_MVP_DECISION_007_WINDOWS_SUPPORT_v1.0.md`
 
 ---
 
@@ -743,14 +743,13 @@ Windows 알림은 네이버 임시저장 완료, 사용자 확인 또는 추가 
 
 ### 20.1 운영체제와 Chrome
 
-- Windows 11 지원
-- Windows 10 지원
-- Windows 10 일반 지원 종료 사실을 설치·도움말 화면에 경고하고 Windows 11을 권장
-- macOS 미지원
-- 사용자 PC에 설치된 Chrome 사용
-- MVP 초기에는 최신 정식 Chrome 지원
-- 직전 정식 버전은 별도 회귀 검증 통과 후 지원 범위에 추가
-- 지원 범위를 벗어나면 업데이트 안내 후 자동 입력을 차단할 수 있다.
+- 최초 공식 지원: Windows 11 25H2 Home·Pro, 64비트 x64
+- 새로운 일반 배포용 Windows 11 x64 버전은 핵심 회귀 테스트 통과 후 추가
+- Microsoft 지원이 종료된 Windows 버전은 BLOW 공식 지원에서도 제외
+- Windows 10은 현재 개발 PC의 내부 검증에만 사용하고 외부 고객지원 대상에서 제외
+- Windows 32비트, ARM64, Server, 회사 관리형 Enterprise·Education, macOS와 Linux는 MVP에서 미지원
+- 사용자 PC에 설치된 최신 정식 Chrome 사용
+- 지원 범위를 벗어나면 정확한 운영체제 버전과 업그레이드 안내를 표시하고 새 자동 입력을 차단할 수 있다.
 
 ### 20.2 설치와 업데이트
 
@@ -838,7 +837,7 @@ Windows 알림은 네이버 임시저장 완료, 사용자 확인 또는 추가 
 
 ### 22.1 데스크톱 앱
 
-- Electron + React + TypeScript
+- Electron + React + TypeScript, Windows 11 x64 패키지
 - Chrome 제어: Playwright의 Chrome 채널과 영구 컨텍스트를 이용한 전용 프로필 실행 후보
 - 설치된 최신 정식 Chrome 호환성은 POC에서 확인했으며, 직전 정식 버전은 출시 또는 초기 사용자 확대 전에 별도 기술검증 필수
 - 로컬 데이터: SQLite 또는 동등한 로컬 데이터베이스
@@ -951,7 +950,7 @@ Windows 알림은 네이버 임시저장 완료, 사용자 확인 또는 추가 
 - AC-052: 모든 핵심 조작이 키보드만으로 가능하다.
 - AC-053: 오류가 색상 외에 아이콘과 문구로도 전달된다.
 - AC-054: 실제 색상 조합이 정해진 명암 대비를 충족한다.
-- AC-060: Windows 10과 11에서 설치, 실행과 제거를 검증한다.
+- AC-060: Windows 11 25H2 x64 실제 PC에서 설치, 실행과 제거를 검증한다.
 - AC-061: 최신 정식 Chrome에서 핵심 작성 시나리오를 반복 검증한다. 직전 정식 버전은 지원 범위에 추가하기 전에 같은 검증을 별도로 통과해야 한다.
 - AC-062: 필수 업데이트 상태의 구버전은 글 생성·자동 입력을 실행할 수 없다.
 - AC-063: 긴급 중지 상태에서는 자동 입력만 차단되고 계정·설정 화면은 사용할 수 있다.
@@ -1023,7 +1022,7 @@ Windows 알림은 네이버 임시저장 완료, 사용자 확인 또는 추가 
 | 증거성 AI 이미지 오용 | 소비자 오인과 광고 위험 | 발행 전 책임 고지, 향후 업종 규정 경고·차단 검토 |
 | 로컬 콘텐츠 무암호화 | 공유 PC·분실 시 내용 노출 | 이용 안내 고지, Windows 계정 잠금 권고와 자격증명 필수 암호화 |
 | 백업 미제공 | 제거·탈퇴·장애 시 복구 불가 | 삭제 전 강한 경고와 사용자 원본 보호 |
-| Windows 10 지원 종료 | 보안 취약 환경 운영 | 지원 종료 경고, Windows 11 권장과 지원 정책 재검토 |
+| 지원하지 않는 Windows 사용 | 보안 취약 환경 운영, 자동화 오류와 고객지원 증가 | Windows 11 25H2 x64만 최초 지원하고 지원 종료 버전·ARM64·32비트는 명확히 안내 |
 
 ## 28. 2차 광고 규정 RAG 방향
 
@@ -1084,12 +1083,14 @@ Windows 알림은 네이버 임시저장 완료, 사용자 확인 또는 추가 
 - [의료법 의료광고 심의 조항](https://www.law.go.kr/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=1000721562)
 - [대한변호사협회 광고 규정 위반 사례 안내](https://koreanbar.or.kr/pages/news/view.asp?category=&page=17&searchstr=&searchtype=&seq=13241&teamcode=&types=1)
 - [Windows 10 지원 종료 안내](https://support.microsoft.com/en-us/windows/deployment/updates-lifecycle/windows-10-support-has-ended-on-october-14-2025)
+- [Windows 11 Home·Pro 수명 주기](https://learn.microsoft.com/lifecycle/products/windows-11-home-and-pro)
+- [Electron 44 64비트 지원 안내](https://www.electronjs.org/blog/electron-44-0)
 - [Electron 보안 권고](https://www.electronjs.org/docs/latest/tutorial/security)
 - [Playwright BrowserType 공식 문서](https://playwright.dev/docs/api/class-browsertype)
 
 ## 32. 최종 MVP 정의
 
-블로우 MVP는 Windows에서 한 사용자가 개인 OpenAI API와 한 개의 네이버 블로그를 연결하고, 한 번에 한 게시물의 제목·본문·이미지·서식을 생성하여 네이버 임시글로 저장한 뒤 직접 검수·발행하는 유료 데스크톱 서비스다.
+블로우 MVP는 공식 지원되는 Windows 11 x64 환경에서 한 사용자가 개인 OpenAI API와 한 개의 네이버 블로그를 연결하고, 한 번에 한 게시물의 제목·본문·이미지·서식을 생성하여 네이버 임시글로 저장한 뒤 직접 검수·발행하는 유료 데스크톱 서비스다.
 
 MVP의 가치는 자동 발행이나 대량 생산이 아니라 다음 세 가지로 제한한다.
 
