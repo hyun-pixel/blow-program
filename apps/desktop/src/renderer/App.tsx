@@ -2,6 +2,7 @@ import {
   Check,
   CheckCircle2,
   Link2,
+  LogOut,
   PanelsTopLeft,
   Circle,
   FileText,
@@ -20,7 +21,10 @@ import type {
   PocSnapshot,
   PocState,
 } from '@blow/automation-core';
+import type { Session } from '@supabase/supabase-js';
+import { AuthScreen } from './AuthScreen.js';
 import { ConnectionScreen } from './ConnectionScreen.js';
+import { supabase } from './supabase.js';
 
 type Screen = 'connection' | 'automation' | 'safety';
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
@@ -423,8 +427,26 @@ function SafetyScreen() {
   );
 }
 
-export function App() {
+function Workspace({ session }: { readonly session: Session }) {
   const [screen, setScreen] = useState<Screen>('connection');
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+
+  const signOut = async (): Promise<void> => {
+    if (!supabase) {
+      return;
+    }
+
+    setIsSigningOut(true);
+    setSignOutError(null);
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setSignOutError('로그아웃하지 못했습니다. 다시 시도해 주세요.');
+    }
+
+    setIsSigningOut(false);
+  };
 
   return (
     <div className="app">
@@ -440,7 +462,7 @@ export function App() {
           <span>BLOW</span>
         </div>
         <div className="titlebar-meta">
-          <span>네이버 입력 POC</span>
+          <span>계정 연결됨</span>
           <strong>로컬 개발 모드</strong>
         </div>
       </header>
@@ -477,9 +499,30 @@ export function App() {
             </button>
           </nav>
 
-          <div className="sidebar-note">
-            <strong>서버 연결 없음</strong>
-            <span>테스트 데이터는 이 PC에서만 사용</span>
+          <div className="sidebar-account">
+            <span className="sidebar-account-label">로그인 계정</span>
+            <strong title={session.user.email}>
+              {session.user.email ?? '이메일 확인 불가'}
+            </strong>
+            {signOutError ? (
+              <span className="sidebar-account-error" role="alert">
+                {signOutError}
+              </span>
+            ) : (
+              <span>회원 정보 확인 완료</span>
+            )}
+            <button
+              type="button"
+              disabled={isSigningOut}
+              onClick={() => void signOut()}
+            >
+              {isSigningOut ? (
+                <LoaderCircle className="is-spinning" aria-hidden="true" />
+              ) : (
+                <LogOut aria-hidden="true" />
+              )}
+              {isSigningOut ? '로그아웃 중…' : '로그아웃'}
+            </button>
           </div>
         </aside>
 
@@ -495,4 +538,175 @@ export function App() {
       </div>
     </div>
   );
+}
+type AccountStatus =
+  | 'checking'
+  | 'active'
+  | 'suspended'
+  | 'unverified'
+  | 'unavailable';
+
+function AccountStatusScreen({
+  status,
+  onRetry,
+  onSignOut,
+}: {
+  readonly status: Exclude<AccountStatus, 'active'>;
+  readonly onRetry: () => void;
+  readonly onSignOut: () => void;
+}) {
+  const content = {
+    checking: {
+      title: '계정 확인 중',
+      description: '로그인 상태와 회원 정보를 안전하게 확인하고 있습니다.',
+    },
+    suspended: {
+      title: '사용이 중지된 계정입니다',
+      description: '계정 상태를 확인하려면 관리자에게 문의해 주세요.',
+    },
+    unverified: {
+      title: '이메일 인증이 필요합니다',
+      description: '받은 메일에서 인증을 완료한 뒤 다시 확인해 주세요.',
+    },
+    unavailable: {
+      title: '계정 정보를 확인하지 못했습니다',
+      description: '네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+    },
+  }[status];
+
+  return (
+    <main className="auth-page">
+      <section className="auth-card" aria-labelledby="account-status-heading">
+        <div className="auth-brand" aria-label="BLOW">
+          <span className="wordmark-sign" aria-hidden="true">
+            B
+          </span>
+          <strong>BLOW</strong>
+        </div>
+        <header className="auth-heading">
+          <h1 id="account-status-heading">{content.title}</h1>
+          <p>{content.description}</p>
+        </header>
+        {status === 'checking' ? (
+          <div className="account-checking" role="status">
+            <LoaderCircle className="is-spinning" aria-hidden="true" />
+            서버 응답을 기다리고 있습니다.
+          </div>
+        ) : (
+          <div className="auth-actions">
+            <button className="button primary" type="button" onClick={onRetry}>
+              다시 확인
+            </button>
+            <button className="button secondary" type="button" onClick={onSignOut}>
+              로그아웃
+            </button>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+export function App() {
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [accountStatus, setAccountStatus] =
+    useState<AccountStatus>('checking');
+  const [checkVersion, setCheckVersion] = useState(0);
+  const userId = session?.user.id;
+  const emailConfirmedAt = session?.user.email_confirmed_at;
+
+  useEffect(() => {
+    const client = supabase;
+
+    if (!client) {
+      setSession(null);
+      return;
+    }
+
+    let active = true;
+
+    void client.auth.getSession().then(({ data }) => {
+      if (active) {
+        setSession(data.session);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((_event, nextSession) => {
+      if (active) {
+        setSession(nextSession);
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const client = supabase;
+
+    if (!client || !userId) {
+      setAccountStatus('checking');
+      return;
+    }
+
+    if (!emailConfirmedAt) {
+      setAccountStatus('unverified');
+      return;
+    }
+
+    let active = true;
+    setAccountStatus('checking');
+
+    void client
+      .from('profiles')
+      .select('account_status')
+      .eq('id', userId)
+      .single()
+      .then(({ data, error }) => {
+        if (!active) {
+          return;
+        }
+
+        if (error || !data) {
+          setAccountStatus('unavailable');
+          return;
+        }
+
+        setAccountStatus(
+          data.account_status === 'active' ? 'active' : 'suspended',
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [checkVersion, emailConfirmedAt, userId]);
+
+  const signOut = (): void => {
+    void supabase?.auth.signOut();
+  };
+
+  if (!supabase || session === null) {
+    return <AuthScreen />;
+  }
+
+  if (session === undefined || accountStatus !== 'active') {
+    return (
+      <AccountStatusScreen
+        status={
+          session === undefined || accountStatus === 'active'
+            ? 'checking'
+            : accountStatus
+        }
+        onRetry={() => setCheckVersion((current) => current + 1)}
+        onSignOut={signOut}
+      />
+    );
+  }
+
+  return <Workspace session={session} />;
 }
