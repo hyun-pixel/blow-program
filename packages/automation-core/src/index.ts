@@ -9,3 +9,4 @@ export type {
   PocState,
   PocStateEntry,
 } from './state-machine.js';
+export * from './work-access.js';
