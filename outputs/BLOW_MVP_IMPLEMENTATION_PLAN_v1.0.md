@@ -289,12 +289,12 @@
 | 인증·이메일 발송 서비스 | 이메일 인증, 비밀번호 재설정과 발송 비용 결정 | 확정: Amazon SES 서울 리전 |
 | 관리자 MFA 방식 | 관리자 계정 탈취 위험과 복구 절차 결정 | 확정: 인증 앱 TOTP, Google Authenticator 기본 안내 |
 | 개인정보·약관·환불 검토 담당 | 유료 판매 전 법적 고지 확정 | 확정: 내부 사실·초안 정리 후 국내 전문 변호사 최종 검토 |
-| Windows 코드 서명 인증서 | 설치 경고와 배포 신뢰도, 비용 결정 | 권장: Microsoft Artifact Signing Basic, Korea Central Public Trust — 사용자 승인 대기 |
+| Windows 코드 서명 인증서 | 설치 경고와 배포 신뢰도, 비용 결정 | 확정: Microsoft Artifact Signing Basic, Korea Central Public Trust — 정식 외부 배포 전 실행 |
 | 공식 Windows 지원 범위 | Windows 10 지원 종료 위험과 고객지원 범위 결정 | 미확정 |
 | 베타 사용자 5명과 테스트 계정 | 실사용 환경과 네이버 계정 위험 분리 | 미확정 |
 
 ## 11. 권장 다음 작업
 
-네이버 제휴 제안을 통해 자동 입력 허용 범위를 서면으로 확인해야 한다. 서버·데이터베이스는 `BLOW_MVP_DECISION_002_BACKEND_HOSTING_v1.0.md`에 따라 Supabase 서울 리전으로 확정했다. 인증 메일은 `BLOW_MVP_DECISION_003_AUTH_EMAIL_v1.0.md`에 따라 Amazon SES 서울 리전으로 확정했다. 관리자 MFA는 `BLOW_MVP_DECISION_004_ADMIN_MFA_v1.0.md`에 따라 인증 앱 TOTP 방식으로 확정했다. 개인정보·약관·환불은 `BLOW_MVP_DECISION_005_LEGAL_REVIEW_v1.0.md`에 따라 내부 사실·초안 정리 후 국내 전문 변호사의 출시 전 최종 검토로 확정했다. Windows 코드 서명은 `BLOW_MVP_DECISION_006_WINDOWS_CODE_SIGNING_v1.0.md`의 Microsoft Artifact Signing Basic, Korea Central Public Trust를 권장안으로 두되 사용자 승인 전 Azure 계정·구독·신원 검증을 실행하지 않는다. M0의 기술·운영 공급자 권장안 정리는 완료됐다. 다음 외부 작업은 네이버 서면 허락 문의이며, 허락과 판매 주체 확정 전에는 외부 계약·결제와 상용 구현을 시작하지 않는다.
+네이버 제휴 제안을 통해 자동 입력 허용 범위를 서면으로 확인해야 한다. 서버·데이터베이스는 `BLOW_MVP_DECISION_002_BACKEND_HOSTING_v1.0.md`에 따라 Supabase 서울 리전으로 확정했다. 인증 메일은 `BLOW_MVP_DECISION_003_AUTH_EMAIL_v1.0.md`에 따라 Amazon SES 서울 리전으로 확정했다. 관리자 MFA는 `BLOW_MVP_DECISION_004_ADMIN_MFA_v1.0.md`에 따라 인증 앱 TOTP 방식으로 확정했다. 개인정보·약관·환불은 `BLOW_MVP_DECISION_005_LEGAL_REVIEW_v1.0.md`에 따라 내부 사실·초안 정리 후 국내 전문 변호사의 출시 전 최종 검토로 확정했다. Windows 코드 서명은 `BLOW_MVP_DECISION_006_WINDOWS_CODE_SIGNING_v1.0.md`에 따라 Microsoft Artifact Signing Basic, Korea Central Public Trust로 확정하되 정식 외부 배포 준비 전에는 Azure 계정·구독·신원 검증을 실행하지 않는다. M0의 기술·운영 방식 결정은 완료됐다. 다음 외부 작업은 네이버 서면 허락 문의이며, 허락과 판매 주체 확정 전에는 외부 계약·결제와 상용 구현을 시작하지 않는다.
 
 POC 브랜치는 네이버 어댑터의 검증 기준점으로 보존한다. MVP 통합 시에는 기존 어댑터를 복사해 새 구현을 만드는 대신 패키지 의존성으로 재사용하고, POC 회귀 테스트를 제품 통합 테스트에 포함한다.
