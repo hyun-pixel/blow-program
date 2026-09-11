@@ -257,6 +257,7 @@ type SlowNetworkResponse =
     };
 
 const ipcChannels = {
+  systemAppVersion: 'system:app-version',
   systemDeviceHash: 'system:device-hash',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
@@ -288,6 +289,8 @@ const ipcChannels = {
 } as const;
 
 const blowSystemApi = {
+  getAppVersion: (): Promise<string> =>
+    ipcRenderer.invoke(ipcChannels.systemAppVersion),
   getDeviceHash: (): Promise<string> =>
     ipcRenderer.invoke(ipcChannels.systemDeviceHash),
 };

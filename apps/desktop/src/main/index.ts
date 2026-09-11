@@ -42,6 +42,7 @@ import {
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
 const ipcChannels = {
+  systemAppVersion: 'system:app-version',
   systemDeviceHash: 'system:device-hash',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
@@ -2310,6 +2311,10 @@ function registerNaverIpc(): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle(ipcChannels.systemAppVersion, (event) => {
+    requireTrustedSender(event);
+    return app.getVersion();
+  });
   ipcMain.handle(ipcChannels.systemDeviceHash, (event) => {
     requireTrustedSender(event);
     return getWindowsDeviceHash();

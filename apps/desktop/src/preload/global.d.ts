@@ -151,6 +151,7 @@ interface BasicSuccessResponse {
 declare global {
   interface Window {
     readonly blowSystem: {
+      getAppVersion(): Promise<string>;
       getDeviceHash(): Promise<string>;
     };
     readonly blowPoc: {

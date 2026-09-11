@@ -3,6 +3,7 @@ import {
   decideDeviceAccess,
   decideLicenseAccess,
   decideWorkAccess,
+  isVersionAtLeast,
   type WorkAccessBlockReason,
   type WorkAccessInput,
 } from '../src/index.js';
@@ -21,6 +22,15 @@ const allowedInput: WorkAccessInput = {
   automationEnabled: true,
   now: '2026-09-10T12:00:00+09:00',
 };
+
+describe('isVersionAtLeast', () => {
+  it('현재 앱 버전이 최소 버전 이상일 때만 허용한다', () => {
+    expect(isVersionAtLeast('0.1.0', '0.1.0')).toBe(true);
+    expect(isVersionAtLeast('0.2.0', '0.1.9')).toBe(true);
+    expect(isVersionAtLeast('0.1.0', '0.1.1')).toBe(false);
+    expect(isVersionAtLeast('invalid', '0.1.0')).toBe(false);
+  });
+});
 
 describe('decideLicenseAccess', () => {
   it('현재 이용 기간 안의 활성 이용권만 허용한다', () => {

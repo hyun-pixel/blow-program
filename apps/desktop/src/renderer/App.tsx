@@ -20,6 +20,7 @@ import {
 import {
   decideDeviceAccess,
   decideLicenseAccess,
+  isVersionAtLeast,
   type LicenseAccessBlockReason,
   type PocSnapshot,
   type PocState,
@@ -568,7 +569,9 @@ type AccountStatus =
   | 'license_not_started'
   | 'license_expired'
   | 'device_unavailable'
-  | 'device_mismatch';
+  | 'device_mismatch'
+  | 'update_required'
+  | 'automation_disabled';
 
 function getBlockedLicenseStatus(
   reason: LicenseAccessBlockReason,
@@ -638,6 +641,14 @@ function AccountStatusScreen({
       title: '등록되지 않은 기기입니다',
       description:
         '이 계정은 처음 등록한 Windows PC에서만 사용할 수 있습니다. 기기를 변경하려면 관리자에게 문의해 주세요.',
+    },
+    update_required: {
+      title: '프로그램 업데이트가 필요합니다',
+      description: '관리자에게 최신 BLOW 설치 파일을 요청해 주세요.',
+    },
+    automation_disabled: {
+      title: '자동 입력이 일시 중지되었습니다',
+      description: '안전 점검이 끝난 뒤 다시 확인해 주세요.',
     },
   }[status];
 
@@ -746,11 +757,19 @@ export function App() {
         .select('device_hash')
         .eq('user_id', userId)
         .maybeSingle(),
+      client
+        .from('app_controls')
+        .select('minimum_version, automation_enabled')
+        .eq('id', true)
+        .single(),
+      window.blowSystem.getAppVersion(),
       window.blowSystem.getDeviceHash(),
     ]).then(async ([
       profileResult,
       licenseResult,
       deviceResult,
+      controlsResult,
+      appVersion,
       currentDeviceHash,
     ]) => {
       if (!active) {
@@ -761,6 +780,8 @@ export function App() {
         profileResult.error ||
         licenseResult.error ||
         deviceResult.error ||
+        controlsResult.error ||
+        !controlsResult.data ||
         !profileResult.data
       ) {
         setAccountStatus('unavailable');
@@ -769,6 +790,21 @@ export function App() {
 
       if (profileResult.data.account_status !== 'active') {
         setAccountStatus('suspended');
+        return;
+      }
+
+      if (
+        !isVersionAtLeast(
+          appVersion,
+          controlsResult.data.minimum_version,
+        )
+      ) {
+        setAccountStatus('update_required');
+        return;
+      }
+
+      if (!controlsResult.data.automation_enabled) {
+        setAccountStatus('automation_disabled');
         return;
       }
 
@@ -825,7 +861,7 @@ export function App() {
       setAccountStatus(getBlockedLicenseStatus(decision.reason));
     }).catch(() => {
       if (active) {
-        setAccountStatus('device_unavailable');
+        setAccountStatus('unavailable');
       }
     });
 
@@ -833,6 +869,30 @@ export function App() {
       active = false;
     };
   }, [checkVersion, emailConfirmedAt, userId]);
+
+  useEffect(() => {
+    const client = supabase;
+
+    if (!client || !userId) {
+      return;
+    }
+
+    const channel = client
+      .channel('app-controls')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'app_controls' },
+        () => {
+          void window.blowNaver.close().catch(() => undefined);
+          setCheckVersion((current) => current + 1);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [userId]);
 
   const signOut = (): void => {
     void supabase?.auth.signOut();

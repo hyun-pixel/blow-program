@@ -42,6 +42,42 @@ export type DeviceAccessDecision =
   | { readonly allowed: true }
   | { readonly allowed: false; readonly reason: DeviceAccessBlockReason };
 
+export function isVersionAtLeast(
+  currentVersion: string,
+  minimumVersion: string,
+): boolean {
+  const parse = (
+    value: string,
+  ): readonly [number, number, number] | null => {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value);
+
+    if (!match) {
+      return null;
+    }
+
+    const parts = [
+      Number(match[1]),
+      Number(match[2]),
+      Number(match[3]),
+    ] as const;
+    return parts.every(Number.isSafeInteger) ? parts : null;
+  };
+  const current = parse(currentVersion);
+  const minimum = parse(minimumVersion);
+
+  if (!current || !minimum) {
+    return false;
+  }
+
+  for (const index of [0, 1, 2] as const) {
+    if (current[index] !== minimum[index]) {
+      return current[index] > minimum[index];
+    }
+  }
+
+  return true;
+}
+
 export function decideLicenseAccess(
   input: LicenseAccessInput,
 ): LicenseAccessDecision {
