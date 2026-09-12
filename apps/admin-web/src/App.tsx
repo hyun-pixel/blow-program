@@ -10,10 +10,12 @@ import {
   LogOut,
   ShieldCheck,
   UserCheck,
+  Users,
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { decideAdminAccess, type AdminAccessStage } from './admin-access.js';
+import { MembersScreen } from './MembersScreen.js';
 import { supabase } from './supabase.js';
 
 type AccessView = 'loading' | AdminAccessStage | 'error';
@@ -483,6 +485,8 @@ function AdminShell({ session, auditCount, onSignOut }: {
   readonly auditCount: number;
   readonly onSignOut: () => Promise<void>;
 }) {
+  const [screen, setScreen] = useState<'overview' | 'members'>('overview');
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">본문으로 건너뛰기</a>
@@ -501,8 +505,21 @@ function AdminShell({ session, auditCount, onSignOut }: {
       <div className="shell-body">
         <aside className="sidebar" aria-label="관리자 메뉴">
           <nav>
-            <button className="nav-button is-active" type="button" aria-current="page">
+            <button
+              className={`nav-button ${screen === 'overview' ? 'is-active' : ''}`}
+              type="button"
+              aria-current={screen === 'overview' ? 'page' : undefined}
+              onClick={() => setScreen('overview')}
+            >
               <LayoutDashboard aria-hidden="true" />개요
+            </button>
+            <button
+              className={`nav-button ${screen === 'members' ? 'is-active' : ''}`}
+              type="button"
+              aria-current={screen === 'members' ? 'page' : undefined}
+              onClick={() => setScreen('members')}
+            >
+              <Users aria-hidden="true" />회원 조회
             </button>
           </nav>
           <div className="account-block">
@@ -512,23 +529,27 @@ function AdminShell({ session, auditCount, onSignOut }: {
           </div>
         </aside>
         <main id="main-content" className="main-content">
-          <header className="page-heading">
-            <h1>관리자 홈</h1>
-            <p>관리자 권한과 추가 인증으로 보호된 별도 관리 화면입니다.</p>
-          </header>
-          <section className="status-strip" aria-label="관리자 보안 상태">
-            <StatusItem icon={<UserCheck aria-hidden="true" />} label="계정" value="연결 완료" />
-            <StatusItem icon={<ShieldCheck aria-hidden="true" />} label="관리자 권한" value="확인 완료" />
-            <StatusItem icon={<LockKeyhole aria-hidden="true" />} label="추가 인증" value="AAL2 보호" />
-          </section>
-          <section className="workspace" aria-labelledby="ready-heading">
-            <div className="ready-mark"><CheckCircle2 aria-hidden="true" /></div>
-            <div>
-              <h2 id="ready-heading">관리자 보안 연결이 완료되었습니다</h2>
-              <p>감사 기록 {auditCount.toLocaleString('ko-KR')}건에 대한 읽기 권한까지 확인했습니다.</p>
-              <p className="muted">회원 조회와 이용권 관리 기능은 다음 개발 단계에서 이 화면에 추가합니다.</p>
-            </div>
-          </section>
+          {screen === 'overview' ? (
+            <>
+              <header className="page-heading">
+                <h1>관리자 홈</h1>
+                <p>관리자 권한과 추가 인증으로 보호된 별도 관리 화면입니다.</p>
+              </header>
+              <section className="status-strip" aria-label="관리자 보안 상태">
+                <StatusItem icon={<UserCheck aria-hidden="true" />} label="계정" value="연결 완료" />
+                <StatusItem icon={<ShieldCheck aria-hidden="true" />} label="관리자 권한" value="확인 완료" />
+                <StatusItem icon={<LockKeyhole aria-hidden="true" />} label="추가 인증" value="AAL2 보호" />
+              </section>
+              <section className="workspace" aria-labelledby="ready-heading">
+                <div className="ready-mark"><CheckCircle2 aria-hidden="true" /></div>
+                <div>
+                  <h2 id="ready-heading">관리자 보안 연결이 완료되었습니다</h2>
+                  <p>감사 기록 {auditCount.toLocaleString('ko-KR')}건에 대한 읽기 권한까지 확인했습니다.</p>
+                  <p className="muted">회원 조회 기능을 준비했습니다. 이용권 변경은 조회 테스트 후 추가합니다.</p>
+                </div>
+              </section>
+            </>
+          ) : <MembersScreen />}
         </main>
       </div>
     </div>
