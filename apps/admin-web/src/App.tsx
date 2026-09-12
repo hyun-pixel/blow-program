@@ -545,7 +545,7 @@ function AdminShell({ session, auditCount, onSignOut }: {
                 <div>
                   <h2 id="ready-heading">관리자 보안 연결이 완료되었습니다</h2>
                   <p>감사 기록 {auditCount.toLocaleString('ko-KR')}건에 대한 읽기 권한까지 확인했습니다.</p>
-                  <p className="muted">회원 조회 기능을 준비했습니다. 이용권 변경은 조회 테스트 후 추가합니다.</p>
+                  <p className="muted">회원 조회와 변경 사유가 기록되는 이용권 관리 기능을 준비했습니다.</p>
                 </div>
               </section>
             </>
