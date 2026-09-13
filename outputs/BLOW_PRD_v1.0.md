@@ -449,6 +449,16 @@ API 응답 시간을 정확히 예측하기 어려우므로 남은 시간이나 
 - API 키 오류 시 작업을 중단하고 API 키를 확인하거나 고객센터로 문의하라는 알림만 표시한다.
 - 블로우가 키를 수정하거나 다른 모델로 자동 대체하지 않는다.
 
+#### 사용자 API 키 발급 설정
+
+- 사용자는 OpenAI에서 BLOW 전용 프로젝트를 선택하고 본인 소유(`You`)의 비밀 키를 발급한다.
+- 권한은 `Restricted`로 설정하고 `List models: Read`, `Responses: Write`, `Images: Request`만 허용한다. 음성, Realtime, Chat Completions, Embeddings, Moderations를 포함한 나머지 권한은 `None`으로 둔다.
+- `List models: Read`는 API 키 연결 검사와 사용 가능한 모델 확인에, `Responses: Write`는 제목·본문 생성에, `Images: Request`는 AI 이미지 생성에 사용한다.
+- 제목·본문 생성은 Responses API를 사용하고 응답을 애플리케이션 상태로 보관할 필요가 없는 요청에는 `store: false`를 지정한다. AI 이미지 생성은 Image API의 이미지 생성 엔드포인트를 사용한다.
+- 베타 운영에서는 키 만료일을 30일로 설정하도록 권장한다. 이는 OpenAI의 필수값이 아니라 노출 위험을 줄이기 위한 BLOW 운영 권장값이며, BLOW가 자동 갱신하지 않는다.
+- 키가 만료되거나 폐기되면 사용자가 OpenAI에서 새 키를 발급하고 BLOW의 `OpenAI 연결` 화면에서 직접 교체한다.
+- 실제 API 키 값은 PRD, 소스 코드, 로그, 테스트 데이터와 블로우 서버에 기록하지 않는다.
+
 ### 12.3 모델 선택
 
 - 운영자가 호환성을 검증해 허용한 글쓰기 모델만 노출한다.

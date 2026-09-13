@@ -7,6 +7,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  safeStorage,
   screen,
   type IpcMainInvokeEvent,
   type OpenDialogOptions,
@@ -33,6 +34,13 @@ import {
   NaverConnectionSession,
 } from './naver-connection.js';
 import {
+  readOpenAiCredential,
+  readOpenAiCredentialStatus,
+  removeOpenAiCredential,
+  saveOpenAiCredential,
+  testOpenAiConnection,
+} from './openai-credential.js';
+import {
   getWindowsDisplayName,
   toDisplayScalePercent,
   type CompatibilityEnvironmentResult,
@@ -44,6 +52,10 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
 const ipcChannels = {
   systemAppVersion: 'system:app-version',
   systemDeviceHash: 'system:device-hash',
+  openAiCredentialStatus: 'openai:credential-status',
+  openAiCredentialSave: 'openai:credential-save',
+  openAiCredentialRemove: 'openai:credential-remove',
+  openAiConnectionTest: 'openai:connection-test',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
   mockState: 'poc:state',
@@ -148,6 +160,15 @@ function getWindowsDeviceHash(): string {
   return createHash('sha256')
     .update(`blow-device-v1:${machineGuid.toLowerCase()}`)
     .digest('hex');
+}
+
+function getOpenAiCredentialPath(): string {
+  return join(
+    process.env.LOCALAPPDATA ?? app.getPath('userData'),
+    'BLOW',
+    'Secure',
+    'openai-api-key.bin',
+  );
 }
 
 function getPocPaths(): {
@@ -2318,6 +2339,115 @@ function registerIpc(): void {
   ipcMain.handle(ipcChannels.systemDeviceHash, (event) => {
     requireTrustedSender(event);
     return getWindowsDeviceHash();
+  });
+  ipcMain.handle(ipcChannels.openAiCredentialStatus, async (event) => {
+    requireTrustedSender(event);
+
+    try {
+      return {
+        ok: true,
+        status: await readOpenAiCredentialStatus(
+          getOpenAiCredentialPath(),
+          safeStorage,
+        ),
+      };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'CREDENTIAL_STATUS_FAILED',
+          message: 'OpenAI API 키 보관 상태를 확인하지 못했습니다.',
+        },
+      };
+    }
+  });
+  ipcMain.handle(
+    ipcChannels.openAiCredentialSave,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      try {
+        return {
+          ok: true,
+          status: await saveOpenAiCredential(
+            getOpenAiCredentialPath(),
+            input,
+            safeStorage,
+          ),
+        };
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: 'CREDENTIAL_SAVE_FAILED',
+            message: 'OpenAI API 키를 저장하지 못했습니다. 키와 Windows 보안 상태를 확인해 주세요.',
+          },
+        };
+      }
+    },
+  );
+  ipcMain.handle(ipcChannels.openAiCredentialRemove, async (event) => {
+    requireTrustedSender(event);
+
+    try {
+      return {
+        ok: true,
+        status: await removeOpenAiCredential(
+          getOpenAiCredentialPath(),
+          safeStorage,
+        ),
+      };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'CREDENTIAL_REMOVE_FAILED',
+          message: '저장된 OpenAI API 키를 삭제하지 못했습니다.',
+        },
+      };
+    }
+  });
+  ipcMain.handle(ipcChannels.openAiConnectionTest, async (event) => {
+    requireTrustedSender(event);
+
+    try {
+      const apiKey = await readOpenAiCredential(
+        getOpenAiCredentialPath(),
+        safeStorage,
+      );
+
+      if (!apiKey) {
+        return {
+          ok: false,
+          error: {
+            code: 'CREDENTIAL_MISSING',
+            message: '먼저 OpenAI API 키를 안전하게 저장해 주세요.',
+          },
+        };
+      }
+
+      const result = await testOpenAiConnection(apiKey);
+
+      if (!result.ok) {
+        return {
+          ok: false,
+          error: {
+            code: result.code,
+            message: result.message,
+          },
+        };
+      }
+
+      return { ok: true, checkedAt: new Date().toISOString() };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'CONNECTION_CHECK_FAILED',
+          message: 'OpenAI 연결을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        },
+      };
+    }
   });
   registerMockIpc();
   registerNaverIpc();

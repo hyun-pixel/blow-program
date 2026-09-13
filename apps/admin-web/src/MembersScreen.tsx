@@ -3,7 +3,9 @@ import {
   CalendarClock,
   CheckCircle2,
   LoaderCircle,
+  MonitorOff,
   Search,
+  UserCheck,
   UsersRound,
 } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
@@ -33,6 +35,16 @@ type LicenseDraft = {
   readonly startsAt: string;
   readonly endsAt: string;
   readonly reason: string;
+};
+
+type AccountDraft = {
+  readonly status: 'active' | 'suspended';
+  readonly reason: string;
+};
+
+type SuccessNotice = {
+  readonly title: string;
+  readonly detail: string;
 };
 
 const dateFormatter = new Intl.DateTimeFormat('ko-KR', {
@@ -73,11 +85,16 @@ export function MembersScreen() {
   const [members, setMembers] = useState<readonly MemberSummary[]>([]);
   const [selectedMember, setSelectedMember] = useState<MemberSummary | null>(null);
   const [licenseDraft, setLicenseDraft] = useState<LicenseDraft | null>(null);
+  const [accountEditMember, setAccountEditMember] = useState<MemberSummary | null>(null);
+  const [accountDraft, setAccountDraft] = useState<AccountDraft | null>(null);
+  const [deviceResetMember, setDeviceResetMember] = useState<MemberSummary | null>(null);
+  const [deviceResetReason, setDeviceResetReason] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [licenseErrorMessage, setLicenseErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<SuccessNotice | null>(null);
+  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
 
   const loadMembers = async (searchText: string | null): Promise<void> => {
     if (!supabase) return;
@@ -85,8 +102,13 @@ export function MembersScreen() {
     setIsLoading(true);
     setErrorMessage(null);
     setSuccessMessage(null);
+    setActionErrorMessage(null);
     setSelectedMember(null);
     setLicenseDraft(null);
+    setAccountEditMember(null);
+    setAccountDraft(null);
+    setDeviceResetMember(null);
+    setDeviceResetReason('');
 
     const { data, error } = await supabase.rpc('admin_search_members', {
       search_text: searchText,
@@ -116,6 +138,18 @@ export function MembersScreen() {
     if (licenseErrorMessage) document.getElementById('license-form-error')?.focus();
   }, [licenseErrorMessage]);
 
+  useEffect(() => {
+    if (actionErrorMessage) document.getElementById('member-action-error')?.focus();
+  }, [actionErrorMessage]);
+
+  useEffect(() => {
+    if (deviceResetMember) document.getElementById('device-reset-heading')?.focus();
+  }, [deviceResetMember]);
+
+  useEffect(() => {
+    if (accountEditMember) document.getElementById('account-editor-heading')?.focus();
+  }, [accountEditMember]);
+
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     void loadMembers(normalizeMemberSearch(query));
@@ -129,6 +163,10 @@ export function MembersScreen() {
   const beginLicenseEdit = (member: MemberSummary): void => {
     setSelectedMember(member);
     setLicenseDraft(createLicenseDraft(member));
+    setAccountEditMember(null);
+    setAccountDraft(null);
+    setDeviceResetMember(null);
+    setDeviceResetReason('');
     setLicenseErrorMessage(null);
     setSuccessMessage(null);
   };
@@ -137,6 +175,43 @@ export function MembersScreen() {
     setSelectedMember(null);
     setLicenseDraft(null);
     setLicenseErrorMessage(null);
+  };
+
+  const beginAccountEdit = (member: MemberSummary): void => {
+    setSelectedMember(null);
+    setLicenseDraft(null);
+    setDeviceResetMember(null);
+    setDeviceResetReason('');
+    setAccountEditMember(member);
+    setAccountDraft({
+      status: member.account_status === 'suspended' ? 'suspended' : 'active',
+      reason: '',
+    });
+    setActionErrorMessage(null);
+    setSuccessMessage(null);
+  };
+
+  const cancelAccountEdit = (): void => {
+    setAccountEditMember(null);
+    setAccountDraft(null);
+    setActionErrorMessage(null);
+  };
+
+  const beginDeviceReset = (member: MemberSummary): void => {
+    setSelectedMember(null);
+    setLicenseDraft(null);
+    setAccountEditMember(null);
+    setAccountDraft(null);
+    setDeviceResetMember(member);
+    setDeviceResetReason('');
+    setActionErrorMessage(null);
+    setSuccessMessage(null);
+  };
+
+  const cancelDeviceReset = (): void => {
+    setDeviceResetMember(null);
+    setDeviceResetReason('');
+    setActionErrorMessage(null);
   };
 
   const saveLicense = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -183,7 +258,98 @@ export function MembersScreen() {
 
     const changedEmail = selectedMember.email ?? '선택한 회원';
     await loadMembers(appliedQuery);
-    setSuccessMessage(`${changedEmail}의 이용권을 변경하고 감사 기록을 남겼습니다.`);
+    setSuccessMessage({
+      title: '이용권 변경 완료',
+      detail: `${changedEmail}의 이용권을 변경하고 감사 기록을 남겼습니다.`,
+    });
+    setIsSaving(false);
+  };
+
+  const saveAccountStatus = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (!supabase || !accountEditMember || !accountDraft) return;
+
+    const reason = accountDraft.reason.trim();
+    if (reason.length < 5 || reason.length > 500) {
+      setActionErrorMessage('계정 상태 변경 사유를 5–500자로 입력해 주세요.');
+      return;
+    }
+
+    if (accountDraft.status === accountEditMember.account_status) {
+      setActionErrorMessage('변경할 계정 상태를 선택해 주세요.');
+      return;
+    }
+
+    const memberName = accountEditMember.email ?? '선택한 회원';
+    if (
+      accountDraft.status === 'suspended'
+      && !window.confirm(`${memberName}의 계정을 정지합니다.\n\n열린 BLOW 사용자 프로그램도 즉시 차단됩니다. 계속할까요?`)
+    ) {
+      return;
+    }
+
+    setIsSaving(true);
+    setActionErrorMessage(null);
+    setSuccessMessage(null);
+
+    const { error } = await supabase.rpc('admin_set_member_account_status', {
+      target_user_id: accountEditMember.user_id,
+      next_status: accountDraft.status,
+      change_reason: reason,
+    });
+
+    if (error) {
+      setActionErrorMessage('계정 상태를 변경하지 못했습니다. 계정 관리 SQL과 추가 인증 상태를 확인한 뒤 다시 시도해 주세요.');
+      setIsSaving(false);
+      return;
+    }
+
+    const nextStatusLabel = accountDraft.status === 'active' ? '정상' : '정지';
+    await loadMembers(appliedQuery);
+    setSuccessMessage({
+      title: '계정 상태 변경 완료',
+      detail: `${memberName}의 계정을 ${nextStatusLabel} 상태로 변경하고 감사 기록을 남겼습니다.`,
+    });
+    setIsSaving(false);
+  };
+
+  const resetDevice = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (!supabase || !deviceResetMember?.device_registered_at) return;
+
+    const reason = deviceResetReason.trim();
+    if (reason.length < 5 || reason.length > 500) {
+      setActionErrorMessage('등록 PC 해제 사유를 5–500자로 입력해 주세요.');
+      return;
+    }
+
+    const memberName = deviceResetMember.email ?? '선택한 회원';
+    if (!window.confirm(
+      `${memberName}의 등록 PC를 해제합니다.\n\n계정과 이용권은 유지되며, 다음 로그인한 PC가 새 등록 PC가 됩니다. 계속할까요?`,
+    )) {
+      return;
+    }
+
+    setIsSaving(true);
+    setActionErrorMessage(null);
+    setSuccessMessage(null);
+
+    const { error } = await supabase.rpc('admin_reset_member_device', {
+      target_user_id: deviceResetMember.user_id,
+      change_reason: reason,
+    });
+
+    if (error) {
+      setActionErrorMessage('등록 PC를 해제하지 못했습니다. 기기 변경 SQL과 추가 인증 상태를 확인한 뒤 다시 시도해 주세요.');
+      setIsSaving(false);
+      return;
+    }
+
+    await loadMembers(appliedQuery);
+    setSuccessMessage({
+      title: '등록 PC 해제 완료',
+      detail: `${memberName}의 기존 PC 등록을 해제했습니다. 다음 로그인한 PC가 새 등록 PC로 등록됩니다.`,
+    });
     setIsSaving(false);
   };
 
@@ -227,11 +393,142 @@ export function MembersScreen() {
         </div>
       ) : null}
 
+      {actionErrorMessage ? (
+        <div id="member-action-error" className="message member-message" role="alert" tabIndex={-1}>
+          <AlertCircle aria-hidden="true" />
+          <div><h2>회원 관리 작업을 완료하지 못했습니다</h2><p>{actionErrorMessage}</p></div>
+        </div>
+      ) : null}
+
       {successMessage ? (
         <div className="message success-message member-message" role="status">
           <CheckCircle2 aria-hidden="true" />
-          <div><h2>이용권 변경 완료</h2><p>{successMessage}</p></div>
+          <div><h2>{successMessage.title}</h2><p>{successMessage.detail}</p></div>
         </div>
+      ) : null}
+
+      {accountEditMember && accountDraft ? (
+        <section id="account-editor" className="license-editor" aria-labelledby="account-editor-heading">
+          <header className="license-editor-heading">
+            <div>
+              <h2 id="account-editor-heading" tabIndex={-1}>계정 상태 변경</h2>
+              <p><strong>{accountEditMember.email ?? '이메일 없음'}</strong><span className="member-id">{accountEditMember.user_id}</span></p>
+            </div>
+            <UserCheck aria-hidden="true" />
+          </header>
+
+          <form className="license-form" onSubmit={(event) => void saveAccountStatus(event)}>
+            <fieldset className="license-status-field" disabled={isSaving}>
+              <legend>계정 상태 <span className="required-label">필수</span></legend>
+              <div className="license-status-options">
+                <label>
+                  <input
+                    type="radio"
+                    name="account-status"
+                    value="active"
+                    checked={accountDraft.status === 'active'}
+                    onChange={() => {
+                      setAccountDraft({ ...accountDraft, status: 'active' });
+                      setActionErrorMessage(null);
+                    }}
+                  />
+                  <span><strong>정상</strong><small>이용권과 등록 PC 조건을 충족하면 프로그램을 사용할 수 있습니다.</small></span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="account-status"
+                    value="suspended"
+                    checked={accountDraft.status === 'suspended'}
+                    onChange={() => {
+                      setAccountDraft({ ...accountDraft, status: 'suspended' });
+                      setActionErrorMessage(null);
+                    }}
+                  />
+                  <span><strong>정지</strong><small>열린 사용자 프로그램을 즉시 차단하지만 이용권 기간은 변경하지 않습니다.</small></span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div className="field-group">
+              <label htmlFor="account-status-reason">변경 사유 <span className="required-label">필수</span></label>
+              <textarea
+                id="account-status-reason"
+                rows={3}
+                minLength={5}
+                maxLength={500}
+                value={accountDraft.reason}
+                disabled={isSaving}
+                required
+                aria-describedby="account-status-reason-help"
+                onChange={(event) => {
+                  setAccountDraft({ ...accountDraft, reason: event.target.value });
+                  setActionErrorMessage(null);
+                }}
+              />
+              <p id="account-status-reason-help" className="field-help">감사 기록에 남습니다. 5–500자로 입력해 주세요.</p>
+            </div>
+
+            <div className="button-row">
+              <button
+                className={`button ${accountDraft.status === 'suspended' ? 'danger' : 'primary'}`}
+                type="submit"
+                disabled={isSaving || accountDraft.status === accountEditMember.account_status}
+              >
+                {isSaving ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <UserCheck aria-hidden="true" />}
+                {isSaving ? '변경 중…' : accountDraft.status === 'suspended' ? '계정 정지' : '정지 해제'}
+              </button>
+              <button className="button secondary" type="button" disabled={isSaving} onClick={cancelAccountEdit}>취소</button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      {deviceResetMember ? (
+        <section id="device-reset-editor" className="license-editor" aria-labelledby="device-reset-heading">
+          <header className="license-editor-heading">
+            <div>
+              <h2 id="device-reset-heading" tabIndex={-1}>등록 PC 해제</h2>
+              <p><strong>{deviceResetMember.email ?? '이메일 없음'}</strong><span className="member-id">{deviceResetMember.user_id}</span></p>
+            </div>
+            <MonitorOff aria-hidden="true" />
+          </header>
+
+          <form className="license-form" onSubmit={(event) => void resetDevice(event)}>
+            <div className="controls-note">
+              <MonitorOff aria-hidden="true" />
+              <p>현재 PC 등록만 해제합니다. 계정과 이용권은 유지되며, 다음 로그인한 PC가 새 등록 PC가 됩니다.</p>
+            </div>
+
+            <div className="field-group">
+              <label htmlFor="device-reset-reason">해제 사유 <span className="required-label">필수</span></label>
+              <textarea
+                id="device-reset-reason"
+                rows={3}
+                minLength={5}
+                maxLength={500}
+                value={deviceResetReason}
+                disabled={isSaving}
+                required
+                autoFocus
+                aria-describedby="device-reset-reason-help"
+                onChange={(event) => {
+                  setDeviceResetReason(event.target.value);
+                  setActionErrorMessage(null);
+                }}
+              />
+              <p id="device-reset-reason-help" className="field-help">감사 기록에 남습니다. 5–500자로 입력해 주세요.</p>
+            </div>
+
+            <div className="button-row">
+              <button className="button danger" type="submit" disabled={isSaving}>
+                {isSaving ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <MonitorOff aria-hidden="true" />}
+                {isSaving ? '해제 중…' : '등록 PC 해제'}
+              </button>
+              <button className="button secondary" type="button" disabled={isSaving} onClick={cancelDeviceReset}>취소</button>
+            </div>
+          </form>
+        </section>
       ) : null}
 
       {selectedMember && licenseDraft ? (
@@ -358,7 +655,10 @@ export function MembersScreen() {
               <tbody>
                 {members.map((member) => {
                   const licenseState = getLicenseDisplayState(member.license_status, member.license_ends_at, Date.now());
-                  const isSelected = selectedMember?.user_id === member.user_id;
+                  const isAccountSelected = accountEditMember?.user_id === member.user_id;
+                  const isLicenseSelected = selectedMember?.user_id === member.user_id;
+                  const isDeviceSelected = deviceResetMember?.user_id === member.user_id;
+                  const isSelected = isAccountSelected || isLicenseSelected || isDeviceSelected;
                   return (
                     <tr key={member.user_id} className={isSelected ? 'is-selected' : undefined}>
                       <td data-label="회원"><strong>{member.email ?? '이메일 없음'}</strong><small className="member-id">{member.user_id}</small></td>
@@ -368,16 +668,40 @@ export function MembersScreen() {
                       <td data-label="등록 PC"><span className={`status-badge ${member.device_registered_at ? 'success' : 'neutral'}`}>{member.device_registered_at ? '등록' : '미등록'}</span><small>{member.device_registered_at ? `${formatDate(member.device_changed_at)} 확인` : '등록 기록 없음'}</small></td>
                       <td data-label="가입일" className="numeric-cell">{formatDate(member.created_at)}</td>
                       <td data-label="관리">
-                        <button
-                          className="button secondary table-action-button"
-                          type="button"
-                          aria-expanded={isSelected}
-                          aria-controls={isSelected ? 'license-editor' : undefined}
-                          disabled={isLoading || isSaving}
-                          onClick={() => beginLicenseEdit(member)}
-                        >
-                          이용권 관리
-                        </button>
+                        <div className="table-action-group">
+                          <button
+                            className="button secondary table-action-button"
+                            type="button"
+                            aria-expanded={isAccountSelected}
+                            aria-controls={isAccountSelected ? 'account-editor' : undefined}
+                            disabled={isLoading || isSaving}
+                            onClick={() => beginAccountEdit(member)}
+                          >
+                            계정 관리
+                          </button>
+                          <button
+                            className="button secondary table-action-button"
+                            type="button"
+                            aria-expanded={isLicenseSelected}
+                            aria-controls={isLicenseSelected ? 'license-editor' : undefined}
+                            disabled={isLoading || isSaving}
+                            onClick={() => beginLicenseEdit(member)}
+                          >
+                            이용권 관리
+                          </button>
+                          {member.device_registered_at ? (
+                            <button
+                              className="button danger table-action-button"
+                              type="button"
+                              aria-expanded={isDeviceSelected}
+                              aria-controls={isDeviceSelected ? 'device-reset-editor' : undefined}
+                              disabled={isLoading || isSaving}
+                              onClick={() => beginDeviceReset(member)}
+                            >
+                              <MonitorOff aria-hidden="true" />등록 PC 해제
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );

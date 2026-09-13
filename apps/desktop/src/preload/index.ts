@@ -256,9 +256,41 @@ type SlowNetworkResponse =
       };
     };
 
+type OpenAiCredentialResponse =
+  | {
+      readonly ok: true;
+      readonly status: {
+        readonly saved: boolean;
+      };
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type OpenAiConnectionResponse =
+  | {
+      readonly ok: true;
+      readonly checkedAt: string;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 const ipcChannels = {
   systemAppVersion: 'system:app-version',
   systemDeviceHash: 'system:device-hash',
+  openAiCredentialStatus: 'openai:credential-status',
+  openAiCredentialSave: 'openai:credential-save',
+  openAiCredentialRemove: 'openai:credential-remove',
+  openAiConnectionTest: 'openai:connection-test',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
   mockState: 'poc:state',
@@ -293,6 +325,17 @@ const blowSystemApi = {
     ipcRenderer.invoke(ipcChannels.systemAppVersion),
   getDeviceHash: (): Promise<string> =>
     ipcRenderer.invoke(ipcChannels.systemDeviceHash),
+};
+
+const blowOpenAiApi = {
+  getStatus: (): Promise<OpenAiCredentialResponse> =>
+    ipcRenderer.invoke(ipcChannels.openAiCredentialStatus),
+  save: (apiKey: string): Promise<OpenAiCredentialResponse> =>
+    ipcRenderer.invoke(ipcChannels.openAiCredentialSave, apiKey),
+  remove: (): Promise<OpenAiCredentialResponse> =>
+    ipcRenderer.invoke(ipcChannels.openAiCredentialRemove),
+  testConnection: (): Promise<OpenAiConnectionResponse> =>
+    ipcRenderer.invoke(ipcChannels.openAiConnectionTest),
 };
 
 const blowPocApi = {
@@ -434,5 +477,6 @@ const blowNaverApi = {
 };
 
 contextBridge.exposeInMainWorld('blowSystem', blowSystemApi);
+contextBridge.exposeInMainWorld('blowOpenAi', blowOpenAiApi);
 contextBridge.exposeInMainWorld('blowPoc', blowPocApi);
 contextBridge.exposeInMainWorld('blowNaver', blowNaverApi);

@@ -4,18 +4,22 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  History,
   LayoutDashboard,
   LoaderCircle,
   LockKeyhole,
   LogOut,
   ShieldCheck,
+  SlidersHorizontal,
   UserCheck,
   Users,
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { decideAdminAccess, type AdminAccessStage } from './admin-access.js';
+import { AuditLogsScreen } from './AuditLogsScreen.js';
 import { MembersScreen } from './MembersScreen.js';
+import { OperationsScreen } from './OperationsScreen.js';
 import { supabase } from './supabase.js';
 
 type AccessView = 'loading' | AdminAccessStage | 'error';
@@ -485,7 +489,7 @@ function AdminShell({ session, auditCount, onSignOut }: {
   readonly auditCount: number;
   readonly onSignOut: () => Promise<void>;
 }) {
-  const [screen, setScreen] = useState<'overview' | 'members'>('overview');
+  const [screen, setScreen] = useState<'overview' | 'members' | 'audit' | 'operations'>('overview');
 
   return (
     <div className="app-shell">
@@ -521,6 +525,22 @@ function AdminShell({ session, auditCount, onSignOut }: {
             >
               <Users aria-hidden="true" />회원 조회
             </button>
+            <button
+              className={`nav-button ${screen === 'audit' ? 'is-active' : ''}`}
+              type="button"
+              aria-current={screen === 'audit' ? 'page' : undefined}
+              onClick={() => setScreen('audit')}
+            >
+              <History aria-hidden="true" />변경 기록
+            </button>
+            <button
+              className={`nav-button ${screen === 'operations' ? 'is-active' : ''}`}
+              type="button"
+              aria-current={screen === 'operations' ? 'page' : undefined}
+              onClick={() => setScreen('operations')}
+            >
+              <SlidersHorizontal aria-hidden="true" />운영 제어
+            </button>
           </nav>
           <div className="account-block">
             <span>관리자 계정</span>
@@ -549,7 +569,11 @@ function AdminShell({ session, auditCount, onSignOut }: {
                 </div>
               </section>
             </>
-          ) : <MembersScreen />}
+          ) : screen === 'members'
+            ? <MembersScreen />
+            : screen === 'audit'
+              ? <AuditLogsScreen currentAdminId={session.user.id} />
+              : <OperationsScreen />}
         </main>
       </div>
     </div>

@@ -148,11 +148,45 @@ interface BasicSuccessResponse {
   readonly ok: true;
 }
 
+type OpenAiCredentialResponse =
+  | {
+      readonly ok: true;
+      readonly status: {
+        readonly saved: boolean;
+      };
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type OpenAiConnectionResponse =
+  | {
+      readonly ok: true;
+      readonly checkedAt: string;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 declare global {
   interface Window {
     readonly blowSystem: {
       getAppVersion(): Promise<string>;
       getDeviceHash(): Promise<string>;
+    };
+    readonly blowOpenAi: {
+      getStatus(): Promise<OpenAiCredentialResponse>;
+      save(apiKey: string): Promise<OpenAiCredentialResponse>;
+      remove(): Promise<OpenAiCredentialResponse>;
+      testConnection(): Promise<OpenAiConnectionResponse>;
     };
     readonly blowPoc: {
       start(): Promise<PocErrorResponse | PocSuccessResponse>;

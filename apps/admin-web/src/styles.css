@@ -163,7 +163,34 @@ td small { margin-top: 4px; color: var(--text-muted); font-size: 0.76rem; }
 .status-badge.neutral { color: var(--text-muted); background: var(--surface-active); }
 .numeric-cell { font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
 .table-action-button { white-space: nowrap; }
+.table-action-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+.audit-results { margin-top: 0; }
+.audit-table { min-width: 1120px; }
+.audit-identity { min-width: 210px; }
+.audit-identity small { overflow-wrap: anywhere; font-family: Consolas, monospace; }
+.audit-value { min-width: 190px; }
+.audit-reason { min-width: 180px; max-width: 320px; overflow-wrap: anywhere; }
+.controls-panel { border: 1px solid var(--line); background: var(--surface); }
+.controls-list { margin: 0; }
+.controls-list > div { display: grid; grid-template-columns: minmax(180px, 0.35fr) minmax(0, 1fr); gap: 24px; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+.controls-list dt { color: var(--text-muted); font-size: 0.86rem; font-weight: 600; }
+.controls-list dd { margin: 0; }
+.controls-list dd strong, .controls-list dd small { display: block; }
+.controls-list dd small { margin-top: 5px; color: var(--text-muted); font-size: 0.82rem; }
+.controls-note { display: flex; align-items: flex-start; gap: 10px; padding: 16px 24px; color: var(--text-muted); background: var(--surface-soft); }
+.controls-note svg { margin-top: 2px; color: var(--success); }
+.controls-message { margin: 20px; }
+.operation-page-message { margin-bottom: 20px; }
+.operation-editor { margin-top: 20px; }
+.operation-version-field { max-width: 520px; }
+.operation-impact { border-left: 3px solid var(--line); }
+.operation-impact.has-changes { border-left-color: var(--danger); }
+.operation-impact.has-changes > svg { color: var(--danger); }
+.operation-impact strong { display: block; color: var(--text); }
+.operation-impact p, .operation-impact ul { margin: 4px 0 0; }
+.operation-impact ul { display: grid; gap: 4px; padding-left: 20px; }
+.operation-save-button { justify-self: start; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) {
   .login-page, .center-page { padding: 16px; }
@@ -182,6 +209,9 @@ td small { margin-top: 4px; color: var(--text-muted); font-size: 0.76rem; }
   .member-search-form .button { width: 100%; }
   .license-status-options, .license-date-fields { grid-template-columns: 1fr; }
   .table-scroll { overflow: visible; }
+  .audit-table { min-width: 0; }
+  .controls-list > div { grid-template-columns: 1fr; gap: 6px; padding: 16px 18px; }
+  .controls-note { padding: 16px 18px; }
   table, tbody, tr, td { display: block; width: 100%; }
   thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
   tbody tr { padding: 8px 16px; border-bottom: 1px solid var(--line); }

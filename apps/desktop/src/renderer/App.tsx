@@ -6,6 +6,7 @@ import {
   PanelsTopLeft,
   Circle,
   FileText,
+  KeyRound,
   LoaderCircle,
   Play,
   ShieldCheck,
@@ -28,9 +29,10 @@ import {
 import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './AuthScreen.js';
 import { ConnectionScreen } from './ConnectionScreen.js';
+import { OpenAiSettingsScreen } from './OpenAiSettingsScreen.js';
 import { supabase } from './supabase.js';
 
-type Screen = 'connection' | 'automation' | 'safety';
+type Screen = 'connection' | 'openai' | 'automation' | 'safety';
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
 const initialSnapshot: PocSnapshot = {
@@ -498,6 +500,15 @@ function Workspace({
               네이버 연결
             </button>
             <button
+              className={screen === 'openai' ? 'nav-button is-active' : 'nav-button'}
+              type="button"
+              aria-current={screen === 'openai' ? 'page' : undefined}
+              onClick={() => setScreen('openai')}
+            >
+              <KeyRound aria-hidden="true" />
+              OpenAI 연결
+            </button>
+            <button
               className={screen === 'automation' ? 'nav-button is-active' : 'nav-button'}
               type="button"
               aria-current={screen === 'automation' ? 'page' : undefined}
@@ -547,6 +558,8 @@ function Workspace({
         <main id="main-content" className="main" tabIndex={-1}>
           {screen === 'connection' ? (
             <ConnectionScreen />
+          ) : screen === 'openai' ? (
+            <OpenAiSettingsScreen />
           ) : screen === 'automation' ? (
             <AutomationScreen />
           ) : (
@@ -877,15 +890,27 @@ export function App() {
       return;
     }
 
+    const refreshAccess = (): void => {
+      void window.blowNaver.close().catch(() => undefined);
+      setCheckVersion((current) => current + 1);
+    };
+
     const channel = client
-      .channel('app-controls')
+      .channel(`account-controls:${userId}`)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'app_controls' },
-        () => {
-          void window.blowNaver.close().catch(() => undefined);
-          setCheckVersion((current) => current + 1);
+        refreshAccess,
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${userId}`,
         },
+        refreshAccess,
       )
       .subscribe();
 

@@ -1907,3 +1907,31 @@ svg {
     grid-template-columns: 1fr;
   }
 }
+.credential-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.credential-input-row .button {
+  min-width: 104px;
+}
+
+.credential-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .credential-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .credential-input-row .button,
+  .credential-actions .button {
+    width: 100%;
+  }
+}
