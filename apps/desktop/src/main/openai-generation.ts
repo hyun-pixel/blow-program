@@ -44,6 +44,7 @@ export interface BlogDraftVerification {
   readonly minimumBodyLength: number;
   readonly maximumBodyLength: number;
   readonly issues: readonly string[];
+  readonly blockingIssues: readonly string[];
 }
 
 export type OpenAiGenerationResult =
@@ -177,13 +178,16 @@ export function verifyGeneratedBlogDraft(
   );
   const primaryKeyword = input.keywords[0]?.value ?? '';
   const issues: string[] = [];
+  const blockingIssues: string[] = [];
 
   if (titleLength > 30) {
     issues.push(`제목이 ${titleLength}자로, 최대 30자를 넘었습니다.`);
   }
 
   if (countExactOccurrences(draft.title, primaryKeyword) !== 1) {
-    issues.push('제목에 기본 키워드가 정확히 한 번 들어가야 합니다.');
+    const issue = '제목에 기본 키워드가 정확히 한 번 들어가야 합니다.';
+    issues.push(issue);
+    blockingIssues.push(issue);
   }
 
   if (/\p{Extended_Pictographic}|[★☆♥♡◆◇■□●○※♪♬✓✔]/u.test(draft.title)) {
@@ -200,7 +204,9 @@ export function verifyGeneratedBlogDraft(
     const actual = countExactOccurrences(draft.body, keyword.value);
 
     if (actual !== keyword.repetitions) {
-      issues.push(`본문의 ‘${keyword.value}’이(가) ${actual}회 사용되었습니다. 설정값은 ${keyword.repetitions}회입니다.`);
+      const issue = `본문의 ‘${keyword.value}’이(가) ${actual}회 사용되었습니다. 설정값은 ${keyword.repetitions}회입니다.`;
+      issues.push(issue);
+      blockingIssues.push(issue);
     }
   }
 
@@ -221,6 +227,7 @@ export function verifyGeneratedBlogDraft(
     minimumBodyLength,
     maximumBodyLength,
     issues,
+    blockingIssues,
   };
 }
 

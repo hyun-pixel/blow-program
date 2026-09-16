@@ -236,6 +236,8 @@ export function NewPostScreen({
   const showKeywordWarning = hasExcessiveKeywords(keywords);
   const isGenerating = generationStatus === 'generating'
     || generationStatus === 'generatingImages';
+  const hasBlockingKeywordIssues =
+    (generationResult?.verification.blockingIssues.length ?? 0) > 0;
 
   const clearError = (field: keyof CoreDraftErrors): void => {
     setErrors((current) => ({ ...current, [field]: undefined }));
@@ -428,6 +430,13 @@ export function NewPostScreen({
         draft: response.draft,
         verification: response.verification,
       });
+
+      if (response.verification.blockingIssues.length > 0) {
+        setGenerationStatus('complete');
+        setNotice('설정한 키워드 횟수를 충족하지 못해 이미지 생성을 시작하지 않았습니다.');
+        window.setTimeout(() => resultRef.current?.focus(), 0);
+        return;
+      }
 
       if (useGeneratedImages) {
         await generateImagesForDraft(response.draft);
@@ -1135,16 +1144,31 @@ export function NewPostScreen({
               <p>네이버에 입력하기 전에 내용과 사실관계를 직접 확인해 주세요.</p>
             </div>
             <span className={generationResult.verification.valid ? 'is-valid' : 'needs-review'}>
-              {generationResult.verification.valid ? '권장 기준 충족' : '일부 항목 확인'}
+              {hasBlockingKeywordIssues
+                ? '키워드 수정 필요'
+                : generationResult.verification.valid
+                  ? '권장 기준 충족'
+                  : '일부 항목 확인'}
             </span>
           </header>
 
           {!generationResult.verification.valid ? (
-            <div className="new-post-result-warning" role="status">
+            <div
+              className="new-post-result-warning"
+              role={hasBlockingKeywordIssues ? 'alert' : 'status'}
+            >
               <CircleAlert aria-hidden="true" />
               <div>
-                <h3>일부 권장 기준을 벗어났습니다</h3>
-                <p>AI 생성 결과는 목표 범위를 간혹 벗어날 수 있습니다. 아래 항목을 확인하고 필요하면 네이버에서 수정해 주세요.</p>
+                <h3>
+                  {hasBlockingKeywordIssues
+                    ? '설정한 키워드 횟수를 충족하지 못했습니다'
+                    : '일부 권장 기준을 벗어났습니다'}
+                </h3>
+                <p>
+                  {hasBlockingKeywordIssues
+                    ? '키워드 횟수는 필수 조건입니다. 입력값을 유지한 채 다시 생성해 주세요. 이미지 생성과 네이버 입력 준비는 시작하지 않았습니다.'
+                    : 'AI 생성 결과는 목표 범위를 간혹 벗어날 수 있습니다. 아래 항목을 확인하고 필요하면 네이버에서 수정해 주세요.'}
+                </p>
                 <ul>
                   {generationResult.verification.issues.map((issue) => (
                     <li key={issue}>{issue}</li>
@@ -1174,7 +1198,7 @@ export function NewPostScreen({
             <div className="new-post-result-body">{generationResult.draft.body}</div>
           </article>
 
-          {useGeneratedImages ? (
+          {useGeneratedImages && !hasBlockingKeywordIssues ? (
             <section className="new-post-image-result" aria-labelledby="new-post-image-result-heading">
               <header>
                 <div>
@@ -1248,24 +1272,26 @@ export function NewPostScreen({
             <p>자동 검사는 글자 수·키워드·CTA 형식만 확인합니다. 가격, 경력, 통계, 광고 표현과 업종별 규정은 발행 전에 직접 확인해야 합니다.</p>
           </div>
 
-          <div className="new-post-result-transfer">
-            <div>
-              <strong>네이버 입력 준비</strong>
-              <span>생성된 제목, 본문과 이미지를 네이버 연결 화면으로 옮깁니다. 이 버튼만으로 Chrome 조작이나 임시저장은 실행되지 않습니다.</span>
+          {!hasBlockingKeywordIssues ? (
+            <div className="new-post-result-transfer">
+              <div>
+                <strong>네이버 입력 준비</strong>
+                <span>생성된 제목, 본문과 이미지를 네이버 연결 화면으로 옮깁니다. 이 버튼만으로 Chrome 조작이나 임시저장은 실행되지 않습니다.</span>
+              </div>
+              <button
+                className="button primary"
+                type="button"
+                disabled={isGenerating}
+                onClick={() => onPrepareNaverDraft({
+                  ...generationResult.draft,
+                  images: generatedImages,
+                })}
+              >
+                <FilePenLine aria-hidden="true" />
+                네이버 입력 준비
+              </button>
             </div>
-            <button
-              className="button primary"
-              type="button"
-              disabled={isGenerating}
-              onClick={() => onPrepareNaverDraft({
-                ...generationResult.draft,
-                images: generatedImages,
-              })}
-            >
-              <FilePenLine aria-hidden="true" />
-              네이버 입력 준비
-            </button>
-          </div>
+          ) : null}
         </section>
       ) : null}
     </>

@@ -64,13 +64,18 @@ describe('OpenAI blog generation', () => {
 
     expect(verification.valid).toBe(true);
     expect(verification.bodyLength).toBe(1_200);
+    expect(verification.blockingIssues).toEqual([]);
 
-    expect(verifyGeneratedBlogDraft(
+    const invalidDraft = verifyGeneratedBlogDraft(
       { title: '가입 전 확인사항', body: `${body}추가 문장` },
       { ...generationRequest, cta: '상담을 신청해 주세요.' },
-    ).issues).toEqual(expect.arrayContaining([
+    );
+    expect(invalidDraft.issues).toEqual(expect.arrayContaining([
       expect.stringContaining('기본 키워드'),
       expect.stringContaining('CTA'),
+    ]));
+    expect(invalidDraft.blockingIssues).toEqual(expect.arrayContaining([
+      expect.stringContaining('기본 키워드'),
     ]));
 
     const longDraft = verifyGeneratedBlogDraft(
@@ -80,6 +85,15 @@ describe('OpenAI blog generation', () => {
     expect(longDraft.valid).toBe(false);
     expect(longDraft.issues).toEqual(expect.arrayContaining([
       expect.stringContaining('목표 범위 1,080–1,320자'),
+    ]));
+    expect(longDraft.blockingIssues).toEqual([]);
+
+    const keywordMismatch = verifyGeneratedBlogDraft(
+      { title: '실손보험 가입 전 확인사항', body: '가'.repeat(1_200) },
+      generationRequest,
+    );
+    expect(keywordMismatch.blockingIssues).toEqual(expect.arrayContaining([
+      expect.stringContaining('설정값은 3회'),
     ]));
   });
 
