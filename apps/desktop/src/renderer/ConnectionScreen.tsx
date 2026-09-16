@@ -56,6 +56,7 @@ import type {
   WriterNavigationRepeatProgress,
   WriterNavigationRepeatResult,
 } from '../shared/compatibility-environment.js';
+import type { GeneratedBlogImage } from '../main/openai-image-generation.js';
 
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
@@ -295,15 +296,27 @@ function parseDraftParagraphs(value: string): readonly string[] {
     .filter((paragraph) => paragraph.length > 0);
 }
 
-export function ConnectionScreen() {
+export function ConnectionScreen({
+  initialDraft,
+}: {
+  readonly initialDraft?: {
+    readonly title: string;
+    readonly body: string;
+    readonly images: readonly GeneratedBlogImage[];
+  } | undefined;
+}) {
   const [blogUrl, setBlogUrl] = useState('');
   const blogUrlInputRef = useRef<HTMLInputElement>(null);
   const draftTitleInputRef = useRef<HTMLInputElement>(null);
   const draftBodyInputRef = useRef<HTMLTextAreaElement>(null);
   const [status, setStatus] = useState<NaverConnectionStatus | null>(null);
   const [browserOpen, setBrowserOpen] = useState(false);
-  const [draftTitle, setDraftTitle] = useState(sampleTitle);
-  const [draftBody, setDraftBody] = useState(sampleBody);
+  const [draftTitle, setDraftTitle] = useState(
+    initialDraft?.title ?? sampleTitle,
+  );
+  const [draftBody, setDraftBody] = useState(
+    initialDraft?.body ?? sampleBody,
+  );
   const [draftErrors, setDraftErrors] = useState<{
     readonly title: string;
     readonly body: string;
@@ -708,7 +721,24 @@ export function ConnectionScreen() {
         setDividerStyles([]);
         setDividerStyleSelection('random');
         setDividerResult(null);
-        setSelectedImages([]);
+        if (initialDraft?.images.length) {
+          const imageResponse = await window.blowNaver.prepareGeneratedImages(
+            initialDraft.images.map((image) => image.dataUrl),
+          );
+
+          if (!isOperationCurrent(operationVersion)) {
+            return;
+          }
+
+          if (imageResponse.ok) {
+            setSelectedImages(imageResponse.files);
+          } else {
+            setSelectedImages([]);
+            setError(imageResponse.error);
+          }
+        } else {
+          setSelectedImages([]);
+        }
         setImageResult(null);
       } else {
         setError(response.error);
@@ -1672,6 +1702,16 @@ export function ConnectionScreen() {
           </div>
         ) : null}
       </header>
+
+      {initialDraft ? (
+        <section className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h2>생성된 콘텐츠를 불러왔습니다</h2>
+            <p>아래 제목, 본문과 이미지를 확인한 뒤 전용 Chrome 연결을 진행해 주세요. 아직 네이버 입력이나 임시저장은 실행하지 않았습니다.</p>
+          </div>
+        </section>
+      ) : null}
 
       <section className="status-strip" aria-label="네이버 연결 상태">
         <div className="status-item">
@@ -3026,7 +3066,9 @@ export function ConnectionScreen() {
             <div>
               <h2 id="image-test-heading">사진 배치 테스트</h2>
               <p>
-                로컬 JPG 또는 PNG 파일과 배치 방식을 선택해 네이버 편집기에 첨부합니다.
+                {initialDraft?.images.length
+                  ? '생성 이미지를 확인하고 배치 방식을 선택해 네이버 편집기에 첨부합니다.'
+                  : '로컬 JPG 또는 PNG 파일과 배치 방식을 선택해 네이버 편집기에 첨부합니다.'}
               </p>
             </div>
             <span className="document-state">
@@ -3067,7 +3109,9 @@ export function ConnectionScreen() {
                   </span>
                 </div>
                 <p className="field-help">
-                  파일 경로는 화면에 표시하거나 서버로 보내지 않습니다. 이번 단계에서는 JPG와 PNG만 지원합니다.
+                  {initialDraft?.images.length
+                    ? '생성 이미지는 BLOW 전용 로컬 폴더에 JPG로 준비하며 서버로 보내지 않습니다. 필요하면 다른 이미지를 다시 선택할 수 있습니다.'
+                    : '파일 경로는 화면에 표시하거나 서버로 보내지 않습니다. 이번 단계에서는 JPG와 PNG만 지원합니다.'}
                 </p>
 
                 {selectedImages.length > 0 ? (
@@ -3142,7 +3186,9 @@ export function ConnectionScreen() {
               <div className="editor-input-note">
                 <ShieldCheck aria-hidden="true" />
                 <p>
-                  원본 파일은 수정하거나 복사하지 않습니다. BLOW는 이미지 첨부 후에도 임시저장과 최종 발행을 누르지 않습니다.
+                  {initialDraft?.images.length
+                    ? '생성 이미지의 첨부 결과를 확인한 뒤 다음 단계로 이동합니다. BLOW는 이 단계에서 임시저장이나 최종 발행을 누르지 않습니다.'
+                    : '원본 파일은 수정하거나 복사하지 않습니다. BLOW는 이미지 첨부 후에도 임시저장과 최종 발행을 누르지 않습니다.'}
                 </p>
               </div>
 

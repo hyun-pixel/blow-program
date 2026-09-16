@@ -33,6 +33,14 @@ import type {
   WriterNavigationRepeatProgress,
   WriterNavigationRepeatResult,
 } from '../shared/compatibility-environment.js';
+import type {
+  BlogGenerationRequest,
+  OpenAiGenerationResult,
+} from '../main/openai-generation.js';
+import type {
+  BlogImageGenerationRequest,
+  OpenAiImageGenerationResult,
+} from '../main/openai-image-generation.js';
 
 type NaverStateResponse =
   | {
@@ -284,6 +292,63 @@ type OpenAiConnectionResponse =
       };
     };
 
+type OpenAiModelListResponse =
+  | {
+      readonly ok: true;
+      readonly modelIds: readonly string[];
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type OpenAiGenerationCancelResponse = {
+  readonly ok: true;
+  readonly cancelled: boolean;
+};
+
+interface BrandProfileInput {
+  readonly brandName: string;
+  readonly industry: string;
+  readonly brandIntroduction: string;
+  readonly productsAndServices: string;
+  readonly contentDirection: string;
+  readonly activityRegion: string;
+  readonly priceInfo: string;
+  readonly businessHours: string;
+  readonly coreStrengths: string;
+  readonly targetCustomers: string;
+  readonly mustEmphasize: string;
+  readonly prohibitedPhrases: string;
+  readonly requiredPhrases: string;
+  readonly defaultCta: string;
+  readonly defaultTone: string;
+  readonly accentColor: string;
+  readonly imageStyle: string;
+  readonly phoneNumber: string;
+  readonly address: string;
+  readonly consultationLink: string;
+}
+
+interface BrandProfile extends BrandProfileInput {
+  readonly updatedAt: string;
+}
+
+type BrandProfileResponse =
+  | {
+      readonly ok: true;
+      readonly profile: BrandProfile | null;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
 const ipcChannels = {
   systemAppVersion: 'system:app-version',
   systemDeviceHash: 'system:device-hash',
@@ -291,6 +356,12 @@ const ipcChannels = {
   openAiCredentialSave: 'openai:credential-save',
   openAiCredentialRemove: 'openai:credential-remove',
   openAiConnectionTest: 'openai:connection-test',
+  openAiGenerateDraft: 'openai:generate-draft',
+  openAiGenerateImages: 'openai:generate-images',
+  openAiGenerationCancel: 'openai:generation-cancel',
+  brandProfileGet: 'brand-profile:get',
+  brandProfileSave: 'brand-profile:save',
+  openAiModelList: 'openai:model-list',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
   mockState: 'poc:state',
@@ -307,6 +378,7 @@ const ipcChannels = {
   naverListStickerCategories: 'naver:list-sticker-categories',
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
+  naverPrepareGeneratedImages: 'naver:prepare-generated-images',
   naverAttachImages: 'naver:attach-images',
   naverMonitorUserInteraction: 'naver:monitor-user-interaction',
   naverTestNetworkInterruption: 'naver:test-network-interruption',
@@ -336,6 +408,28 @@ const blowOpenAiApi = {
     ipcRenderer.invoke(ipcChannels.openAiCredentialRemove),
   testConnection: (): Promise<OpenAiConnectionResponse> =>
     ipcRenderer.invoke(ipcChannels.openAiConnectionTest),
+  listModels: (): Promise<OpenAiModelListResponse> =>
+    ipcRenderer.invoke(ipcChannels.openAiModelList),
+  generateDraft: (
+    input: BlogGenerationRequest,
+  ): Promise<OpenAiGenerationResult> =>
+    ipcRenderer.invoke(ipcChannels.openAiGenerateDraft, input),
+  generateImages: (
+    input: BlogImageGenerationRequest,
+  ): Promise<OpenAiImageGenerationResult> =>
+    ipcRenderer.invoke(ipcChannels.openAiGenerateImages, input),
+  cancelGeneration: (): Promise<OpenAiGenerationCancelResponse> =>
+    ipcRenderer.invoke(ipcChannels.openAiGenerationCancel),
+};
+
+const blowBrandProfileApi = {
+  get: (userId: string): Promise<BrandProfileResponse> =>
+    ipcRenderer.invoke(ipcChannels.brandProfileGet, userId),
+  save: (
+    userId: string,
+    input: BrandProfileInput,
+  ): Promise<BrandProfileResponse> =>
+    ipcRenderer.invoke(ipcChannels.brandProfileSave, userId, input),
 };
 
 const blowPocApi = {
@@ -435,6 +529,10 @@ const blowNaverApi = {
     }),
   selectImages: (): Promise<NaverImageSelectionResponse> =>
     ipcRenderer.invoke(ipcChannels.naverSelectImages),
+  prepareGeneratedImages: (
+    dataUrls: readonly string[],
+  ): Promise<NaverImageSelectionResponse> =>
+    ipcRenderer.invoke(ipcChannels.naverPrepareGeneratedImages, dataUrls),
   attachImages: (
     imageIds: readonly string[],
     layout: NaverImageLayout,
@@ -480,3 +578,4 @@ contextBridge.exposeInMainWorld('blowSystem', blowSystemApi);
 contextBridge.exposeInMainWorld('blowOpenAi', blowOpenAiApi);
 contextBridge.exposeInMainWorld('blowPoc', blowPocApi);
 contextBridge.exposeInMainWorld('blowNaver', blowNaverApi);
+contextBridge.exposeInMainWorld('blowBrandProfile', blowBrandProfileApi);

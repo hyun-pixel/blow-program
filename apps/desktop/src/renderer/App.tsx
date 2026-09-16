@@ -1,4 +1,5 @@
 import {
+  Building2,
   Check,
   CheckCircle2,
   Link2,
@@ -6,6 +7,7 @@ import {
   PanelsTopLeft,
   Circle,
   FileText,
+  FilePenLine,
   KeyRound,
   LoaderCircle,
   Play,
@@ -28,12 +30,21 @@ import {
 } from '@blow/automation-core';
 import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './AuthScreen.js';
+import { BrandProfileScreen } from './BrandProfileScreen.js';
 import { ConnectionScreen } from './ConnectionScreen.js';
 import { OpenAiSettingsScreen } from './OpenAiSettingsScreen.js';
+import { NewPostScreen } from './NewPostScreen.js';
 import { supabase } from './supabase.js';
+import type { GeneratedBlogImage } from '../main/openai-image-generation.js';
 
-type Screen = 'connection' | 'openai' | 'automation' | 'safety';
+type Screen = 'newPost' | 'connection' | 'openai' | 'brand' | 'automation' | 'safety';
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
+
+interface PreparedNaverDraft {
+  readonly title: string;
+  readonly body: string;
+  readonly images: readonly GeneratedBlogImage[];
+}
 
 const initialSnapshot: PocSnapshot = {
   current: 'IDLE',
@@ -448,7 +459,9 @@ function Workspace({
   readonly session: Session;
   readonly licenseEndsAt: string;
 }) {
-  const [screen, setScreen] = useState<Screen>('connection');
+  const [screen, setScreen] = useState<Screen>('newPost');
+  const [preparedNaverDraft, setPreparedNaverDraft] =
+    useState<PreparedNaverDraft | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
 
@@ -491,6 +504,15 @@ function Workspace({
         <aside className="sidebar" aria-label="주요 메뉴">
           <nav>
             <button
+              className={screen === 'newPost' ? 'nav-button is-active' : 'nav-button'}
+              type="button"
+              aria-current={screen === 'newPost' ? 'page' : undefined}
+              onClick={() => setScreen('newPost')}
+            >
+              <FilePenLine aria-hidden="true" />
+              새 글 작성
+            </button>
+            <button
               className={screen === 'connection' ? 'nav-button is-active' : 'nav-button'}
               type="button"
               aria-current={screen === 'connection' ? 'page' : undefined}
@@ -507,6 +529,15 @@ function Workspace({
             >
               <KeyRound aria-hidden="true" />
               OpenAI 연결
+            </button>
+            <button
+              className={screen === 'brand' ? 'nav-button is-active' : 'nav-button'}
+              type="button"
+              aria-current={screen === 'brand' ? 'page' : undefined}
+              onClick={() => setScreen('brand')}
+            >
+              <Building2 aria-hidden="true" />
+              브랜드 프로필
             </button>
             <button
               className={screen === 'automation' ? 'nav-button is-active' : 'nav-button'}
@@ -556,10 +587,21 @@ function Workspace({
         </aside>
 
         <main id="main-content" className="main" tabIndex={-1}>
-          {screen === 'connection' ? (
-            <ConnectionScreen />
+          {screen === 'newPost' ? (
+            <NewPostScreen
+              userId={session.user.id}
+              onOpenBrandProfile={() => setScreen('brand')}
+              onPrepareNaverDraft={(draft) => {
+                setPreparedNaverDraft(draft);
+                setScreen('connection');
+              }}
+            />
+          ) : screen === 'connection' ? (
+            <ConnectionScreen initialDraft={preparedNaverDraft ?? undefined} />
           ) : screen === 'openai' ? (
             <OpenAiSettingsScreen />
+          ) : screen === 'brand' ? (
+            <BrandProfileScreen userId={session.user.id} />
           ) : screen === 'automation' ? (
             <AutomationScreen />
           ) : (

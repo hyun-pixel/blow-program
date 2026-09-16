@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  listOpenAiModelIds,
   readOpenAiCredentialStatus,
   removeOpenAiCredential,
   saveOpenAiCredential,
@@ -48,6 +49,7 @@ describe('OpenAI credential storage', () => {
     })).rejects.toThrow('보안 저장소');
   });
 });
+
 describe('OpenAI connection check', () => {
   it('checks the official models endpoint without exposing the key', async () => {
     const apiKey = 'sk-test-key-that-is-long-enough';
@@ -59,13 +61,57 @@ describe('OpenAI connection check', () => {
       async (input, init) => {
         requestedUrl = String(input);
         authorization = new Headers(init?.headers).get('Authorization') ?? '';
-        return { ok: true, status: 200 } as Response;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [] }),
+        } as Response;
       },
     );
 
     expect(result).toEqual({ ok: true });
     expect(requestedUrl).toBe('https://api.openai.com/v1/models');
     expect(authorization).toBe(`Bearer ${apiKey}`);
+  });
+
+  it('returns unique model IDs without exposing the saved key', async () => {
+    await expect(
+      listOpenAiModelIds(
+        'sk-test-key-that-is-long-enough',
+        async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: [
+              { id: 'gpt-5.6-terra' },
+              { id: 'gpt-5.6-terra' },
+              { id: 'gpt-5.6-luna' },
+              { id: 123 },
+            ],
+          }),
+        }) as Response,
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      modelIds: ['gpt-5.6-luna', 'gpt-5.6-terra'],
+    });
+  });
+
+  it('returns a safe error for an unexpected models response', async () => {
+    await expect(
+      listOpenAiModelIds(
+        'sk-test-key-that-is-long-enough',
+        async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({ unexpected: true }),
+        }) as Response,
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      code: 'SERVICE_ERROR',
+      message: 'OpenAI 모델 목록을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+    });
   });
 
   it('returns a safe message when authentication fails', async () => {

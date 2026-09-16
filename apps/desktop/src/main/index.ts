@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import {
   app,
@@ -35,11 +35,26 @@ import {
 } from './naver-connection.js';
 import {
   readOpenAiCredential,
+  listOpenAiModelIds,
   readOpenAiCredentialStatus,
   removeOpenAiCredential,
   saveOpenAiCredential,
   testOpenAiConnection,
 } from './openai-credential.js';
+import {
+  generateOpenAiBlogDraft,
+  normalizeBlogGenerationRequest,
+} from './openai-generation.js';
+import {
+  decodeGeneratedBlogImageDataUrl,
+  generateOpenAiBlogImages,
+  normalizeBlogImageGenerationRequest,
+} from './openai-image-generation.js';
+import {
+  normalizeBrandProfileUserId,
+  readBrandProfile,
+  saveBrandProfile,
+} from './brand-profile.js';
 import {
   getWindowsDisplayName,
   toDisplayScalePercent,
@@ -56,6 +71,12 @@ const ipcChannels = {
   openAiCredentialSave: 'openai:credential-save',
   openAiCredentialRemove: 'openai:credential-remove',
   openAiConnectionTest: 'openai:connection-test',
+  openAiGenerateDraft: 'openai:generate-draft',
+  openAiGenerateImages: 'openai:generate-images',
+  openAiGenerationCancel: 'openai:generation-cancel',
+  brandProfileGet: 'brand-profile:get',
+  openAiModelList: 'openai:model-list',
+  brandProfileSave: 'brand-profile:save',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
   mockState: 'poc:state',
@@ -72,6 +93,7 @@ const ipcChannels = {
   naverListStickerCategories: 'naver:list-sticker-categories',
   naverInsertSticker: 'naver:insert-sticker',
   naverSelectImages: 'naver:select-images',
+  naverPrepareGeneratedImages: 'naver:prepare-generated-images',
   naverAttachImages: 'naver:attach-images',
   naverMonitorUserInteraction: 'naver:monitor-user-interaction',
   naverTestNetworkInterruption: 'naver:test-network-interruption',
@@ -95,6 +117,7 @@ const selectedNaverImages = new Map<
   { readonly path: string; readonly name: string; readonly sizeBytes: number }
 >();
 let naverWatchVersion = 0;
+let activeOpenAiGeneration: AbortController | null = null;
 let quitting = false;
 
 function isTrustedSender(event: IpcMainInvokeEvent): boolean {
@@ -169,6 +192,62 @@ function getOpenAiCredentialPath(): string {
     'Secure',
     'openai-api-key.bin',
   );
+}
+
+function getBrandProfilePath(input: unknown): string {
+  const userId = normalizeBrandProfileUserId(input);
+
+  return join(
+    process.env.LOCALAPPDATA ?? app.getPath('userData'),
+    'BLOW',
+    'Profiles',
+    userId,
+    'brand-profile.json',
+  );
+}
+
+async function prepareGeneratedNaverImages(input: unknown): Promise<readonly {
+  readonly id: string;
+  readonly path: string;
+  readonly name: string;
+  readonly sizeBytes: number;
+}[]> {
+  if (!Array.isArray(input) || input.length < 1 || input.length > 4) {
+    throw new Error('INVALID_GENERATED_IMAGES');
+  }
+
+  const images = input.map(decodeGeneratedBlogImageDataUrl);
+  const directory = join(
+    process.env.LOCALAPPDATA ?? app.getPath('userData'),
+    'BLOW',
+    'GeneratedImages',
+  );
+  const writtenPaths: string[] = [];
+
+  await mkdir(directory, { recursive: true });
+
+  try {
+    const prepared = [];
+
+    for (const [index, image] of images.entries()) {
+      const id = randomUUID();
+      const path = join(directory, `${id}.jpg`);
+
+      await writeFile(path, image, { flag: 'wx' });
+      writtenPaths.push(path);
+      prepared.push({
+        id,
+        path,
+        name: `BLOW 생성 이미지 ${index + 1}.jpg`,
+        sizeBytes: image.length,
+      });
+    }
+
+    return prepared;
+  } catch (error) {
+    await Promise.allSettled(writtenPaths.map((path) => unlink(path)));
+    throw error;
+  }
 }
 
 function getPocPaths(): {
@@ -1784,6 +1863,59 @@ function registerNaverIpc(): void {
   });
 
   ipcMain.handle(
+    ipcChannels.naverPrepareGeneratedImages,
+    async (event, input: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      if (!activeNaverSession) {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVER_SESSION_NOT_FOUND',
+            message: '전용 Chrome을 먼저 열어 주세요.',
+          },
+        };
+      }
+
+      try {
+        const images = await prepareGeneratedNaverImages(input);
+
+        selectedNaverImages.clear();
+
+        for (const image of images) {
+          selectedNaverImages.set(image.id, {
+            path: image.path,
+            name: image.name,
+            sizeBytes: image.sizeBytes,
+          });
+        }
+
+        return {
+          ok: true,
+          canceled: false,
+          files: images.map(({ id, name, sizeBytes }) => ({
+            id,
+            name,
+            sizeBytes,
+          })),
+        };
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: 'INVALID_IMAGE_SELECTION',
+            message: '생성 이미지를 네이버 첨부용 파일로 준비하지 못했습니다.',
+          },
+        };
+      }
+    },
+  );
+
+  ipcMain.handle(
     ipcChannels.naverAttachImages,
     async (event, input: unknown) => {
       requireTrustedSender(event);
@@ -2449,7 +2581,219 @@ function registerIpc(): void {
       };
     }
   });
+  ipcMain.handle(ipcChannels.openAiModelList, async (event) => {
+    requireTrustedSender(event);
+
+    try {
+      const apiKey = await readOpenAiCredential(
+        getOpenAiCredentialPath(),
+        safeStorage,
+      );
+
+      if (!apiKey) {
+        return {
+          ok: false,
+          error: {
+            code: 'CREDENTIAL_MISSING',
+            message: '먼저 OpenAI API 키를 안전하게 저장해 주세요.',
+          },
+        };
+      }
+
+      const result = await listOpenAiModelIds(apiKey);
+
+      if (!result.ok) {
+        return {
+          ok: false,
+          error: {
+            code: result.code,
+            message: result.message,
+          },
+        };
+      }
+
+      return { ok: true, modelIds: result.modelIds };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'MODEL_LIST_FAILED',
+          message: '사용 가능한 OpenAI 모델을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+        },
+      };
+    }
+  });
+  ipcMain.handle(
+    ipcChannels.openAiGenerateDraft,
+    async (event, rawInput: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeOpenAiGeneration) {
+        return {
+          ok: false,
+          code: 'GENERATION_IN_PROGRESS',
+          message: '이미 콘텐츠를 생성하고 있습니다. 완료되거나 중단된 뒤 다시 시도해 주세요.',
+        };
+      }
+
+      try {
+        const input = normalizeBlogGenerationRequest(rawInput);
+        const [apiKey, profile] = await Promise.all([
+          readOpenAiCredential(getOpenAiCredentialPath(), safeStorage),
+          readBrandProfile(getBrandProfilePath(input.userId)),
+        ]);
+
+        if (!apiKey) {
+          return {
+            ok: false,
+            code: 'CREDENTIAL_MISSING',
+            message: '먼저 OpenAI API 키를 안전하게 저장해 주세요.',
+          };
+        }
+
+        if (!profile) {
+          return {
+            ok: false,
+            code: 'BRAND_PROFILE_MISSING',
+            message: '먼저 브랜드 프로필의 필수 정보를 저장해 주세요.',
+          };
+        }
+
+        const controller = new AbortController();
+        activeOpenAiGeneration = controller;
+
+        try {
+          return await generateOpenAiBlogDraft(
+            apiKey,
+            input,
+            profile,
+            fetch,
+            controller.signal,
+          );
+        } finally {
+          if (activeOpenAiGeneration === controller) {
+            activeOpenAiGeneration = null;
+          }
+        }
+      } catch {
+        return {
+          ok: false,
+          code: 'GENERATION_INPUT_INVALID',
+          message: '글 생성 입력값을 확인한 뒤 다시 시도해 주세요.',
+        };
+      }
+    },
+  );
+  ipcMain.handle(
+    ipcChannels.openAiGenerateImages,
+    async (event, rawInput: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeOpenAiGeneration) {
+        return {
+          ok: false,
+          code: 'GENERATION_IN_PROGRESS',
+          message: '이미 콘텐츠를 생성하고 있습니다. 완료되거나 중단된 뒤 다시 시도해 주세요.',
+        };
+      }
+
+      try {
+        const input = normalizeBlogImageGenerationRequest(rawInput);
+        const [apiKey, profile] = await Promise.all([
+          readOpenAiCredential(getOpenAiCredentialPath(), safeStorage),
+          readBrandProfile(getBrandProfilePath(input.userId)),
+        ]);
+
+        if (!apiKey) {
+          return {
+            ok: false,
+            code: 'CREDENTIAL_MISSING',
+            message: '먼저 OpenAI API 키를 안전하게 저장해 주세요.',
+          };
+        }
+
+        if (!profile) {
+          return {
+            ok: false,
+            code: 'BRAND_PROFILE_MISSING',
+            message: '먼저 브랜드 프로필의 필수 정보를 저장해 주세요.',
+          };
+        }
+
+        const controller = new AbortController();
+        activeOpenAiGeneration = controller;
+
+        try {
+          return await generateOpenAiBlogImages(
+            apiKey,
+            input,
+            profile,
+            fetch,
+            controller.signal,
+          );
+        } finally {
+          if (activeOpenAiGeneration === controller) {
+            activeOpenAiGeneration = null;
+          }
+        }
+      } catch {
+        return {
+          ok: false,
+          code: 'GENERATION_INPUT_INVALID',
+          message: '이미지 생성 설정을 확인한 뒤 다시 시도해 주세요.',
+        };
+      }
+    },
+  );
+  ipcMain.handle(ipcChannels.openAiGenerationCancel, (event) => {
+    requireTrustedSender(event);
+    const cancelled = activeOpenAiGeneration !== null;
+    activeOpenAiGeneration?.abort();
+    return { ok: true, cancelled };
+  });
   registerMockIpc();
+  ipcMain.handle(ipcChannels.brandProfileGet, async (event, userId: unknown) => {
+    requireTrustedSender(event);
+
+    try {
+      return {
+        ok: true,
+        profile: await readBrandProfile(getBrandProfilePath(userId)),
+      };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'BRAND_PROFILE_READ_FAILED',
+          message: '저장된 브랜드 정보를 불러오지 못했습니다.',
+        },
+      };
+    }
+  });
+  ipcMain.handle(
+    ipcChannels.brandProfileSave,
+    async (event, userId: unknown, input: unknown) => {
+      requireTrustedSender(event);
+
+      try {
+        return {
+          ok: true,
+          profile: await saveBrandProfile(
+            getBrandProfilePath(userId),
+            input,
+          ),
+        };
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: 'BRAND_PROFILE_SAVE_FAILED',
+            message: '브랜드 정보를 저장하지 못했습니다. 필수 항목을 확인해 주세요.',
+          },
+        };
+      }
+    },
+  );
   registerNaverIpc();
 }
 

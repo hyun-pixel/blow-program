@@ -29,6 +29,14 @@ import type {
   WriterNavigationRepeatProgress,
   WriterNavigationRepeatResult,
 } from '../shared/compatibility-environment.js';
+import type {
+  BlogGenerationRequest,
+  OpenAiGenerationResult,
+} from '../main/openai-generation.js';
+import type {
+  BlogImageGenerationRequest,
+  OpenAiImageGenerationResult,
+} from '../main/openai-image-generation.js';
 
 interface PocErrorResponse {
   readonly ok: false;
@@ -176,6 +184,64 @@ type OpenAiConnectionResponse =
       };
     };
 
+type OpenAiModelListResponse =
+  | {
+      readonly ok: true;
+      readonly modelIds: readonly string[];
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type OpenAiGenerationCancelResponse = {
+  readonly ok: true;
+  readonly cancelled: boolean;
+};
+
+interface BrandProfileInput {
+  readonly brandName: string;
+  readonly industry: string;
+  readonly brandIntroduction: string;
+  readonly productsAndServices: string;
+  readonly contentDirection: string;
+  readonly activityRegion: string;
+  readonly priceInfo: string;
+  readonly businessHours: string;
+  readonly coreStrengths: string;
+  readonly targetCustomers: string;
+  readonly mustEmphasize: string;
+  readonly prohibitedPhrases: string;
+  readonly requiredPhrases: string;
+  readonly defaultCta: string;
+  readonly defaultTone: string;
+  readonly accentColor: string;
+  readonly imageStyle: string;
+  readonly phoneNumber: string;
+  readonly address: string;
+  readonly consultationLink: string;
+}
+
+interface BrandProfile extends BrandProfileInput {
+  readonly updatedAt: string;
+}
+
+type BrandProfileResponse =
+  | {
+      readonly ok: true;
+      readonly profile: BrandProfile | null;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
 declare global {
   interface Window {
     readonly blowSystem: {
@@ -187,6 +253,17 @@ declare global {
       save(apiKey: string): Promise<OpenAiCredentialResponse>;
       remove(): Promise<OpenAiCredentialResponse>;
       testConnection(): Promise<OpenAiConnectionResponse>;
+      listModels(): Promise<OpenAiModelListResponse>;
+      generateDraft(input: BlogGenerationRequest): Promise<OpenAiGenerationResult>;
+      generateImages(input: BlogImageGenerationRequest): Promise<OpenAiImageGenerationResult>;
+      cancelGeneration(): Promise<OpenAiGenerationCancelResponse>;
+    };
+    readonly blowBrandProfile: {
+      get(userId: string): Promise<BrandProfileResponse>;
+      save(
+        userId: string,
+        input: BrandProfileInput,
+      ): Promise<BrandProfileResponse>;
     };
     readonly blowPoc: {
       start(): Promise<PocErrorResponse | PocSuccessResponse>;
@@ -238,6 +315,9 @@ declare global {
       selectImages(): Promise<
         NaverErrorResponse | NaverImageSelectionSuccessResponse
       >;
+      prepareGeneratedImages(
+        dataUrls: readonly string[],
+      ): Promise<NaverErrorResponse | NaverImageSelectionSuccessResponse>;
       attachImages(
         imageIds: readonly string[],
         layout: NaverImageLayout,
