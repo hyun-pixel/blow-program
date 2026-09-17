@@ -1,7 +1,8 @@
 # BLOW MVP 결정 003 — 인증 메일 발송
 
-> 확인일: 2026-09-09
-> 상태: 사용자 승인 완료
+> 최초 확인일: 2026-09-09
+> 실행 상태 업데이트: 2026-09-17
+> 상태: 도메인 인증 완료·운영 연결 진행 중
 > 확정안: Amazon SES 서울 리전과 Supabase Auth 연동
 > 예상 발송비: 1,000건당 0.10–0.16달러부터
 
@@ -13,7 +14,7 @@ Supabase 기본 메일 서버는 테스트용이며 외부 사용자에게는 �
 
 ## 2. 확정안
 
-Amazon SES의 서울 리전 `ap-northeast-2`를 권장한다.
+Amazon SES의 서울 리전 `ap-northeast-2`를 사용한다.
 
 - Supabase가 지원하는 표준 SMTP로 연결할 수 있다.
 - 서울 리전에서 API·SMTP를 모두 제공한다.
@@ -36,18 +37,15 @@ AWS 계정 전체 권한을 가진 루트 키는 사용하지 않는다. SES 전
 
 비용과 정책은 2026-09-09 공식 자료 기준이며 변경될 수 있다. 환율, 세금과 AWS의 다른 서비스를 함께 사용할 때 발생하는 비용은 별도다.
 
-## 4. 필요한 발신 도메인
+## 4. 확정한 발신 도메인
 
-운영 전에 BLOW가 소유하고 DNS를 수정할 수 있는 도메인이 필요하다.
-
-권장 구조:
-
-- 인증 링크 도메인: `auth.사용도메인`
-- 발신 주소: `no-reply@auth.사용도메인`
-- 답장 주소: 실제 고객지원 메일
+- 공식 도메인과 SES 자격 증명: `flowaxblow.com`
+- 발신 주소: `no-reply@flowaxblow.com`
+- 사용자 지정 MAIL FROM: `bounce.flowaxblow.com`
+- 기본 구성 세트: `blow-auth`
 - 메일 종류: 회원가입 인증, 비밀번호 재설정, 이메일 변경
 
-SPF, DKIM과 DMARC를 설정한다. 처음에는 DMARC를 모니터링 모드로 시작하고 정상 발송을 확인한 뒤 격리 또는 거부 정책으로 강화한다.
+`flowaxblow.com`의 DKIM과 사용자 지정 MAIL FROM 인증을 완료했다. DMARC는 `_dmarc.flowaxblow.com`에 `v=DMARC1;p=none;`으로 시작하며, 정상 발송과 수신 결과를 충분히 확인한 뒤 격리 또는 거부 정책으로 강화한다. 발신 주소는 발송 전용이므로 별도 수신함을 만들지 않으며, 답장을 받을 고객지원 주소는 공식 웹사이트·고객지원 정책과 함께 별도로 확정한다.
 
 ## 5. 개인정보와 보안 기준
 
@@ -69,22 +67,24 @@ SPF, DKIM과 DMARC를 설정한다. 처음에는 DMARC를 모니터링 모드로
 - 24시간당 최대 200건, 초당 1건으로 제한된다.
 - 실제 사용자에게 보내기 전에 서울 리전에서 Production access를 신청해야 한다.
 - Production access 승인은 보장되지 않으며 사용 목적과 반송·불만 처리 방법을 설명해야 한다.
+- 같은 AWS 계정과 서울 리전을 사용하는 BLOW와 마진온에는 하나의 Production access 상태가 공통 적용된다. 별도 신청을 반복하지 않는다.
+- 두 서비스는 발송 한도·평판·청구를 공유하므로 한 서비스의 과도한 발송이나 불만 신고가 다른 서비스에 영향을 줄 수 있다.
 
 개발 중에는 Sandbox와 테스트 주소만 사용하고, 외부 베타 전에 운영 전환과 발송 도메인 검증을 완료한다.
 
 ## 7. Supabase 연결 설정
 
-승인 후 설정 경로:
+운영 연결 순서:
 
 1. AWS Console에서 리전을 “Asia Pacific (Seoul)”로 선택한다.
-2. SES에서 발신 도메인을 등록하고 DNS에 DKIM·SPF·DMARC 레코드를 추가한다.
-3. SES 전용 SMTP 자격증명을 만든다.
-4. Supabase Dashboard에서 `Authentication → Emails → SMTP Settings`를 연다.
-5. 서울 SES SMTP 호스트, 포트, 사용자명과 비밀번호를 입력한다.
-6. 발신자명은 “BLOW”, 발신 주소는 전용 `no-reply` 주소로 설정한다.
-7. 인증·재설정·이메일 변경 템플릿을 한국어로 작성한다.
-8. 링크·열람 추적을 끄고 Gmail, Naver Mail과 다음 메일에서 전달을 확인한다.
-9. 개발 검증 후 SES Production access를 신청한다.
+2. SES에서 인증 완료된 `flowaxblow.com`과 기본 구성 세트 `blow-auth`를 사용한다.
+3. 공식 웹사이트와 개인정보·반송 처리 안내를 공개한 뒤 SES Production access를 신청한다.
+4. 승인 후 BLOW 전용 최소 권한 SMTP 자격증명을 만든다.
+5. Supabase Dashboard에서 `Authentication → Emails → SMTP Settings`를 연다.
+6. 서울 SES SMTP 호스트, 포트, 사용자명과 비밀번호를 입력한다.
+7. 발신자명은 “BLOW”, 발신 주소는 `no-reply@flowaxblow.com`으로 설정한다.
+8. 인증·재설정·이메일 변경 템플릿을 한국어로 작성한다.
+9. 링크·열람 추적을 끄고 Gmail, Naver Mail과 다음 메일에서 전달을 확인한다.
 
 ## 8. 완료 기준
 
@@ -97,25 +97,34 @@ SPF, DKIM과 DMARC를 설정한다. 처음에는 DMARC를 모니터링 모드로
 - EML-07: AWS 비용 알림과 월 지출 한도가 설정된다.
 - EML-08: 개인정보처리방침에 메일 발송 위탁·처리 항목이 반영된다.
 
-## 9. 승인 후 실행 순서
+## 9. 현재 실행 상태
 
-1. 사용할 제품 도메인과 DNS 관리 권한을 확인한다.
-2. AWS 계정의 루트 MFA와 비용 알림을 설정한다.
-3. 서울 리전 SES Sandbox에서 발신 도메인과 시험 주소를 검증한다.
+완료:
+
+1. `flowaxblow.com` 구매와 호스팅케이알 DNS 관리 권한 확인
+2. AWS 루트 MFA와 계정 전체 제로 지출 비용 알림 설정
+3. 서울 리전 SES Essentials와 발신 도메인·시험 주소 검증
+4. DKIM CNAME 3개, DMARC TXT, MAIL FROM MX·SPF TXT 등록과 공개 DNS 확인
+5. `bounce.flowaxblow.com` MAIL FROM 인증
+6. `blow-auth` 구성 세트 생성, `Service=BLOW` 태그와 도메인 기본 구성 세트 연결
+
+남은 순서:
+
+1. `flowaxblow.com`에 제품 소개·개인정보처리방침·이용약관·연락처를 포함한 공식 웹사이트를 HTTPS로 공개한다.
+2. 서울 리전 SES Production access를 신청한다. 같은 계정·리전의 마진온과 승인 상태를 공유한다.
+3. 루트 키가 아닌 BLOW 전용 최소 권한 SMTP 자격증명을 생성한다.
 4. Supabase 개발 프로젝트의 사용자 지정 SMTP에 연결한다.
-5. 세 종류의 인증 메일과 오류 조건을 테스트한다.
-6. 개인정보 고지와 반송 처리 절차를 확정한다.
-7. 외부 베타 직전에 Production access를 신청한다.
+5. 가입 인증·비밀번호 재설정·이메일 변경 템플릿과 오류 조건을 테스트한다.
+6. Gmail, Naver Mail과 다음 메일에서 SPF·DKIM·DMARC, 링크 동작과 수신 결과를 확인한다.
+7. 반송·불만·억제 목록 처리 절차와 개인정보 고지를 확정한다.
 
-## 10. 아직 실행하지 않는 작업
+## 10. 서비스 분리 원칙
 
-- AWS 계정 생성과 카드 등록
-- 도메인 구매 또는 DNS 변경
-- SES Production access 신청
-- SMTP 비밀번호 생성·저장
-- 실제 사용자 이메일 발송
-
-이 작업은 제품 도메인을 확정하고 실제 구축을 시작할 때 진행한다.
+- BLOW와 마진온은 같은 AWS 계정과 서울 리전을 사용한다.
+- BLOW는 `flowaxblow.com`, `blow-auth`와 BLOW 전용 SMTP 자격증명을 사용한다.
+- 마진온은 `majin-on.com`, `marginon-auth`와 마진온 전용 SMTP 자격증명을 사용한다.
+- 두 서비스의 구성 세트와 발송량을 기준으로 예상 비용을 구분하지만 AWS 청구서 자체는 계정 단위로 합산된다.
+- CloudWatch 이벤트 게시처럼 별도 비용이 발생할 수 있는 통계 기능은 필요성이 확인되기 전에는 활성화하지 않는다.
 
 ## 11. 공식 자료
 

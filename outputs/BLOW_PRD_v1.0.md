@@ -1,8 +1,8 @@
 # 블로우 제품 요구사항 정의서
 
 > 문서 버전: v1.0
-> 작성 기준일: 2026-09-09
-> 문서 상태: MVP 인터뷰·네이버 자동 입력 POC 반영본
+> 작성 기준일: 2026-09-17
+> 문서 상태: MVP 인터뷰·네이버 자동 입력 POC·AWS SES 실행 상태 반영본
 > 대상 독자: 서비스 기획자, UI·UX 디자이너, 데스크톱·백엔드 개발자, QA 담당자, 운영자
 > 관련 문서: `BLOW_NAVER_AUTOMATION_POC_RESULT_v1.0.md`, `BLOW_MVP_IMPLEMENTATION_PLAN_v1.0.md`, `BLOW_MVP_DECISION_001_NAVER_AUTOMATION_POLICY_v1.0.md`, `BLOW_MVP_DECISION_002_BACKEND_HOSTING_v1.0.md`, `BLOW_MVP_DECISION_003_AUTH_EMAIL_v1.0.md`, `BLOW_MVP_DECISION_004_ADMIN_MFA_v1.0.md`, `BLOW_MVP_DECISION_005_LEGAL_REVIEW_v1.0.md`, `BLOW_MVP_DECISION_006_WINDOWS_CODE_SIGNING_v1.0.md`, `BLOW_MVP_DECISION_007_WINDOWS_SUPPORT_v1.0.md`, `BLOW_MVP_DECISION_008_BETA_USERS_v1.0.md`
 
@@ -25,6 +25,16 @@
 5. 프로그램은 결과를 네이버 편집기에 입력하고 사용자가 네이버에서 최종 검수한다.
 6. 네이버의 추가 인증, 접근 제한 또는 예측하지 못한 화면을 우회하지 않는다.
 7. UI는 부드러운 크리에이터 도구의 분위기와 고밀도 업무용 대시보드의 효율을 결합한다.
+
+### 1.3 확정 인프라와 공식 도메인
+
+- 공식 도메인은 `flowaxblow.com`이며, 공식 소개 웹사이트 배포는 진행 전이다.
+- 회원 인증과 계정 데이터는 Supabase 서울 리전을 사용한다.
+- 인증 메일은 Amazon SES 서울 리전 `ap-northeast-2`에서 발송한다.
+- SES 발신 도메인 `flowaxblow.com`과 사용자 지정 MAIL FROM `bounce.flowaxblow.com`의 인증을 완료했고 DKIM·DMARC DNS를 게시했다.
+- 발신 주소는 `no-reply@flowaxblow.com`, 기본 구성 세트는 `blow-auth`를 사용한다.
+- AWS 계정과 서울 리전 발송 한도·평판·청구는 마진온과 공유하지만, 도메인 자격 증명·구성 세트·SMTP 자격증명과 애플리케이션 비밀정보는 서비스별로 분리한다.
+- 일반 사용자 발송을 위한 SES 프로덕션 액세스, BLOW 전용 SMTP 자격증명과 Supabase 사용자 지정 SMTP 연결은 아직 완료하지 않았다.
 
 ## 2. 제품 목표와 성공 정의
 
@@ -1104,8 +1114,8 @@ Windows 알림은 네이버 임시저장 완료, 사용자 확인 또는 추가 
 - 결제·거래 기록별 법정 보관 기간
 - 개인정보처리방침, 이용약관과 자동화 위험 동의 문구
 - Windows 설치파일 코드 서명 인증서와 배포 비용
-- 서버 공급자, 이메일 인증 서비스와 운영비
-- 제품 영문 표기, 로고, 상표와 도메인 중복 여부
+- Supabase·Amazon SES의 실제 사용량 기준 운영비와 SES 프로덕션 승인
+- 제품 영문 표기, 로고와 상표 중복 여부
 - OpenAI 모델 허용 목록과 모델별 기능 호환성 검증
 - 지원 가능한 네이버 스티커·인용구·구분선 디자인의 실제 범위
 
