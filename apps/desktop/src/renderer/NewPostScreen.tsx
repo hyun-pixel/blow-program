@@ -64,6 +64,19 @@ export function NewPostScreen({
   readonly onPrepareNaverDraft: (
     draft: GeneratedBlogDraft & {
       readonly images: readonly GeneratedBlogImage[];
+      readonly modelId: string;
+      readonly modelName: string;
+      readonly reasoningEffort: string;
+      readonly reasoningLabel: string;
+      readonly settings: {
+        readonly articleType: string;
+        readonly targetLength: number;
+        readonly useGeneratedImages: boolean;
+        readonly imageCount: number;
+        readonly imageAspectRatio: ImageAspectRatio;
+        readonly imageQualityMode: ImageQualityMode;
+        readonly imageStyle: string;
+      };
     },
   ) => void;
 }) {
@@ -1285,6 +1298,21 @@ export function NewPostScreen({
                 onClick={() => onPrepareNaverDraft({
                   ...generationResult.draft,
                   images: generatedImages,
+                  modelId,
+                  modelName: selectedModel?.displayName ?? modelId,
+                  reasoningEffort,
+                  reasoningLabel: reasoningEffort
+                    ? reasoningEffortLabels[reasoningEffort]
+                    : '',
+                  settings: {
+                    articleType,
+                    targetLength,
+                    useGeneratedImages,
+                    imageCount,
+                    imageAspectRatio,
+                    imageQualityMode,
+                    imageStyle: imageStyle.trim(),
+                  },
                 })}
               >
                 <FilePenLine aria-hidden="true" />

@@ -14,6 +14,7 @@ import {
   type DraftContent,
   type NaverBlogProfile,
   type NaverConnectionStatus,
+  type NaverSavedDraftOpenResult,
   type NaverDividerInsertionResult,
   type NaverDividerPosition,
   type NaverDividerStyleResult,
@@ -56,6 +57,10 @@ export type NaverRunnerFailureCode =
   | 'CHROME_NOT_FOUND'
   | 'PROFILE_IN_USE'
   | 'INVALID_BLOG_URL'
+  | 'DRAFT_LIST_CONTROL_NOT_FOUND'
+  | 'DRAFT_LIST_CONTROL_AMBIGUOUS'
+  | 'DRAFT_TITLE_NOT_FOUND'
+  | 'DRAFT_TITLE_AMBIGUOUS'
   | 'LOGIN_WAIT_TIMEOUT'
   | 'NAVER_AUTH_REQUIRED'
   | 'NAVER_PAGE_UNKNOWN'
@@ -289,6 +294,23 @@ export class NaverConnectionSession {
 
     try {
       return await this.adapter.openWriter(this.profile, this.writerHref);
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), {
+        cause: error,
+      });
+    }
+  }
+
+  async openSavedDraft(
+    savedWriterUrl: string,
+    content: DraftContent,
+  ): Promise<NaverSavedDraftOpenResult> {
+    try {
+      return await this.adapter.openSavedDraft(
+        this.profile,
+        savedWriterUrl,
+        validateDraftContent(content),
+      );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
         cause: error,

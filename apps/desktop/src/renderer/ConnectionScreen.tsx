@@ -2,6 +2,7 @@ import {
   Check,
   CheckCircle2,
   Circle,
+  CircleAlert,
   ExternalLink,
   FileText,
   Gauge,
@@ -297,12 +298,27 @@ function parseDraftParagraphs(value: string): readonly string[] {
 }
 
 export function ConnectionScreen({
+  userId,
   initialDraft,
 }: {
+  readonly userId: string;
   readonly initialDraft?: {
     readonly title: string;
     readonly body: string;
     readonly images: readonly GeneratedBlogImage[];
+    readonly modelId: string;
+    readonly modelName: string;
+    readonly reasoningEffort: string;
+    readonly reasoningLabel: string;
+    readonly settings: {
+      readonly articleType: string;
+      readonly targetLength: number;
+      readonly useGeneratedImages: boolean;
+      readonly imageCount: number;
+      readonly imageAspectRatio: 'landscape' | 'portrait' | 'square';
+      readonly imageQualityMode: 'economy' | 'quality';
+      readonly imageStyle: string;
+    };
   } | undefined;
 }) {
   const [blogUrl, setBlogUrl] = useState('');
@@ -328,6 +344,7 @@ export function ConnectionScreen({
     useState<NaverEditorInputResult | null>(null);
   const [draftSaveResult, setDraftSaveResult] =
     useState<NaverDraftSaveResult | null>(null);
+  const [historySaveWarning, setHistorySaveWarning] = useState<string | null>(null);
   const [interactionResult, setInteractionResult] =
     useState<NaverUserInteractionResult | null>(null);
   const [interactionError, setInteractionError] = useState<string | null>(null);
@@ -1188,6 +1205,7 @@ export function ConnectionScreen({
   const saveDraft = async (): Promise<void> => {
     const operationVersion = beginOperation('save-draft');
     setDraftSaveResult(null);
+    setHistorySaveWarning(null);
     setError(null);
 
     try {
@@ -1199,6 +1217,23 @@ export function ConnectionScreen({
 
       if (response.ok) {
         setDraftSaveResult(response.result);
+        if (initialDraft) {
+          const historyResponse = await window.blowWorkHistory.add(userId, {
+            title: draftTitle,
+            body: draftBody,
+            modelId: initialDraft.modelId,
+            modelName: initialDraft.modelName,
+            reasoningEffort: initialDraft.reasoningEffort,
+            reasoningLabel: initialDraft.reasoningLabel,
+            imageCount: imageResult?.insertedCount ?? 0,
+            naverUrl: response.result.currentUrl,
+            settings: initialDraft.settings,
+          });
+
+          if (!historyResponse.ok) {
+            setHistorySaveWarning(historyResponse.error.message);
+          }
+        }
       } else {
         setError(response.error);
       }
@@ -1894,6 +1929,16 @@ export function ConnectionScreen({
             <p>
               아래 테스트 문안을 확인한 뒤 제목·본문 입력을 시작할 수 있습니다.
             </p>
+          </div>
+        </section>
+      ) : null}
+
+      {historySaveWarning ? (
+        <section className="message history-warning-message" role="status">
+          <CircleAlert aria-hidden="true" />
+          <div>
+            <h2>작업 내역만 기록하지 못했습니다</h2>
+            <p>{historySaveWarning} 네이버 임시저장 결과에는 영향이 없습니다.</p>
           </div>
         </section>
       ) : null}

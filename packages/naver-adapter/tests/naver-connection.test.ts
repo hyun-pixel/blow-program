@@ -112,6 +112,40 @@ describe('자동 입력 전 인증 상태 확인', () => {
       code: 'WRITER_NOT_READY',
     });
   });
+
+  it('임시글 이동 중 로그인이 필요하면 인증 완료 후 같은 주소를 다시 연다', async () => {
+    const writerUrl =
+      'https://blog.naver.com/PostWriteForm.naver?blogId=green_fork';
+    let currentUrl = '';
+    const controls = { count: vi.fn().mockResolvedValue(0) };
+    const page = {
+      goto: vi.fn().mockImplementation(async () => {
+        currentUrl = currentUrl ? writerUrl : 'https://nid.naver.com/nidlogin.login';
+      }),
+      url: vi.fn(() => currentUrl),
+      evaluate: vi.fn().mockResolvedValue(true),
+      frames: vi.fn().mockReturnValue([
+        { locator: vi.fn().mockReturnValue(controls) },
+      ]),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(page);
+    const waitForLogin = vi
+      .spyOn(adapter, 'waitForLoginAndVerify')
+      .mockResolvedValue({
+        stage: 'WRITER_LINK_READY',
+        message: '확인 완료',
+        registeredBlogId: profile.blogId,
+        actualBlogId: profile.blogId,
+        currentUrl: profile.canonicalUrl,
+        writerHref: writerUrl,
+      });
+
+    await expect(
+      adapter.openSavedDraft(profile, writerUrl, content),
+    ).rejects.toMatchObject({ code: 'DRAFT_LIST_CONTROL_NOT_FOUND' });
+    expect(waitForLogin).toHaveBeenCalledOnce();
+    expect(page.goto).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('자동 입력 전 네트워크 상태 확인', () => {
@@ -371,6 +405,7 @@ describe('로그인 완료 자동 확인', () => {
         },
       ]),
       goto,
+      isClosed: vi.fn().mockReturnValue(false),
       locator: vi.fn().mockReturnValue(controls),
       url: vi.fn(() => currentUrl),
     } as unknown as Page;
@@ -448,6 +483,52 @@ describe('로그인 완료 자동 확인', () => {
   });
 });
 describe('로그인 직후 이동 충돌 복구', () => {
+  it('로그인 탭이 닫혀도 같은 전용 Chrome의 새 탭에서 확인을 계속한다', async () => {
+    let closedLoginPage: Page;
+    let replacementPage: Page;
+    const context = {
+      pages: vi.fn(() => [closedLoginPage, replacementPage]),
+    };
+    closedLoginPage = {
+      context: vi.fn().mockReturnValue(context),
+      isClosed: vi.fn().mockReturnValue(true),
+      url: vi.fn(() => {
+        throw new Error('Target page has been closed');
+      }),
+    } as unknown as Page;
+    replacementPage = {
+      context: vi.fn().mockReturnValue(context),
+      isClosed: vi.fn().mockReturnValue(false),
+      url: vi.fn().mockReturnValue(
+        'https://section.blog.naver.com/BlogHome.naver',
+      ),
+    } as unknown as Page;
+    const adapter = new NaverConnectionAdapter(closedLoginPage);
+    const verify = vi.spyOn(adapter, 'verifyRegisteredBlog').mockResolvedValue({
+      stage: 'WRITER_LINK_READY',
+      message: '등록 블로그와 글쓰기 이동 경로를 확인했습니다.',
+      registeredBlogId: 'green_fork',
+      actualBlogId: 'green_fork',
+      currentUrl: 'https://section.blog.naver.com/BlogHome.naver',
+      writerHref: 'https://blog.naver.com/GoBlogWrite.naver',
+    });
+
+    const status = await adapter.waitForLoginAndVerify(
+      {
+        blogId: 'green_fork',
+        canonicalUrl: 'https://blog.naver.com/green_fork',
+      },
+      {
+        timeoutMs: 100,
+        pollIntervalMs: 1,
+        settleDelayMs: 0,
+      },
+    );
+
+    expect(verify).toHaveBeenCalledOnce();
+    expect(status.stage).toBe('WRITER_LINK_READY');
+  });
+
   it('네이버의 마지막 이동과 검증 이동이 겹치면 자동으로 다시 확인한다', async () => {
     let currentUrl = 'https://nid.naver.com/nidlogin.login';
     let loginPage: Page;

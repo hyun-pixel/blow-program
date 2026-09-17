@@ -18,6 +18,7 @@ import type {
   NaverQuotePosition,
   NaverQuoteStyleResult,
   NaverQuoteStyleSelection,
+  NaverSavedDraftOpenResult,
   NaverStickerCategoryResult,
   NaverStickerInsertionResult,
   NaverStickerPosition,
@@ -37,6 +38,10 @@ import type {
   BlogImageGenerationRequest,
   OpenAiImageGenerationResult,
 } from '../main/openai-image-generation.js';
+import type {
+  WorkHistoryEntry,
+  WorkHistoryInput,
+} from '../main/work-history.js';
 
 interface PocErrorResponse {
   readonly ok: false;
@@ -242,6 +247,27 @@ type BrandProfileResponse =
       };
     };
 
+type WorkHistoryListResponse =
+  | {
+      readonly ok: true;
+      readonly entries: readonly WorkHistoryEntry[];
+    }
+  | NaverErrorResponse;
+
+type WorkHistoryAddResponse =
+  | {
+      readonly ok: true;
+      readonly entry: WorkHistoryEntry;
+    }
+  | NaverErrorResponse;
+
+type WorkHistoryOpenDraftResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverSavedDraftOpenResult;
+    }
+  | NaverErrorResponse;
+
 declare global {
   interface Window {
     readonly blowSystem: {
@@ -264,6 +290,21 @@ declare global {
         userId: string,
         input: BrandProfileInput,
       ): Promise<BrandProfileResponse>;
+    };
+    readonly blowWorkHistory: {
+      list(userId: string): Promise<WorkHistoryListResponse>;
+      add(
+        userId: string,
+        input: WorkHistoryInput,
+      ): Promise<WorkHistoryAddResponse>;
+      remove(
+        userId: string,
+        entryId: string,
+      ): Promise<WorkHistoryListResponse>;
+      openDraft(
+        userId: string,
+        entryId: string,
+      ): Promise<WorkHistoryOpenDraftResponse>;
     };
     readonly blowPoc: {
       start(): Promise<PocErrorResponse | PocSuccessResponse>;

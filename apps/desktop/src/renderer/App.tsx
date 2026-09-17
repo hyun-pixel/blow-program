@@ -8,6 +8,7 @@ import {
   Circle,
   FileText,
   FilePenLine,
+  History as HistoryIcon,
   KeyRound,
   LoaderCircle,
   Play,
@@ -34,16 +35,30 @@ import { BrandProfileScreen } from './BrandProfileScreen.js';
 import { ConnectionScreen } from './ConnectionScreen.js';
 import { OpenAiSettingsScreen } from './OpenAiSettingsScreen.js';
 import { NewPostScreen } from './NewPostScreen.js';
+import { WorkHistoryScreen } from './WorkHistoryScreen.js';
 import { supabase } from './supabase.js';
 import type { GeneratedBlogImage } from '../main/openai-image-generation.js';
 
-type Screen = 'newPost' | 'connection' | 'openai' | 'brand' | 'automation' | 'safety';
+type Screen = 'newPost' | 'history' | 'connection' | 'openai' | 'brand' | 'automation' | 'safety';
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
 interface PreparedNaverDraft {
   readonly title: string;
   readonly body: string;
   readonly images: readonly GeneratedBlogImage[];
+  readonly modelId: string;
+  readonly modelName: string;
+  readonly reasoningEffort: string;
+  readonly reasoningLabel: string;
+  readonly settings: {
+    readonly articleType: string;
+    readonly targetLength: number;
+    readonly useGeneratedImages: boolean;
+    readonly imageCount: number;
+    readonly imageAspectRatio: 'landscape' | 'portrait' | 'square';
+    readonly imageQualityMode: 'economy' | 'quality';
+    readonly imageStyle: string;
+  };
 }
 
 const initialSnapshot: PocSnapshot = {
@@ -513,6 +528,15 @@ function Workspace({
               새 글 작성
             </button>
             <button
+              className={screen === 'history' ? 'nav-button is-active' : 'nav-button'}
+              type="button"
+              aria-current={screen === 'history' ? 'page' : undefined}
+              onClick={() => setScreen('history')}
+            >
+              <HistoryIcon aria-hidden="true" />
+              작업 내역
+            </button>
+            <button
               className={screen === 'connection' ? 'nav-button is-active' : 'nav-button'}
               type="button"
               aria-current={screen === 'connection' ? 'page' : undefined}
@@ -596,8 +620,16 @@ function Workspace({
                 setScreen('connection');
               }}
             />
+          ) : screen === 'history' ? (
+            <WorkHistoryScreen
+              userId={session.user.id}
+              onCreateNew={() => setScreen('newPost')}
+            />
           ) : screen === 'connection' ? (
-            <ConnectionScreen initialDraft={preparedNaverDraft ?? undefined} />
+            <ConnectionScreen
+              userId={session.user.id}
+              initialDraft={preparedNaverDraft ?? undefined}
+            />
           ) : screen === 'openai' ? (
             <OpenAiSettingsScreen />
           ) : screen === 'brand' ? (

@@ -56,6 +56,16 @@ import {
   saveBrandProfile,
 } from './brand-profile.js';
 import {
+  completePendingGeneratedImages,
+  discardPendingGeneratedImages,
+  pruneGeneratedImages,
+} from './generated-image-storage.js';
+import {
+  addWorkHistoryEntry,
+  deleteWorkHistoryEntry,
+  readWorkHistory,
+} from './work-history.js';
+import {
   getWindowsDisplayName,
   toDisplayScalePercent,
   type CompatibilityEnvironmentResult,
@@ -63,6 +73,10 @@ import {
 } from '../shared/compatibility-environment.js';
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.blow.desktop');
+}
 
 const ipcChannels = {
   systemAppVersion: 'system:app-version',
@@ -77,6 +91,10 @@ const ipcChannels = {
   brandProfileGet: 'brand-profile:get',
   openAiModelList: 'openai:model-list',
   brandProfileSave: 'brand-profile:save',
+  workHistoryList: 'work-history:list',
+  workHistoryAdd: 'work-history:add',
+  workHistoryDelete: 'work-history:delete',
+  workHistoryOpenDraft: 'work-history:open-draft',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
   mockState: 'poc:state',
@@ -206,6 +224,30 @@ function getBrandProfilePath(input: unknown): string {
   );
 }
 
+function getWorkHistoryPath(input: unknown): string {
+  const userId = normalizeBrandProfileUserId(input);
+
+  return join(
+    process.env.LOCALAPPDATA ?? app.getPath('userData'),
+    'BLOW',
+    'Profiles',
+    userId,
+    'work-history.json',
+  );
+}
+
+function getGeneratedImagesDirectory(): string {
+  return join(
+    process.env.LOCALAPPDATA ?? app.getPath('userData'),
+    'BLOW',
+    'GeneratedImages',
+  );
+}
+
+function getPendingGeneratedImagesDirectory(): string {
+  return join(getGeneratedImagesDirectory(), 'Pending');
+}
+
 async function prepareGeneratedNaverImages(input: unknown): Promise<readonly {
   readonly id: string;
   readonly path: string;
@@ -217,13 +259,10 @@ async function prepareGeneratedNaverImages(input: unknown): Promise<readonly {
   }
 
   const images = input.map(decodeGeneratedBlogImageDataUrl);
-  const directory = join(
-    process.env.LOCALAPPDATA ?? app.getPath('userData'),
-    'BLOW',
-    'GeneratedImages',
-  );
+  const directory = getPendingGeneratedImagesDirectory();
   const writtenPaths: string[] = [];
 
+  await discardPendingGeneratedImages(directory);
   await mkdir(directory, { recursive: true });
 
   try {
@@ -1737,9 +1776,15 @@ function registerNaverIpc(): void {
         return userInteractionResponse();
       }
 
+      const result = await session.saveDraft(draftSaveAbortController.signal);
+      await completePendingGeneratedImages(
+        getPendingGeneratedImagesDirectory(),
+        getGeneratedImagesDirectory(),
+      ).catch(() => undefined);
+
       return {
         ok: true,
-        result: await session.saveDraft(draftSaveAbortController.signal),
+        result,
       };
     } catch (error) {
       if (error instanceof NaverConnectionRunnerError) {
@@ -2794,7 +2839,170 @@ function registerIpc(): void {
       }
     },
   );
+  ipcMain.handle(ipcChannels.workHistoryList, async (event, userId: unknown) => {
+    requireTrustedSender(event);
+
+    try {
+      return {
+        ok: true,
+        entries: await readWorkHistory(getWorkHistoryPath(userId)),
+      };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'WORK_HISTORY_READ_FAILED',
+          message: '이 PC에 저장된 작업 내역을 불러오지 못했습니다.',
+        },
+      };
+    }
+  });
+  ipcMain.handle(
+    ipcChannels.workHistoryAdd,
+    async (event, userId: unknown, input: unknown) => {
+      requireTrustedSender(event);
+
+      try {
+        return {
+          ok: true,
+          entry: await addWorkHistoryEntry(getWorkHistoryPath(userId), input),
+        };
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: 'WORK_HISTORY_SAVE_FAILED',
+            message: '임시저장은 완료됐지만 작업 내역을 이 PC에 기록하지 못했습니다.',
+          },
+        };
+      }
+    },
+  );
+  ipcMain.handle(
+    ipcChannels.workHistoryDelete,
+    async (event, userId: unknown, entryId: unknown) => {
+      requireTrustedSender(event);
+
+      try {
+        return {
+          ok: true,
+          entries: await deleteWorkHistoryEntry(
+            getWorkHistoryPath(userId),
+            entryId,
+          ),
+        };
+      } catch {
+        return {
+          ok: false,
+          error: {
+            code: 'WORK_HISTORY_DELETE_FAILED',
+            message: '선택한 작업 내역을 삭제하지 못했습니다.',
+          },
+        };
+      }
+    },
+  );
+  ipcMain.handle(
+    ipcChannels.workHistoryOpenDraft,
+    async (event, userId: unknown, entryId: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeRun) {
+        return busyResponse();
+      }
+
+      const id = typeof entryId === 'string' ? entryId.trim() : '';
+      const entries = await readWorkHistory(getWorkHistoryPath(userId))
+        .catch(() => []);
+      const entry = entries.find((candidate) => candidate.id === id);
+
+      if (!entry?.naverUrl) {
+        return {
+          ok: false,
+          error: {
+            code: 'WORK_HISTORY_ENTRY_NOT_FOUND',
+            message: '열 수 있는 임시글 기록을 찾지 못했습니다.',
+          },
+        };
+      }
+
+      activeRun = true;
+      const stopVersion = naverStopVersion;
+      await closeAllBrowsers();
+
+      try {
+        const { profilePath } = getPocPaths();
+        const created = await NaverConnectionSession.create({
+          profilePath,
+          blogUrl: entry.naverUrl,
+          headless: false,
+        });
+
+        if (stopVersion !== naverStopVersion) {
+          await created.session.close();
+          return {
+            ok: false,
+            error: {
+              code: 'AUTOMATION_STOPPED',
+              message: '작업을 중단했습니다.',
+            },
+          };
+        }
+
+        activeNaverSession = created.session;
+        if (stopVersion !== naverStopVersion) {
+          return {
+            ok: false,
+            error: {
+              code: 'AUTOMATION_STOPPED',
+              message: '작업을 중단했습니다.',
+            },
+          };
+        }
+
+        return {
+          ok: true,
+          result: await created.session.openSavedDraft(
+            entry.naverUrl,
+            {
+              title: entry.title,
+              paragraphs: toDraftParagraphs(entry.body),
+            },
+          ),
+        };
+      } catch (error) {
+        if (error instanceof NaverConnectionRunnerError) {
+          if (error.failure.code === 'BROWSER_CLOSED') {
+            activeNaverSession = null;
+          }
+
+          return {
+            ok: false,
+            error: error.failure,
+          };
+        }
+
+        return {
+          ok: false,
+          error: {
+            code: 'SAVED_DRAFT_OPEN_FAILED',
+            message: '네이버 임시글을 열지 못했습니다. 연결 상태를 확인해 주세요.',
+          },
+        };
+      } finally {
+        activeRun = false;
+      }
+    },
+  );
   registerNaverIpc();
+}
+
+function toDraftParagraphs(body: string): readonly string[] {
+  return body
+    .replace(/\r\n?/g, '\n')
+    .split(/\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
 }
 
 function createMainWindow(): BrowserWindow {
@@ -2849,7 +3057,11 @@ if (!hasInstanceLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    await Promise.all([
+      discardPendingGeneratedImages(getPendingGeneratedImagesDirectory()),
+      pruneGeneratedImages(getGeneratedImagesDirectory()),
+    ]).catch(() => undefined);
     registerIpc();
     mainWindow = createMainWindow();
 

@@ -1,0 +1,31 @@
+appId: com.blow.desktop
+productName: BLOW
+asar: true
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: BLOW-Setup-${version}-x64.${ext}
+
+nsis:
+  include: build/installer.nsh
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: BLOW
+  uninstallDisplayName: BLOW
+  runAfterFinish: true

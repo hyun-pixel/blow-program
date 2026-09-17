@@ -22,6 +22,7 @@ import type {
   NaverQuotePosition,
   NaverQuoteStyleResult,
   NaverQuoteStyleSelection,
+  NaverSavedDraftOpenResult,
   NaverStickerCategoryResult,
   NaverStickerInsertionResult,
   NaverStickerPosition,
@@ -41,6 +42,10 @@ import type {
   BlogImageGenerationRequest,
   OpenAiImageGenerationResult,
 } from '../main/openai-image-generation.js';
+import type {
+  WorkHistoryEntry,
+  WorkHistoryInput,
+} from '../main/work-history.js';
 
 type NaverStateResponse =
   | {
@@ -349,6 +354,45 @@ type BrandProfileResponse =
         readonly message: string;
       };
     };
+
+type WorkHistoryListResponse =
+  | {
+      readonly ok: true;
+      readonly entries: readonly WorkHistoryEntry[];
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type WorkHistoryAddResponse =
+  | {
+      readonly ok: true;
+      readonly entry: WorkHistoryEntry;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
+
+type WorkHistoryOpenDraftResponse =
+  | {
+      readonly ok: true;
+      readonly result: NaverSavedDraftOpenResult;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+      };
+    };
 const ipcChannels = {
   systemAppVersion: 'system:app-version',
   systemDeviceHash: 'system:device-hash',
@@ -361,6 +405,10 @@ const ipcChannels = {
   openAiGenerationCancel: 'openai:generation-cancel',
   brandProfileGet: 'brand-profile:get',
   brandProfileSave: 'brand-profile:save',
+  workHistoryList: 'work-history:list',
+  workHistoryAdd: 'work-history:add',
+  workHistoryDelete: 'work-history:delete',
+  workHistoryOpenDraft: 'work-history:open-draft',
   openAiModelList: 'openai:model-list',
   mockStart: 'poc:start',
   mockCloseBrowser: 'poc:close-browser',
@@ -430,6 +478,26 @@ const blowBrandProfileApi = {
     input: BrandProfileInput,
   ): Promise<BrandProfileResponse> =>
     ipcRenderer.invoke(ipcChannels.brandProfileSave, userId, input),
+};
+
+const blowWorkHistoryApi = {
+  list: (userId: string): Promise<WorkHistoryListResponse> =>
+    ipcRenderer.invoke(ipcChannels.workHistoryList, userId),
+  add: (
+    userId: string,
+    input: WorkHistoryInput,
+  ): Promise<WorkHistoryAddResponse> =>
+    ipcRenderer.invoke(ipcChannels.workHistoryAdd, userId, input),
+  remove: (
+    userId: string,
+    entryId: string,
+  ): Promise<WorkHistoryListResponse> =>
+    ipcRenderer.invoke(ipcChannels.workHistoryDelete, userId, entryId),
+  openDraft: (
+    userId: string,
+    entryId: string,
+  ): Promise<WorkHistoryOpenDraftResponse> =>
+    ipcRenderer.invoke(ipcChannels.workHistoryOpenDraft, userId, entryId),
 };
 
 const blowPocApi = {
@@ -579,3 +647,4 @@ contextBridge.exposeInMainWorld('blowOpenAi', blowOpenAiApi);
 contextBridge.exposeInMainWorld('blowPoc', blowPocApi);
 contextBridge.exposeInMainWorld('blowNaver', blowNaverApi);
 contextBridge.exposeInMainWorld('blowBrandProfile', blowBrandProfileApi);
+contextBridge.exposeInMainWorld('blowWorkHistory', blowWorkHistoryApi);

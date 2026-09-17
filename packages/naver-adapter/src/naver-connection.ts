@@ -64,6 +64,10 @@ export type NaverConnectionStage =
 
 export type NaverConnectionFailureCode =
   | 'INVALID_BLOG_URL'
+  | 'DRAFT_LIST_CONTROL_NOT_FOUND'
+  | 'DRAFT_LIST_CONTROL_AMBIGUOUS'
+  | 'DRAFT_TITLE_NOT_FOUND'
+  | 'DRAFT_TITLE_AMBIGUOUS'
   | 'LOGIN_WAIT_TIMEOUT'
   | 'NAVER_AUTH_REQUIRED'
   | 'NAVER_NETWORK_ERROR'
@@ -91,6 +95,12 @@ export interface NaverConnectionStatus {
   readonly actualBlogId?: string;
   readonly currentUrl: string;
   readonly writerHref?: string;
+}
+
+export interface NaverSavedDraftOpenResult {
+  readonly stage: 'SAVED_DRAFT_OPENED';
+  readonly message: string;
+  readonly currentUrl: string;
 }
 
 export type NaverUserInteractionType =
@@ -417,6 +427,58 @@ export function isNaverWriterUrl(
   }
 }
 
+interface DraftListControlSnapshot {
+  readonly label: string;
+  readonly identity: string;
+  readonly aliases?: readonly string[];
+  readonly nearSaveControl?: boolean;
+}
+
+function compactControlText(value: string): string {
+  return value
+    .normalize('NFC')
+    .replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+}
+
+function isSavedDraftListControl(snapshot: DraftListControlSnapshot): boolean {
+  const labels = (snapshot.aliases ?? [snapshot.label]).map(compactControlText);
+
+  return (
+    labels.some((label) => (
+      /^임시저장(?:글)?\d+(?:개)?$/.test(label)
+      || /^저장\d+(?:개)?$/.test(label)
+      || (/^\d+$/.test(label) && snapshot.nearSaveControl === true)
+    ))
+    || (
+      labels.some((label) => label.startsWith('임시저장'))
+      && /(temporary|temp|draft)/i.test(snapshot.identity)
+      && /(list|layer|popup|count|load)/i.test(snapshot.identity)
+    )
+  );
+}
+
+export function selectUniqueSavedDraftListIndex(
+  snapshots: readonly DraftListControlSnapshot[],
+): number | null {
+  const matches = snapshots.flatMap((snapshot, index) =>
+    isSavedDraftListControl(snapshot) ? [index] : [],
+  );
+
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+export function selectUniqueSavedDraftTitleIndex(
+  labels: readonly string[],
+  expectedTitle: string,
+): number | null {
+  const title = compactControlText(expectedTitle);
+  const matches = labels.flatMap((label, index) =>
+    compactControlText(label).includes(title) ? [index] : [],
+  );
+
+  return matches.length === 1 ? matches[0]! : null;
+}
+
 async function readNaverNetworkAvailability(page: Page): Promise<boolean> {
   try {
     return await page.evaluate(() => navigator.onLine);
@@ -541,6 +603,24 @@ export class NaverConnectionAdapter {
     this.stickerAdapter = new NaverStickerAdapter(page);
   }
 
+  private adoptReplacementPage(): boolean {
+    if (!this.page.isClosed()) return false;
+
+    const pages = this.page.context().pages();
+
+    for (let index = pages.length - 1; index >= 0; index -= 1) {
+      const replacement = pages[index];
+
+      if (replacement && !replacement.isClosed()) {
+        this.page = replacement;
+        this.stickerAdapter = new NaverStickerAdapter(replacement);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   async openHome(profile: NaverBlogProfile): Promise<NaverConnectionStatus> {
     await this.page.goto(BLOG_HOME_URL, {
       waitUntil: 'domcontentloaded',
@@ -578,6 +658,7 @@ export class NaverConnectionAdapter {
     const settleDelayMs = options.settleDelayMs ?? 1_200;
     const stableDelayMs = Math.max(settleDelayMs, pollIntervalMs);
     const deadline = Date.now() + timeoutMs;
+    this.adoptReplacementPage();
     let verificationRequested = isNaverLoginUrl(this.page.url());
     let lastNonLoginUrl = '';
     let nonLoginUrlStableSince = 0;
@@ -586,6 +667,7 @@ export class NaverConnectionAdapter {
     await waitForDelay(settleDelayMs);
 
     while (Date.now() < deadline) {
+      this.adoptReplacementPage();
       const currentUrl = this.page.url();
       let shouldVerify = !verificationRequested;
 
@@ -615,9 +697,10 @@ export class NaverConnectionAdapter {
           }
         } catch (error) {
           transientFailureCount += 1;
+          const replacementAdopted = this.adoptReplacementPage();
 
           if (
-            this.page.isClosed() ||
+            (this.page.isClosed() && !replacementAdopted) ||
             transientFailureCount >= 5 ||
             (error instanceof NaverConnectionError &&
               !isRetryableVerificationError(error))
@@ -791,6 +874,243 @@ export class NaverConnectionAdapter {
       actualBlogId: profile.blogId,
       currentUrl: this.page.url(),
       writerHref: safeWriterHref,
+    };
+  }
+
+  async openSavedDraft(
+    profile: NaverBlogProfile,
+    savedWriterUrl: string,
+    content: DraftContent,
+  ): Promise<NaverSavedDraftOpenResult> {
+    if (!isNaverWriterUrl(savedWriterUrl, profile.blogId)) {
+      throw new NaverConnectionError(
+        'WRITER_NOT_READY',
+        '저장된 네이버 글쓰기 주소가 등록 블로그와 일치하지 않습니다.',
+      );
+    }
+
+    await this.page.goto(savedWriterUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30_000,
+    });
+    try {
+      await requireNaverWriterAccess(
+        this.page,
+        profile,
+        '네이버 글쓰기 화면을 확인할 수 없어 임시글을 열지 않았습니다.',
+      );
+    } catch (error) {
+      if (
+        !(error instanceof NaverConnectionError)
+        || error.code !== 'NAVER_AUTH_REQUIRED'
+      ) {
+        throw error;
+      }
+
+      const status = await this.waitForLoginAndVerify(profile);
+
+      if (status.stage !== 'WRITER_LINK_READY') {
+        throw new NaverConnectionError('WRITER_NOT_READY', status.message);
+      }
+
+      await this.page.goto(savedWriterUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000,
+      });
+      await requireNaverWriterAccess(
+        this.page,
+        profile,
+        '네이버 글쓰기 화면을 확인할 수 없어 임시글을 열지 않았습니다.',
+      );
+    }
+
+    const controlSnapshots: DraftListControlSnapshot[] = [];
+    const controlLocators: Locator[] = [];
+
+    for (const frame of this.page.frames()) {
+      const controls = frame.locator('button, a, [role="button"]');
+
+      for (let index = 0; index < await controls.count(); index += 1) {
+        const control = controls.nth(index);
+
+        if (!(await control.isVisible().catch(() => false))) continue;
+
+        const [
+          label,
+          ariaLabel,
+          title,
+          className,
+          id,
+          nearSaveControl,
+        ] = await Promise.all([
+          control.innerText().catch(() => ''),
+          control.getAttribute('aria-label'),
+          control.getAttribute('title'),
+          control.getAttribute('class'),
+          control.getAttribute('id'),
+          control.evaluate((element) => {
+            const compact = (value: string) => value.replace(/\s+/g, '');
+            let container = element.parentElement;
+
+            for (let depth = 0; container && depth < 2; depth += 1) {
+              const controls = container.querySelectorAll(
+                'button, a, [role="button"]',
+              );
+
+              for (const candidate of controls) {
+                if (candidate === element) continue;
+
+                const label = candidate.getAttribute('aria-label')
+                  || candidate.getAttribute('title')
+                  || candidate.textContent
+                  || '';
+
+                if (compact(label) === '저장') return true;
+              }
+
+              container = container.parentElement;
+            }
+
+            return false;
+          }).catch(() => false),
+        ]);
+        controlLocators.push(control);
+        controlSnapshots.push({
+          label: [label, ariaLabel, title].filter(Boolean).join(' '),
+          identity: [className, id].filter(Boolean).join(' '),
+          aliases: [label, ariaLabel, title].filter(
+            (value): value is string => Boolean(value),
+          ),
+          nearSaveControl,
+        });
+      }
+    }
+
+    const listIndex = selectUniqueSavedDraftListIndex(controlSnapshots);
+
+    if (listIndex === null) {
+      const matchCount = controlSnapshots.filter(isSavedDraftListControl).length;
+      throw new NaverConnectionError(
+        matchCount === 0
+          ? 'DRAFT_LIST_CONTROL_NOT_FOUND'
+          : 'DRAFT_LIST_CONTROL_AMBIGUOUS',
+        matchCount === 0
+          ? '네이버 임시저장 목록 버튼을 찾지 못했습니다.'
+          : '네이버 임시저장 목록 버튼이 여러 개라 임의로 선택하지 않았습니다.',
+      );
+    }
+
+    await controlLocators[listIndex]!.click();
+
+    const titleLabels: string[] = [];
+    const titleLocators: Locator[] = [];
+    const titlePages: Page[] = [];
+
+    for (let attempt = 0; attempt < 60 && titleLocators.length === 0; attempt += 1) {
+      titleLabels.length = 0;
+      titleLocators.length = 0;
+      titlePages.length = 0;
+
+      for (const page of this.page.context().pages()) {
+        if (page.isClosed()) continue;
+
+        for (const frame of page.frames()) {
+          const elements = frame.locator('body *');
+          const candidates = await elements.evaluateAll<Array<{
+            index: number;
+            label: string;
+          }>, string>(
+            (candidates, expectedTitle) => {
+              const compact = (value: string) => value
+                .normalize('NFC')
+                .replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+              const expected = compact(expectedTitle);
+              const readLabels = (element: Element) => [
+                element.textContent ?? '',
+                element.getAttribute('aria-label') ?? '',
+                element.getAttribute('title') ?? '',
+                element.getAttribute('alt') ?? '',
+                'value' in element
+                  ? String((element as HTMLInputElement).value ?? '')
+                  : '',
+              ].map(compact);
+
+              return candidates.flatMap((element, index) => {
+                const label = readLabels(element)
+                  .find((value) => value.includes(expected));
+
+                if (!label) return [];
+
+                const style = window.getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+
+                if (
+                  style.display === 'none'
+                  || style.visibility === 'hidden'
+                  || rect.width === 0
+                  || rect.height === 0
+                ) {
+                  return [];
+                }
+
+                const childContainsTitle = Array.from(element.children)
+                  .some((child) => readLabels(child)
+                    .some((value) => value.includes(expected)));
+
+                return childContainsTitle ? [] : [{ index, label }];
+              });
+            },
+            content.title,
+          ).catch(() => []);
+
+          for (const candidate of candidates) {
+            const control = elements.nth(candidate.index);
+
+            titleLocators.push(control);
+            titlePages.push(page);
+            titleLabels.push(candidate.label);
+          }
+        }
+      }
+
+      if (titleLocators.length === 0) {
+        await this.page.waitForTimeout(250);
+      }
+    }
+
+    const titleIndex = selectUniqueSavedDraftTitleIndex(
+      titleLabels,
+      content.title,
+    );
+
+    if (titleIndex === null) {
+      const matchCount = titleLabels.filter((label) =>
+        compactControlText(label).includes(compactControlText(content.title)),
+      ).length;
+      throw new NaverConnectionError(
+        matchCount === 0 ? 'DRAFT_TITLE_NOT_FOUND' : 'DRAFT_TITLE_AMBIGUOUS',
+        matchCount === 0
+          ? '임시저장 목록에서 이 글의 제목을 찾지 못했습니다.'
+          : '같은 제목의 임시글이 여러 개라 임의로 선택하지 않았습니다.',
+      );
+    }
+
+    const titlePage = titlePages[titleIndex]!;
+
+    if (titlePage !== this.page) {
+      this.page = titlePage;
+      this.stickerAdapter = new NaverStickerAdapter(titlePage);
+    }
+
+    await titleLocators[titleIndex]!.click();
+    const editor = new NaverEditorAdapter(this.page);
+    await editor.verifyCurrent(content);
+    await this.page.bringToFront();
+
+    return {
+      stage: 'SAVED_DRAFT_OPENED',
+      message: '네이버에서 저장한 임시글을 열고 내용을 다시 확인했습니다.',
+      currentUrl: this.page.url(),
     };
   }
 

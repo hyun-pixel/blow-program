@@ -89,6 +89,8 @@ export {
   normalizeUserInteractionType,
   normalizeWriterHref,
   parseNaverBlogUrl,
+  selectUniqueSavedDraftListIndex,
+  selectUniqueSavedDraftTitleIndex,
   selectUniqueWriterHref,
 } from './naver-connection.js';
 export type {
@@ -96,6 +98,7 @@ export type {
   NaverConnectionFailureCode,
   NaverConnectionStage,
   NaverConnectionStatus,
+  NaverSavedDraftOpenResult,
   NaverNetworkInterruptionTestResult,
   NaverStructureChangeTestResult,
   NaverUserInteractionMonitorOptions,

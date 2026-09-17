@@ -11,6 +11,7 @@
     "dev": "npm run build --workspace @blow/automation-core && npm run build --workspace @blow/naver-adapter && npm run dev --workspace @blow/desktop",
     "dev:admin": "npm run dev --workspace @blow/admin-web",
     "build": "npm run build --workspace @blow/automation-core && npm run build --workspace @blow/naver-adapter && npm run build --workspace @blow/desktop && npm run build --workspace @blow/admin-web",
+    "package:win": "npm run build --workspace @blow/automation-core && npm run build --workspace @blow/naver-adapter && npm run build --workspace @blow/desktop && npm run package:win --workspace @blow/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
