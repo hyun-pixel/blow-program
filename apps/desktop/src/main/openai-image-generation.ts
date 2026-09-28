@@ -134,7 +134,7 @@ function buildImagePrompt(
     `업종: ${profile.industry}`,
     `브랜드·사업 소개: ${profile.brandIntroduction}`,
     `상품·서비스: ${profile.productsAndServices}`,
-    `브랜드 이미지 스타일: ${profile.imageStyle || '자연스럽고 신뢰감 있는 사진'}`,
+    '기본 이미지 방향: 자연스럽고 신뢰감 있는 사진',
     input.style ? `이번 글의 추가 스타일: ${input.style}` : '',
     '이미지 안에 글자, 숫자, 로고, 워터마크, 문서, 증명서 또는 전후 비교 표시는 넣지 마세요.',
     '실제 고객, 실제 시술 결과 또는 실제 사건을 촬영한 증거처럼 보이게 만들지 마세요.',

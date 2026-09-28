@@ -1,5 +1,6 @@
 import {
   Building2,
+  BookOpen,
   Check,
   CheckCircle2,
   Link2,
@@ -9,7 +10,6 @@ import {
   FileText,
   FilePenLine,
   History as HistoryIcon,
-  KeyRound,
   LoaderCircle,
   Play,
   ShieldCheck,
@@ -33,33 +33,16 @@ import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './AuthScreen.js';
 import { BrandProfileScreen } from './BrandProfileScreen.js';
 import { ConnectionScreen } from './ConnectionScreen.js';
+import { WritingSteps } from './WritingSteps.js';
 import { OpenAiSettingsScreen } from './OpenAiSettingsScreen.js';
 import { NewPostScreen } from './NewPostScreen.js';
 import { WorkHistoryScreen } from './WorkHistoryScreen.js';
 import { supabase } from './supabase.js';
-import type { GeneratedBlogImage } from '../main/openai-image-generation.js';
 
-type Screen = 'newPost' | 'history' | 'connection' | 'openai' | 'brand' | 'automation' | 'safety';
+
+type Screen = 'newPost' | 'history' | 'connection' | 'brand' | 'automation' | 'safety';
 type StepStatus = 'complete' | 'current' | 'pending' | 'failed';
 
-interface PreparedNaverDraft {
-  readonly title: string;
-  readonly body: string;
-  readonly images: readonly GeneratedBlogImage[];
-  readonly modelId: string;
-  readonly modelName: string;
-  readonly reasoningEffort: string;
-  readonly reasoningLabel: string;
-  readonly settings: {
-    readonly articleType: string;
-    readonly targetLength: number;
-    readonly useGeneratedImages: boolean;
-    readonly imageCount: number;
-    readonly imageAspectRatio: 'landscape' | 'portrait' | 'square';
-    readonly imageQualityMode: 'economy' | 'quality';
-    readonly imageStyle: string;
-  };
-}
 
 const initialSnapshot: PocSnapshot = {
   current: 'IDLE',
@@ -412,46 +395,59 @@ function SafetyScreen() {
     <>
       <header className="page-head">
         <div>
-          <h1>안전 기준</h1>
+          <h1>사용 가이드</h1>
           <p>
-            실제 네이버 편집기 연결 전부터 지켜야 할 자동화 경계를 확인합니다.
+            처음 설정부터 글을 저장하는 순간까지, 필요한 순서를 정리했어요.
           </p>
         </div>
       </header>
 
+      <section className="guide-start" aria-labelledby="guide-start-heading">
+        <h2 id="guide-start-heading">처음이라면 이 순서대로</h2>
+        <ol className="guide-list">
+          <li><strong>블로그 세팅을 완료하세요</strong><p>왼쪽 ‘블로그 세팅’에서 필수 사항 10개를 입력하고 저장합니다. 주요 상품·서비스는 별도 영역에서 항목별로 추가하고 저장하세요. 선택 사항은 필요한 내용만 추가하세요.</p></li>
+          <li><strong>AI를 연결하세요</strong><p>‘블로그 세팅’ 아래의 ‘AI 연결’에서 본인의 OpenAI API 키를 저장하고 연결을 확인합니다. 글·이미지 생성 비용은 BLOW 이용료와 별도입니다.</p></li>
+          <li><strong>네이버를 먼저 연결하세요</strong><p>‘블로그 세팅’ 아래에서 블로그 주소를 입력하고 전용 Chrome에 로그인합니다. 등록한 블로그와 일치하는지 확인한 뒤 글 작성을 시작하세요.</p></li>
+          <li><strong>글별 설정을 준비하세요</strong><p>‘새 글 작성’에서 주제·글 유형·키워드·모델·이미지·꾸미기를 정합니다. 여러 글은 ‘목록에 추가’로 하나씩 담고, 한 글은 ‘이 글 자동 작성·저장’을 누르세요.</p></li>
+          <li><strong>자동 작성을 시작하세요</strong><p>실행 전 글 수·이미지 수와 API 비용 안내를 확인합니다. 프로그램이 한 글씩 생성·형식 검사·꾸미기·네이버 임시저장을 진행합니다. BLOW를 맨 앞으로 두고 PC를 조작하거나 절전·종료하지 마세요.</p></li>
+          <li><strong>저장된 글을 마지막에 확인하세요</strong><p>완료 후 ‘저장한 글 확인’ 또는 ‘작업 내역’에서 네이버 글을 열어 내용·사실관계·이미지 사용 권한을 검토하세요. 자동 검사는 글자 수와 키워드 등 형식만 확인하며 사실성이나 법적 적합성을 보장하지 않습니다.</p></li>
+        </ol>
+        <p className="guide-publish-note">BLOW는 임시저장까지만 돕습니다. 글을 공개하려면 네이버에서 내용을 확인하고 직접 발행해 주세요.</p>
+      </section>
+      <h2 className="guide-safety-heading">안심하고 사용하기</h2>
       <section className="safety-sheet">
         <div className="safety-section">
-          <h2>Chrome 분리</h2>
+          <h3>Chrome 분리</h3>
           <p>
             BLOW 전용 프로필만 사용합니다. 평소 사용하는 Chrome 프로필은 읽거나 조작하지 않습니다.
           </p>
         </div>
 
         <div className="safety-section">
-          <h2>클릭 전 확인</h2>
+          <h3>클릭 전 확인</h3>
           <p>
-            현재 주소, 화면 단계, 버튼 개수와 활성 상태를 모두 확인한 뒤에만 조작합니다.
+            올바른 블로그와 글쓰기 화면인지 확인한 뒤 내용을 입력합니다.
           </p>
         </div>
 
         <div className="safety-section">
-          <h2>불확실하면 중단</h2>
+          <h3>불확실하면 중단</h3>
           <p>
-            버튼을 찾지 못하거나 두 개 이상 발견하면 임의로 선택하지 않고 작업을 멈춥니다.
+            버튼을 찾지 못하거나 저장 결과가 불확실하면 해당 글과 남은 목록을 멈춥니다. 실패·중단된 글은 네이버 임시저장 목록을 먼저 확인하세요. 자동 재시도하지 않으므로 추가 비용과 중복 작성을 줄입니다.
           </p>
         </div>
 
         <div className="safety-section">
-          <h2>임시저장까지만</h2>
+          <h3>임시저장까지만</h3>
           <p>
-            자동화 명령과 선택자 목록에는 최종 발행 기능을 만들지 않습니다.
+            BLOW는 네이버에 글을 임시저장합니다. 공개 여부는 직접 결정할 수 있습니다.
           </p>
         </div>
 
         <div className="safety-section">
-          <h2>콘텐츠 비수집</h2>
+          <h3>콘텐츠 비수집</h3>
           <p>
-            API 키, 네이버 로그인 정보, 제목, 본문과 이미지는 BLOW 서버로 보내지 않습니다.
+            API 키와 작성 내용은 BLOW 서버에 저장하지 않습니다. 글·이미지 생성 시 입력 내용은 OpenAI로, 임시저장 시 콘텐츠는 네이버로 전송됩니다.
           </p>
         </div>
       </section>
@@ -474,11 +470,34 @@ function Workspace({
   readonly session: Session;
   readonly licenseEndsAt: string;
 }) {
-  const [screen, setScreen] = useState<Screen>('newPost');
-  const [preparedNaverDraft, setPreparedNaverDraft] =
-    useState<PreparedNaverDraft | null>(null);
+  const [screen, setScreen] = useState<Screen>('brand');
+  const [hasOpenedComposer, setHasOpenedComposer] = useState(false);
+  const [connectedBlogId, setConnectedBlogId] = useState<string | null>(null);
+  const [naverBusy, setNaverBusy] = useState(false);
+  const [connectionResetToken, setConnectionResetToken] = useState(0);
+  const [generationBusy, setGenerationBusy] = useState(false);
+  const [brandSaving, setBrandSaving] = useState(false);
+  const navigationBusy = naverBusy || generationBusy || brandSaving;
+
+  const openComposer = (): void => {
+    setHasOpenedComposer(true);
+    setScreen('newPost');
+  };
+
+  const openNaverSettings = (): void => {
+    setScreen('brand');
+    window.setTimeout(() => {
+      document.getElementById('brand-naver-heading')?.scrollIntoView({ block: 'start' });
+      document.getElementById('brand-naver-heading')?.focus({ preventScroll: true });
+    }, 0);
+  };
+
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+
+  useEffect(() => {
+    document.getElementById('main-content')?.focus({ preventScroll: true });
+  }, [screen]);
 
   const signOut = async (): Promise<void> => {
     if (!supabase) {
@@ -503,142 +522,119 @@ function Workspace({
       </a>
 
       <header className="titlebar">
-        <div className="wordmark">
-          <span className="wordmark-sign" aria-hidden="true">
-            B
-          </span>
-          <span>BLOW</span>
-        </div>
+        <button className="wordmark" type="button" disabled={navigationBusy} onClick={() => setScreen('brand')} aria-label="BLOW 블로그 세팅">
+          <span>blow</span><span className="wordmark-dot">.</span>
+        </button>
         <div className="titlebar-meta">
-          <span>계정 연결됨</span>
-          <strong>로컬 개발 모드</strong>
+          <span className="beta-label">비공개 베타</span>
+          <strong>블로그 글쓰기 도구</strong>
         </div>
       </header>
 
       <div className="shell">
         <aside className="sidebar" aria-label="주요 메뉴">
           <nav>
-            <button
-              className={screen === 'newPost' ? 'nav-button is-active' : 'nav-button'}
-              type="button"
-              aria-current={screen === 'newPost' ? 'page' : undefined}
-              onClick={() => setScreen('newPost')}
-            >
-              <FilePenLine aria-hidden="true" />
-              새 글 작성
-            </button>
-            <button
-              className={screen === 'history' ? 'nav-button is-active' : 'nav-button'}
-              type="button"
-              aria-current={screen === 'history' ? 'page' : undefined}
-              onClick={() => setScreen('history')}
-            >
-              <HistoryIcon aria-hidden="true" />
-              작업 내역
-            </button>
-            <button
-              className={screen === 'connection' ? 'nav-button is-active' : 'nav-button'}
-              type="button"
-              aria-current={screen === 'connection' ? 'page' : undefined}
-              onClick={() => setScreen('connection')}
-            >
-              <Link2 aria-hidden="true" />
-              네이버 연결
-            </button>
-            <button
-              className={screen === 'openai' ? 'nav-button is-active' : 'nav-button'}
-              type="button"
-              aria-current={screen === 'openai' ? 'page' : undefined}
-              onClick={() => setScreen('openai')}
-            >
-              <KeyRound aria-hidden="true" />
-              OpenAI 연결
-            </button>
-            <button
-              className={screen === 'brand' ? 'nav-button is-active' : 'nav-button'}
-              type="button"
-              aria-current={screen === 'brand' ? 'page' : undefined}
-              onClick={() => setScreen('brand')}
-            >
-              <Building2 aria-hidden="true" />
-              브랜드 프로필
-            </button>
-            <button
-              className={screen === 'automation' ? 'nav-button is-active' : 'nav-button'}
-              type="button"
-              aria-current={screen === 'automation' ? 'page' : undefined}
-              onClick={() => setScreen('automation')}
-            >
-              <PanelsTopLeft aria-hidden="true" />
-              자동 입력
-            </button>
-            <button
-              className={screen === 'safety' ? 'nav-button is-active' : 'nav-button'}
-              type="button"
-              aria-current={screen === 'safety' ? 'page' : undefined}
-              onClick={() => setScreen('safety')}
-            >
-              <ShieldCheck aria-hidden="true" />
-              안전 기준
-            </button>
+            <div className="sidebar-nav-group">
+              <button className={screen === 'brand' ? 'nav-button is-active' : 'nav-button'} type="button" disabled={navigationBusy} title="블로그 세팅" aria-current={screen === 'brand' ? 'page' : undefined} onClick={() => setScreen('brand')}>
+                <Building2 aria-hidden="true" /><span className="nav-label">블로그 세팅</span>
+              </button>
+              <button className={screen === 'newPost' || screen === 'connection' ? 'nav-button is-active' : 'nav-button'} type="button" disabled={navigationBusy} title="새 글 작성" aria-current={screen === 'newPost' || screen === 'connection' ? 'page' : undefined} onClick={() => { setHasOpenedComposer(true); setScreen('newPost'); }}>
+                <FilePenLine aria-hidden="true" /><span className="nav-label">새 글 작성</span>
+              </button>
+              <button className={screen === 'history' ? 'nav-button is-active' : 'nav-button'} type="button" disabled={navigationBusy} title="작업 내역" aria-current={screen === 'history' ? 'page' : undefined} onClick={() => setScreen('history')}>
+                <HistoryIcon aria-hidden="true" /><span className="nav-label">작업 내역</span>
+              </button>
+              <button className={screen === 'safety' ? 'nav-button is-active' : 'nav-button'} type="button" disabled={navigationBusy} title="사용 가이드" aria-current={screen === 'safety' ? 'page' : undefined} onClick={() => setScreen('safety')}>
+                <BookOpen aria-hidden="true" /><span className="nav-label">사용 가이드</span>
+              </button>
+              {import.meta.env.DEV ? (
+                <button className={screen === 'automation' ? 'nav-button is-active' : 'nav-button'} type="button" disabled={navigationBusy} title="연결 진단" aria-current={screen === 'automation' ? 'page' : undefined} onClick={() => setScreen('automation')}>
+                  <PanelsTopLeft aria-hidden="true" /><span className="nav-label">연결 진단</span>
+                </button>
+              ) : null}
+            </div>
           </nav>
 
           <div className="sidebar-account">
             <span className="sidebar-account-label">로그인 계정</span>
-            <strong title={session.user.email}>
-              {session.user.email ?? '이메일 확인 불가'}
-            </strong>
+            <strong title={session.user.email}>{session.user.email ?? '이메일 확인 불가'}</strong>
             {signOutError ? (
-              <span className="sidebar-account-error" role="alert">
-                {signOutError}
-              </span>
+              <span className="sidebar-account-error" role="alert">{signOutError}</span>
             ) : (
               <span>이용 종료 {formatLicenseEndDate(licenseEndsAt)}</span>
             )}
-            <button
-              type="button"
-              disabled={isSigningOut}
-              onClick={() => void signOut()}
-            >
-              {isSigningOut ? (
-                <LoaderCircle className="is-spinning" aria-hidden="true" />
-              ) : (
-                <LogOut aria-hidden="true" />
-              )}
-              {isSigningOut ? '로그아웃 중…' : '로그아웃'}
+            <button type="button" title="로그아웃" disabled={isSigningOut || navigationBusy} onClick={() => void signOut()}>
+              {isSigningOut ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <LogOut aria-hidden="true" />}
+              <span>{isSigningOut ? '로그아웃 중…' : '로그아웃'}</span>
             </button>
           </div>
         </aside>
 
         <main id="main-content" className="main" tabIndex={-1}>
-          {screen === 'newPost' ? (
-            <NewPostScreen
-              userId={session.user.id}
-              onOpenBrandProfile={() => setScreen('brand')}
-              onPrepareNaverDraft={(draft) => {
-                setPreparedNaverDraft(draft);
-                setScreen('connection');
-              }}
-            />
-          ) : screen === 'history' ? (
-            <WorkHistoryScreen
-              userId={session.user.id}
-              onCreateNew={() => setScreen('newPost')}
-            />
-          ) : screen === 'connection' ? (
+          <div hidden={screen !== 'brand'}>
+            <BrandProfileScreen userId={session.user.id} onBusyChange={setBrandSaving} onContinue={() => {
+              document.getElementById('brand-ai-heading')?.scrollIntoView({ block: 'start' });
+              document.getElementById('openai-api-key')?.focus({ preventScroll: true });
+            }} />
+            <section className="brand-ai-section" aria-labelledby="brand-ai-heading">
+              <OpenAiSettingsScreen embedded onContinue={openNaverSettings} />
+            </section>
+          </div>
+
+          <div hidden={screen !== 'newPost'}>
+            {!connectedBlogId && !generationBusy ? (
+              <section className="compose-page" aria-labelledby="connection-required-heading">
+                <header className="page-head"><div><h1>새 글 작성</h1><p>어느 블로그에 쓸지 먼저 확인하고 글을 준비합니다.</p></div></header>
+                <WritingSteps current={1} />
+                <div className="new-post-profile-warning">
+                  <Link2 aria-hidden="true" />
+                  <div>
+                    <h2 id="connection-required-heading">네이버를 먼저 연결해 주세요</h2>
+                    <p>‘블로그 세팅’에서 블로그 주소와 로그인 계정을 확인하면 글 작성을 시작할 수 있습니다. 작성 중이던 내용은 이 프로그램을 열어 둔 동안 유지됩니다.</p>
+                    <button className="button primary" type="button" onClick={openNaverSettings}>네이버 연결하러 가기</button>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+            <div hidden={!connectedBlogId && !generationBusy}>
+              {hasOpenedComposer ? (
+                <NewPostScreen
+                  key={session.user.id}
+                  userId={session.user.id}
+                  active={screen === 'newPost' && Boolean(connectedBlogId)}
+                  connectedBlogId={connectedBlogId}
+                  onBusyChange={setGenerationBusy}
+                  onOpenBrandProfile={() => setScreen('brand')}
+                  onReviewSaved={() => setScreen('history')}
+                />
+              ) : null}
+            </div>
+          </div>
+
+          <div className={screen === 'brand' ? 'brand-naver-section' : undefined} hidden={screen !== 'brand' && screen !== 'connection'}>
             <ConnectionScreen
               userId={session.user.id}
-              initialDraft={preparedNaverDraft ?? undefined}
+              mode="setup"
+              onConnectionChange={setConnectedBlogId}
+              onBusyChange={setNaverBusy}
+              resetToken={connectionResetToken}
+              onContinue={openComposer}
+              onBack={openComposer}
             />
-          ) : screen === 'openai' ? (
-            <OpenAiSettingsScreen />
-          ) : screen === 'brand' ? (
-            <BrandProfileScreen userId={session.user.id} />
+          </div>
+
+          {screen === 'history' ? (
+            <WorkHistoryScreen
+              userId={session.user.id}
+              onCreateNew={openComposer}
+              onBusyChange={setNaverBusy}
+              onNaverSessionChange={() => setConnectionResetToken((token) => token + 1)}
+            />
           ) : screen === 'automation' ? (
             <AutomationScreen />
-          ) : (
+          ) : screen === 'safety' ? (
             <SafetyScreen />
-          )}
+          ) : null}
         </main>
       </div>
     </div>
@@ -743,10 +739,7 @@ function AccountStatusScreen({
     <main className="auth-page">
       <section className="auth-card" aria-labelledby="account-status-heading">
         <div className="auth-brand" aria-label="BLOW">
-          <span className="wordmark-sign" aria-hidden="true">
-            B
-          </span>
-          <strong>BLOW</strong>
+          <span>blow</span><span className="wordmark-dot">.</span>
         </div>
         <header className="auth-heading">
           <h1 id="account-status-heading">{content.title}</h1>

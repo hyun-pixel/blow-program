@@ -1,0 +1,11 @@
+{
+  "checks": [
+    "Brand settings labels, inputs, buttons and headings use the requested font",
+    "Korean headings really render with the embedded custom font",
+    "Composer and writing queue inherit the same font",
+    "History and guide use the same font",
+    "375px, landscape and 200% text size preserve layout",
+    "Login screen uses the same embedded font"
+  ],
+  "failures": []
+}

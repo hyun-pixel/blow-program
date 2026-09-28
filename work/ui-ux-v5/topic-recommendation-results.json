@@ -1,0 +1,13 @@
+{
+  "passed": [
+    "Initial state, cost disclosure, default connected model and three distinct suggestions",
+    "Select, keyboard apply, restore and retry preserve original seed without generating the blog",
+    "Manual topic change starts a fresh recommendation set",
+    "API errors preserve all previous options and input without automatic retries",
+    "Single in-flight request locks competing actions; cancel ignores late results",
+    "Selected model effort is used and recommendation survives navigation",
+    "Suggestion cards stay vertical without horizontal overflow on desktop/tablet/mobile",
+    "Chosen content is passed unchanged to existing blog generation"
+  ],
+  "errors": []
+}

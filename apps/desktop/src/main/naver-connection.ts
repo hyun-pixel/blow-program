@@ -220,7 +220,7 @@ export class NaverConnectionSession {
   private constructor(
     private context: BrowserContext | undefined,
     readonly profile: NaverBlogProfile,
-    private readonly adapter: NaverConnectionAdapter,
+    private adapter: NaverConnectionAdapter,
     private writerHref?: string,
   ) {}
 
@@ -281,6 +281,33 @@ export class NaverConnectionSession {
       throw new NaverConnectionRunnerError(classifyFailure(error), {
         cause: error,
       });
+    }
+  }
+
+  async prepareAutomaticWriter(blogId: string): Promise<NaverConnectionStatus> {
+    if (!this.context || blogId !== this.profile.blogId) {
+      throw new NaverConnectionRunnerError({
+        code: 'WRITER_NOT_READY',
+        message: '저장할 블로그와 현재 연결이 다릅니다. 블로그 세팅에서 다시 연결해 주세요.',
+      });
+    }
+    // A new tab for every job preserves any prior draft, including uncertain/partial saves.
+    // Never navigate away from or clear an existing user's editor.
+    try {
+      const page = await this.context.newPage();
+      const adapter = new NaverConnectionAdapter(page);
+      const status = await adapter.verifyRegisteredBlog(this.profile);
+      if (status.stage !== 'WRITER_LINK_READY' || !status.writerHref) {
+        await page.close();
+        return status;
+      }
+      const writer = await adapter.openWriter(this.profile, status.writerHref);
+      this.adapter = adapter;
+      this.writerHref = status.writerHref;
+      this.enteredContent = null;
+      return writer;
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyFailure(error), { cause: error });
     }
   }
 

@@ -27,6 +27,28 @@ const allowedRows = [
 ] as const;
 
 describe('allowed model options', () => {
+  it('curates three real model IDs and names without widening operator approval', () => {
+    const extra = {
+      ...allowedRows[0], model_id: 'gpt-6-astra', display_name: '다른 표시 이름',
+      allowed_reasoning_efforts: ['low', 'medium', 'high'], sort_order: 40,
+    };
+    const rows = [...allowedRows, extra, { ...extra, model_id: 'gpt-5.6-sol' }];
+    const models = getSelectableModels(parseAllowedModels(rows), [
+      'gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-6-astra', 'gpt-5.6-sol',
+    ]);
+    expect(models.map(({ modelId, displayName }) => [modelId, displayName])).toEqual([
+      ['gpt-6-astra', 'GPT-6 Astra'],
+      ['gpt-5.6-terra', 'GPT-5.6 Terra'],
+      ['gpt-5.6-luna', 'GPT-5.6 Luna'],
+    ]);
+    expect(models[0]?.allowedReasoningEfforts).not.toContain('none');
+    expect(getSelectableModels([], ['gpt-6-astra'])).toEqual([]);
+    expect(getSelectableModels(parseAllowedModels(rows), [])).toEqual([]);
+    expect(readSavedModelPreference(JSON.stringify({
+      modelId: 'gpt-5.6-sol', reasoningEffort: 'medium',
+    }), models)).toEqual({ preference: null, invalid: true });
+  });
+
   it('validates server rows and preserves only supported reasoning efforts', () => {
     const models = parseAllowedModels([
       ...allowedRows,

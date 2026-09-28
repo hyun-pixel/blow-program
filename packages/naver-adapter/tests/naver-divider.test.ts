@@ -636,3 +636,17 @@ describe('네이버 구분선 삽입', () => {
 });
 
 expect(NaverDividerError).toBeDefined();
+
+it('verifies repeated divider insertions against the same original paragraphs', async () => {
+  const paragraphs = Array.from({ length: 10 }, (_, index) => `${index + 1}번째 안내 문단입니다.`);
+  const { page } = createDividerPage({ paragraphs });
+  const adapter = new NaverDividerAdapter(page);
+
+  for (const paragraphNumber of Array.from({ length: 10 }, (_, index) => index + 1)) {
+    const result = await adapter.insertDivider(
+      paragraphs, paragraphNumber, 'after', 'default',
+    );
+    expect(result.paragraphNumber).toBe(paragraphNumber);
+    expect(result.dividerCount).toBe(paragraphNumber);
+  }
+});

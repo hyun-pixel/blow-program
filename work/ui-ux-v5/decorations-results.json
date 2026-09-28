@@ -1,0 +1,15 @@
+{
+  "results": [
+    "Random counts 1–10 replace all region/paragraph controls and survive navigation",
+    "Sequential quote batch locks editing/navigation, verifies all positions, and cannot repeat",
+    "Up to ten sequential divider insertions and independent sticker counts preserve quote results",
+    "Transfer uses content-aware boundaries and never separates headings from explanations",
+    "Short drafts display the reduced count and do not duplicate a boundary",
+    "A failed second insertion preserves partial progress and blocks retries even after other operations",
+    "Stopping an in-flight batch ignores its late response and never dispatches the next insertion",
+    "Counts have visible labels and keyboard selection capped at ten",
+    "Desktop/mobile/landscape, dark OS, reduced motion and 200% text stay legible without overflow"
+  ],
+  "errors": [],
+  "mode": "Local mock data only"
+}

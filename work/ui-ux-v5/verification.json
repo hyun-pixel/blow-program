@@ -1,0 +1,17 @@
+{
+  "results": [
+    "No start or standalone AI menu; brand contains AI with working focus and connection",
+    "All 10 sections are ordered in one column with clear gaps",
+    "Generation payload is unchanged and decoration choices transfer without external calls",
+    "Independent decorations do not require photos; preferred location survives editor entry",
+    "Unavailable requested design is blocked until explicitly changed",
+    "Insert quote then divider then sticker; other completions are not erased or duplicated",
+    "No-decoration and manual sticker paths remain usable",
+    "Desktop, narrow and dark OS modes retain light layout with no overflow",
+    "Expired login and mismatched blog block transfer without discarding generated text",
+    "Save runs once and completed transfer survives menu navigation",
+    "A second draft resets transfer state; a new editor needs explicit confirmation",
+    "Opening a historical draft invalidates the old connection but keeps the current text"
+  ],
+  "errors": []
+}

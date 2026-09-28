@@ -1,0 +1,12 @@
+{
+  "results": [
+    "New user: next action opens brand setup",
+    "Required validation keeps focus on first missing field",
+    "Collapsed optional controls retain entered values and unchanged request payload",
+    "Settings, history and guide remain reachable",
+    "Ready, missing-key, load-failure and nonempty-history states",
+    "Light appearance remains light with OS dark mode and reduced motion",
+    "Responsive home and form at desktop, narrow window and 200% equivalent width"
+  ],
+  "errors": []
+}

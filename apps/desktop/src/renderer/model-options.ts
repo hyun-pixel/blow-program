@@ -1,3 +1,10 @@
+// The writing menu is curated, but server approval and API-key availability still apply.
+export const writingModelNames: Readonly<Record<string, string>> = {
+  'gpt-5.6-luna': 'GPT-5.6 Luna',
+  'gpt-5.6-terra': 'GPT-5.6 Terra',
+  'gpt-6-astra': 'GPT-6 Astra',
+};
+
 export const reasoningEfforts = [
   'none',
   'low',
@@ -104,7 +111,8 @@ export function getSelectableModels(
   const available = new Set(availableModelIds);
 
   return allowedModels
-    .filter((model) => available.has(model.modelId))
+    .filter((model) => Object.hasOwn(writingModelNames, model.modelId) && available.has(model.modelId))
+    .map((model) => ({ ...model, displayName: writingModelNames[model.modelId]! }))
     .sort((left, right) => right.sortOrder - left.sortOrder);
 }
 

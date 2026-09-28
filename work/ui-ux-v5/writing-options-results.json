@@ -1,0 +1,13 @@
+{
+  "results": [
+    "Six requested lengths with 1800 default and keyboard selection",
+    "Removed keyword suggestions and per-post CTA; manual keywords and topic suggestions remain",
+    "Three real model names and supported reasoning levels",
+    "All six length values reach the existing generation payload unchanged",
+    "Each real model ID reaches generation without substitution",
+    "Key availability still filters options and invalidates unavailable saved preferences",
+    "An API key without an approved writing model shows a safe error"
+  ],
+  "errors": [],
+  "externalServices": "Blocked; preview fixtures only"
+}

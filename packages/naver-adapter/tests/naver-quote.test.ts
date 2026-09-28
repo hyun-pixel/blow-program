@@ -642,3 +642,17 @@ describe('네이버 인용구 삽입', () => {
 });
 
 expect(NaverQuoteError).toBeDefined();
+
+it('verifies repeated quote insertions against the same original paragraphs', async () => {
+  const paragraphs = Array.from({ length: 10 }, (_, index) => `${index + 1}번째 안내 문단입니다.`);
+  const { page } = createQuotePage({ paragraphs });
+  const adapter = new NaverQuoteAdapter(page);
+
+  for (const paragraphNumber of Array.from({ length: 10 }, (_, index) => index + 1)) {
+    const result = await adapter.insertQuote(
+      paragraphs, paragraphNumber, 'after', 'default',
+    );
+    expect(result.paragraphNumber).toBe(paragraphNumber);
+    expect(result.quoteCount).toBe(paragraphNumber);
+  }
+});

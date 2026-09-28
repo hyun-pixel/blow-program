@@ -77,10 +77,11 @@ BLOW는 미용실, 법률, 보험, 뷰티 등 브랜드 블로그 실무자가 �
 
 ### 글꼴
 
-- 기본: SUIT Variable
-- 대체: SUIT, Pretendard, Noto Sans KR, Segoe UI, sans-serif
+- Windows 사용자 앱 기본: Cafe24 Supermagic Regular v1.0 (2026-09-27 사용자 지정)
+- Windows 사용자 앱 대체: Noto Sans KR, Malgun Gothic, Segoe UI, sans-serif
+- 관리자 웹의 기존 SUIT 설정은 이번 사용자 앱 글꼴 변경 대상에 포함하지 않는다.
 - 앱 설치 파일에 글꼴을 포함해 외부 폰트 서버에 의존하지 않는다.
-- 사용 굵기: 400, 500, 600, 700
+- 사용자 앱 웹폰트의 실제 굵기는 400이다. 기존 제목·라벨의 굵기 지정과 크기·간격 계층은 유지하며 강조 굵기는 브라우저의 합성 굵기로 표시한다.
 - 숫자 표와 날짜에는 tabular-nums lining-nums를 적용한다.
 
 ### 크기 체계
@@ -324,6 +325,8 @@ BLOW는 미용실, 법률, 보험, 뷰티 등 브랜드 블로그 실무자가 �
 
 ## 13. 구현용 기본 토큰
 
+글꼴 토큰은 Windows 사용자 앱 기준이며, 관리자 웹의 기존 글꼴은 유지한다.
+
     :root {
       --color-primary-800: #1e3a8a;
       --color-primary-700: #1e40af;
@@ -356,7 +359,7 @@ BLOW는 미용실, 법률, 보험, 뷰티 등 브랜드 블로그 실무자가 �
       --radius-control: 0.5rem;
       --radius-card: 0.75rem;
       --radius-dialog: 1rem;
-      font-family: "SUIT Variable", SUIT, Pretendard, "Noto Sans KR", "Segoe UI", sans-serif;
+      font-family: "Cafe24 Supermagic", "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
       font-feature-settings: "kern" 1;
       text-rendering: optimizeLegibility;
     }
@@ -366,4 +369,5 @@ BLOW는 미용실, 법률, 보험, 뷰티 등 브랜드 블로그 실무자가 �
 - 자동 추천의 분홍·청록 팔레트와 Inter는 기존 PRD 및 한글 실무 도구의 성격과 충돌해 채택하지 않았다.
 - 자동 추천에서 확인된 평면적 구성, 적은 효과, 높은 정보 밀도와 짧은 상태 전환은 채택했다.
 - PRD의 #CBD5E1 테두리는 조작 요소 경계 대비가 부족해 장식용으로 제한하고 #64748B를 조작 요소 경계로 추가했다.
-- 제품의 핵심 사용 환경이 Windows 데스크톱이므로 SUIT를 앱에 포함하고 외부 폰트 요청을 피한다.
+- 최초에는 Windows 데스크톱 사용 환경을 고려해 SUIT를 앱에 포함했다.
+- 2026-09-27 사용자 요청으로 사용자 앱 전체 글꼴을 Cafe24 Supermagic Regular v1.0으로 변경했다. 원본 WOFF2와 저작권·라이선스를 앱에 포함하고 외부 폰트 요청은 하지 않는다.

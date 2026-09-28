@@ -22,9 +22,13 @@ function formatCreatedAt(value: string): string {
 export function WorkHistoryScreen({
   userId,
   onCreateNew,
+  onBusyChange,
+  onNaverSessionChange,
 }: {
   readonly userId: string;
   readonly onCreateNew: () => void;
+  readonly onBusyChange?: (busy: boolean) => void;
+  readonly onNaverSessionChange?: () => void;
 }) {
   const [entries, setEntries] = useState<readonly WorkHistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -77,14 +81,21 @@ export function WorkHistoryScreen({
     setOpeningId(entry.id);
     setErrorMessage(null);
     setOpenNotice(null);
-    const response = await window.blowWorkHistory.openDraft(userId, entry.id);
-
-    if (response.ok) {
-      setOpenNotice(response.result.message);
-    } else {
-      setErrorMessage(response.error.message);
+    onBusyChange?.(true);
+    onNaverSessionChange?.();
+    try {
+      const response = await window.blowWorkHistory.openDraft(userId, entry.id);
+      if (response.ok) {
+        setOpenNotice(response.result.message);
+      } else {
+        setErrorMessage(response.error.message);
+      }
+    } catch {
+      setErrorMessage('임시글을 열지 못했습니다. Chrome 상태를 확인한 뒤 다시 시도해 주세요.');
+    } finally {
+      setOpeningId(null);
+      onBusyChange?.(false);
     }
-    setOpeningId(null);
   };
 
   return (
@@ -95,7 +106,7 @@ export function WorkHistoryScreen({
           <p>이 PC에 저장된 최근 30일의 네이버 임시저장 완료 기록입니다.</p>
         </div>
         <div className="page-head-actions">
-          <button className="button primary" type="button" onClick={onCreateNew}>
+          <button className="button primary" type="button" disabled={Boolean(openingId)} onClick={onCreateNew}>
             새 글 작성
           </button>
         </div>
@@ -104,7 +115,7 @@ export function WorkHistoryScreen({
       <section className="history-retention-note">
         <FileClock aria-hidden="true" />
         <p>
-          글 제목과 본문, 사용 모델과 완료 단계만 로컬에 보관합니다. 토큰과 비용은 기록하지 않으며 30일이 지난 기록은 자동으로 삭제됩니다.
+          이 PC의 작업 기록은 30일 동안 보관됩니다. 여기서 기록을 삭제해도 네이버에 저장한 글은 삭제되지 않습니다.
         </p>
       </section>
 
@@ -152,9 +163,9 @@ export function WorkHistoryScreen({
                   <th scope="col">글 제목</th>
                   <th scope="col">상태</th>
                   <th scope="col">사용 모델</th>
-                  <th scope="col">추론 강도</th>
+                  <th scope="col">AI 검토 깊이</th>
                   <th scope="col">최종 단계</th>
-                  <th scope="col">행동</th>
+                  <th scope="col">글 관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -175,9 +186,9 @@ export function WorkHistoryScreen({
                       <td>
                         <div className="history-actions">
                           <button
-                            className="button primary"
+                            className="button secondary"
                             type="button"
-                            disabled={openingId === entry.id}
+                            disabled={Boolean(openingId)}
                             onClick={() => void openDraft(entry)}
                           >
                             {openingId === entry.id ? (
@@ -231,8 +242,12 @@ export function WorkHistoryScreen({
                                 <dd>{entry.settings.targetLength.toLocaleString('ko-KR')}자</dd>
                               </div>
                             </dl>
-                            <h3>저장한 본문</h3>
-                            <p>{entry.body}</p>
+                            <h2 className="history-body-heading">저장한 본문</h2>
+                            <div className="history-body">
+                              {entry.body.split(/\r?\n[ \t]*\r?\n/u).map((paragraph, index) => (
+                                <p key={index}>{paragraph}</p>
+                              ))}
+                            </div>
                           </div>
                         </td>
                       </tr>

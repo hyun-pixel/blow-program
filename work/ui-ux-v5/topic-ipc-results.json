@@ -1,0 +1,12 @@
+{
+  "passed": [
+    "openAiRecommendTopics: lock reserved before asynchronous reads; cross-action lock, cancel and recovery pass",
+    "openAiGenerateDraft: lock reserved before asynchronous reads; cross-action lock, cancel and recovery pass",
+    "openAiGenerateImages: lock reserved before asynchronous reads; cross-action lock, cancel and recovery pass",
+    "CREDENTIAL_MISSING: no generation, lock released",
+    "BRAND_PROFILE_MISSING: no generation, lock released",
+    "GENERATION_INPUT_INVALID: no generation, lock released",
+    "GENERATION_INPUT_INVALID: no generation, lock released",
+    "Untrusted sender rejected without acquiring the shared lock"
+  ]
+}

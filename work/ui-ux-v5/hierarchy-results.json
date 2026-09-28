@@ -1,0 +1,291 @@
+{
+  "passed": [
+    "Blog settings: page 32 / sections 24 / internal 18 / labels 16 and 32px field gaps",
+    "Embedded AI and Naver sections: 24px parent / 20px internal with 56px separation",
+    "All 10 composition sections share 24px headings, 16px inputs, 40px separation",
+    "Recommendations: consistent title/body hierarchy and spacious candidates",
+    "Generated article: visible paragraph spacing, original generation and transfer text unchanged",
+    "History empty state and guide use distinct page/section/internal heading sizes",
+    "Existing history text is displayed as separate paragraphs without data changes",
+    "All categories reflow at 768, 375, landscape, dark OS and 200% text size"
+  ],
+  "metrics": [
+    {
+      "name": "blog-settings",
+      "headings": [
+        {
+          "text": "블로그 세팅",
+          "level": "H1",
+          "size": "32px",
+          "weight": "750"
+        },
+        {
+          "text": "필수 사항",
+          "level": "H2",
+          "size": "24px",
+          "weight": "750"
+        },
+        {
+          "text": "주요 상품·서비스",
+          "level": "H2",
+          "size": "24px",
+          "weight": "750"
+        },
+        {
+          "text": "상품·서비스 1",
+          "level": "H3",
+          "size": "18px",
+          "weight": "700"
+        },
+        {
+          "text": "선택 사항",
+          "level": "H2",
+          "size": "24px",
+          "weight": "750"
+        },
+        {
+          "text": "글에 적용할 표현 기준",
+          "level": "H3",
+          "size": "18px",
+          "weight": "700"
+        },
+        {
+          "text": "작성한 정보는 이렇게 쓰여요",
+          "level": "H2",
+          "size": "20px",
+          "weight": "700"
+        },
+        {
+          "text": "AI 연결",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "OpenAI API 키 입력",
+          "level": "H3",
+          "size": "20px",
+          "weight": "700"
+        },
+        {
+          "text": "연결 상태",
+          "level": "H3",
+          "size": "20px",
+          "weight": "700"
+        },
+        {
+          "text": "네이버 연결",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "어느 블로그에 저장할까요?",
+          "level": "H3",
+          "size": "20px",
+          "weight": "700"
+        },
+        {
+          "text": "연결 순서",
+          "level": "H3",
+          "size": "20px",
+          "weight": "700"
+        }
+      ]
+    },
+    {
+      "name": "compose",
+      "headings": [
+        {
+          "text": "새 글 작성",
+          "level": "H1",
+          "size": "32px",
+          "weight": "750"
+        },
+        {
+          "text": "글 주제",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "글 유형",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "글 길이",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "키워드",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "상품·서비스",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "AI 모델과 검토 깊이",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "AI 이미지",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "인용구",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "스티커",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "구분선",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        }
+      ]
+    },
+    {
+      "name": "naver-transfer",
+      "headings": [
+        {
+          "text": "네이버 임시저장",
+          "level": "H1",
+          "size": "32px",
+          "weight": "750"
+        },
+        {
+          "text": "작성한 글을 가져왔어요",
+          "level": "H2",
+          "size": "16px",
+          "weight": "700"
+        },
+        {
+          "text": "미리 선택한 꾸미기",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "어느 블로그에 저장할까요?",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "연결 순서",
+          "level": "H2",
+          "size": "20px",
+          "weight": "700"
+        }
+      ]
+    },
+    {
+      "name": "history-empty",
+      "headings": [
+        {
+          "text": "작업 내역",
+          "level": "H1",
+          "size": "32px",
+          "weight": "750"
+        },
+        {
+          "text": "아직 저장된 작업 내역이 없습니다",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        }
+      ]
+    },
+    {
+      "name": "guide",
+      "headings": [
+        {
+          "text": "사용 가이드",
+          "level": "H1",
+          "size": "32px",
+          "weight": "750"
+        },
+        {
+          "text": "처음이라면 이 순서대로",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "안심하고 사용하기",
+          "level": "H2",
+          "size": "24px",
+          "weight": "700"
+        },
+        {
+          "text": "Chrome 분리",
+          "level": "H3",
+          "size": "18px",
+          "weight": "700"
+        },
+        {
+          "text": "클릭 전 확인",
+          "level": "H3",
+          "size": "18px",
+          "weight": "700"
+        },
+        {
+          "text": "불확실하면 중단",
+          "level": "H3",
+          "size": "18px",
+          "weight": "700"
+        },
+        {
+          "text": "임시저장까지만",
+          "level": "H3",
+          "size": "18px",
+          "weight": "700"
+        },
+        {
+          "text": "콘텐츠 비수집",
+          "level": "H3",
+          "size": "18px",
+          "weight": "700"
+        }
+      ]
+    },
+    {
+      "name": "history-detail",
+      "headings": [
+        {
+          "text": "작업 내역",
+          "level": "H1",
+          "size": "32px",
+          "weight": "750"
+        },
+        {
+          "text": "저장한 본문",
+          "level": "H2",
+          "size": "20px",
+          "weight": "700"
+        }
+      ]
+    }
+  ],
+  "errors": []
+}

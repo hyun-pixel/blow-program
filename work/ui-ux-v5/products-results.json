@@ -1,0 +1,17 @@
+{
+  "results": [
+    "Initial profile prerequisite is explained; removed headings and fields are absent",
+    "Individual add/remove controls manage rows with keyboard focus",
+    "Product-only save preserves both saved profile and unsaved main-field edits",
+    "Saved choices appear immediately in compose and reach generation unchanged",
+    "Manage button focuses the catalog; unsaved catalog changes do not leak through main save",
+    "Removing the selected product resets only that selection, retaining the writing draft",
+    "Price-only changes save on Enter without submitting main settings",
+    "Empty and duplicate entries are blocked without a save or lost input",
+    "Save errors retain rows; in-flight saves lock edits and navigation then recover",
+    "Main settings save errors also release navigation and preserve both sets of inputs",
+    "Catalog typography, focus targets and layout work on narrow, landscape, dark OS and enlarged text"
+  ],
+  "errors": [],
+  "mode": "Local mocks only; no external services or customer data"
+}

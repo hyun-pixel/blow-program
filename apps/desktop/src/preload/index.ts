@@ -38,6 +38,7 @@ import type {
   BlogGenerationRequest,
   OpenAiGenerationResult,
 } from '../main/openai-generation.js';
+import type { TopicRecommendationRequest, TopicRecommendationResult } from '../main/openai-topic-recommendation.js';
 import type {
   BlogImageGenerationRequest,
   OpenAiImageGenerationResult,
@@ -320,6 +321,7 @@ interface BrandProfileInput {
   readonly industry: string;
   readonly brandIntroduction: string;
   readonly productsAndServices: string;
+  readonly productPrices?: Readonly<Record<string, string>>;
   readonly contentDirection: string;
   readonly activityRegion: string;
   readonly priceInfo: string;
@@ -400,11 +402,13 @@ const ipcChannels = {
   openAiCredentialSave: 'openai:credential-save',
   openAiCredentialRemove: 'openai:credential-remove',
   openAiConnectionTest: 'openai:connection-test',
+  openAiRecommendTopics: 'openai:recommend-topics',
   openAiGenerateDraft: 'openai:generate-draft',
   openAiGenerateImages: 'openai:generate-images',
   openAiGenerationCancel: 'openai:generation-cancel',
   brandProfileGet: 'brand-profile:get',
   brandProfileSave: 'brand-profile:save',
+  brandProfileProductsSave: 'brand-profile:products-save',
   workHistoryList: 'work-history:list',
   workHistoryAdd: 'work-history:add',
   workHistoryDelete: 'work-history:delete',
@@ -417,6 +421,7 @@ const ipcChannels = {
   naverState: 'naver:state',
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
+  naverPrepareAutomaticWriter: 'naver:prepare-automatic-writer',
   naverEnterContent: 'naver:enter-content',
   naverListDividerStyles: 'naver:list-divider-styles',
   naverInsertDivider: 'naver:insert-divider',
@@ -458,6 +463,8 @@ const blowOpenAiApi = {
     ipcRenderer.invoke(ipcChannels.openAiConnectionTest),
   listModels: (): Promise<OpenAiModelListResponse> =>
     ipcRenderer.invoke(ipcChannels.openAiModelList),
+  recommendTopics: (input: TopicRecommendationRequest): Promise<TopicRecommendationResult> =>
+    ipcRenderer.invoke(ipcChannels.openAiRecommendTopics, input),
   generateDraft: (
     input: BlogGenerationRequest,
   ): Promise<OpenAiGenerationResult> =>
@@ -478,6 +485,8 @@ const blowBrandProfileApi = {
     input: BrandProfileInput,
   ): Promise<BrandProfileResponse> =>
     ipcRenderer.invoke(ipcChannels.brandProfileSave, userId, input),
+  saveProducts: (userId: string, items: readonly { readonly name: string; readonly price: string }[]): Promise<BrandProfileResponse> =>
+    ipcRenderer.invoke(ipcChannels.brandProfileProductsSave, userId, items),
 };
 
 const blowWorkHistoryApi = {
@@ -537,6 +546,7 @@ const blowNaverApi = {
   },
   verify: () => ipcRenderer.invoke(ipcChannels.naverVerify),
   openWriter: () => ipcRenderer.invoke(ipcChannels.naverOpenWriter),
+  prepareAutomaticWriter: (blogId: string) => ipcRenderer.invoke(ipcChannels.naverPrepareAutomaticWriter, blogId),
   enterContent: (content: DraftContent): Promise<NaverInputResponse> =>
     ipcRenderer.invoke(ipcChannels.naverEnterContent, content),
   listDividerStyles: (

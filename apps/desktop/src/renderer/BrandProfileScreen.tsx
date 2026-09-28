@@ -1,7 +1,6 @@
 import {
   CheckCircle2,
   Circle,
-  ChevronDown,
   HardDrive,
   LoaderCircle,
   Save,
@@ -9,6 +8,11 @@ import {
   XCircle,
 } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
+import { requiredBrandProfileFields, requiredBrandProfileLabels } from '../shared/brand-profile-requirements.js';
+
+import type { ProductPrices } from '../shared/product-services.js';
+
+import { BrandProductsEditor } from './BrandProductsEditor.js';
 
 interface ProfileForm {
   readonly brandName: string;
@@ -33,8 +37,8 @@ interface ProfileForm {
   readonly consultationLink: string;
 }
 
-type RequiredField = 'brandName' | 'industry' | 'brandIntroduction';
-type FieldWithError = RequiredField | 'consultationLink';
+type RequiredField = (typeof requiredBrandProfileFields)[number];
+type FieldWithError = RequiredField;
 type FieldErrors = Partial<Record<FieldWithError, string>>;
 
 const emptyProfile: ProfileForm = {
@@ -60,17 +64,9 @@ const emptyProfile: ProfileForm = {
   consultationLink: '',
 };
 
-const requiredFieldLabels: Record<RequiredField, string> = {
-  brandName: '브랜드명',
-  industry: '업종',
-  brandIntroduction: '브랜드·사업 소개',
-};
-
-const requiredFieldMessages: Record<RequiredField, string> = {
-  brandName: '브랜드명을 입력해 주세요.',
-  industry: '업종을 입력해 주세요.',
-  brandIntroduction: '브랜드·사업 소개를 입력해 주세요.',
-};
+const requiredFieldMessages = Object.fromEntries(
+  requiredBrandProfileFields.map((field) => [field, `${requiredBrandProfileLabels[field]} 항목을 입력해 주세요.`]),
+) as Record<RequiredField, string>;
 
 function formatSavedAt(value: string): string {
   return new Intl.DateTimeFormat('ko-KR', {
@@ -79,10 +75,10 @@ function formatSavedAt(value: string): string {
   }).format(new Date(value));
 }
 
-type OptionalField = Exclude<keyof ProfileForm, RequiredField>;
+type ProfileFieldKey = keyof ProfileForm;
 
-interface OptionalFieldDefinition {
-  readonly key: OptionalField;
+interface ProfileFieldDefinition {
+  readonly key: ProfileFieldKey;
   readonly label: string;
   readonly placeholder: string;
   readonly maxLength: number;
@@ -96,60 +92,73 @@ interface OptionalFieldDefinition {
 interface OptionalSection {
   readonly title: string;
   readonly description: string;
-  readonly fields: readonly OptionalFieldDefinition[];
+  readonly fields: readonly ProfileFieldDefinition[];
 }
+
+const additionalRequiredFields: readonly ProfileFieldDefinition[] = [
+  {
+    key: 'defaultTone',
+    label: '기본 말투',
+    placeholder: '예: 쉽고 친절한 존댓말',
+    maxLength: 300,
+    autoComplete: 'off',
+  },
+  {
+    key: 'businessHours',
+    label: '영업시간',
+    placeholder: '예: 평일 10:00–19:00, 일요일 휴무',
+    maxLength: 300,
+    multiline: true,
+  },
+  {
+    key: 'coreStrengths',
+    label: '핵심 강점과 차별점',
+    placeholder: '예: 예약제 운영, 10년 경력 담당자 상담',
+    maxLength: 1_000,
+    multiline: true,
+    wide: true,
+    help: '확인할 수 있는 사실만 입력하고 과장된 최상급 표현은 피하세요.',
+  },
+  {
+    key: 'targetCustomers',
+    label: '주요 고객',
+    placeholder: '예: 첫 본식을 준비하며 자연스러운 스타일을 원하는 예비 신부',
+    maxLength: 500,
+    multiline: true,
+    wide: true,
+  },
+  {
+    key: 'mustEmphasize',
+    label: '반드시 강조할 내용',
+    placeholder: '예: 모든 상담은 예약제로 운영',
+    maxLength: 1_000,
+    multiline: true,
+    wide: true,
+  },
+  {
+    key: 'phoneNumber',
+    label: '전화번호',
+    placeholder: '예: 02-1234-5678',
+    maxLength: 80,
+    inputType: 'tel',
+    autoComplete: 'tel',
+    help: '고객이 연락할 수 있는 브랜드의 공개 전화번호를 입력해 주세요.',
+  },
+  {
+    key: 'address',
+    label: '주소',
+    placeholder: '예: 서울특별시 강남구…',
+    maxLength: 300,
+    multiline: true,
+    autoComplete: 'street-address',
+    help: '공개 가능한 사업장 주소를 입력해 주세요. 방문 장소가 없다면 온라인 전용 등 실제 운영 형태를 적어 주세요.',
+  },
+];
 
 const optionalSections: readonly OptionalSection[] = [
   {
-    title: '운영 및 소개 정보',
-    description: '가격·영업시간과 브랜드를 설명하는 사실',
-    fields: [
-      {
-        key: 'productsAndServices',
-        label: '주요 상품·서비스',
-        placeholder: '예: 실손·건강보험 보장 점검, 자동차보험 상담',
-        maxLength: 1_500,
-        multiline: true,
-        wide: true,
-        help: '여러 개라면 한 줄에 하나씩 적어 주세요. 비워 두어도 됩니다.',
-      },
-      {
-        key: 'priceInfo',
-        label: '가격 정보',
-        placeholder: '예: 기본 상담 무료, 서비스별 가격은 상담 후 안내',
-        maxLength: 300,
-        multiline: true,
-        help: '현재 실제로 적용하는 가격과 조건만 입력해 주세요.',
-      },
-      {
-        key: 'businessHours',
-        label: '영업시간',
-        placeholder: '예: 평일 10:00–19:00, 일요일 휴무',
-        maxLength: 300,
-        multiline: true,
-      },
-      {
-        key: 'coreStrengths',
-        label: '핵심 강점과 차별점',
-        placeholder: '예: 예약제 운영, 10년 경력 담당자 상담',
-        maxLength: 1_000,
-        multiline: true,
-        wide: true,
-        help: '확인할 수 있는 사실만 입력하고 과장된 최상급 표현은 피하세요.',
-      },
-      {
-        key: 'targetCustomers',
-        label: '주요 고객',
-        placeholder: '예: 첫 본식을 준비하며 자연스러운 스타일을 원하는 예비 신부',
-        maxLength: 500,
-        multiline: true,
-        wide: true,
-      },
-    ],
-  },
-  {
     title: '글에 적용할 표현 기준',
-    description: '항상 강조하거나 사용하지 않을 문구',
+    description: '콘텐츠 방향과 글에 적용할 문구',
     fields: [
       {
         key: 'contentDirection',
@@ -159,14 +168,6 @@ const optionalSections: readonly OptionalSection[] = [
         multiline: true,
         wide: true,
         help: '모든 글에 공통으로 적용할 운영 방향만 적어 주세요.',
-      },
-      {
-        key: 'mustEmphasize',
-        label: '반드시 강조할 내용',
-        placeholder: '예: 모든 상담은 예약제로 운영',
-        maxLength: 1_000,
-        multiline: true,
-        wide: true,
       },
       {
         key: 'prohibitedPhrases',
@@ -187,93 +188,30 @@ const optionalSections: readonly OptionalSection[] = [
       },
     ],
   },
-  {
-    title: '연락 및 예약 정보',
-    description: '글 마지막 안내에 사용할 공개 정보',
-    fields: [
-      {
-        key: 'phoneNumber',
-        label: '전화번호',
-        placeholder: '예: 02-1234-5678',
-        maxLength: 80,
-        inputType: 'tel',
-        autoComplete: 'tel',
-      },
-      {
-        key: 'address',
-        label: '주소',
-        placeholder: '예: 서울특별시 강남구…',
-        maxLength: 300,
-        multiline: true,
-        autoComplete: 'street-address',
-      },
-      {
-        key: 'consultationLink',
-        label: '예약·상담 링크',
-        placeholder: '예: https://booking.naver.com/…',
-        maxLength: 2_048,
-        inputType: 'url',
-        autoComplete: 'url',
-        wide: true,
-        help: 'http:// 또는 https://로 시작하는 전체 주소를 입력해 주세요.',
-      },
-    ],
-  },
-  {
-    title: '이미지 기본 방향',
-    description: 'AI 이미지 생성 때 우선 적용할 색상과 분위기',
-    fields: [
-      {
-        key: 'accentColor',
-        label: '강조색',
-        placeholder: '예: 짙은 파란색, #1E40AF',
-        maxLength: 100,
-      },
-      {
-        key: 'imageStyle',
-        label: '이미지 스타일',
-        placeholder: '예: 밝은 자연광의 현실적인 매장 사진 분위기',
-        maxLength: 500,
-        multiline: true,
-        wide: true,
-      },
-    ],
-  },
 ];
 
-const optionalFieldKeys: readonly OptionalField[] = [
+const optionalFieldKeys: readonly ProfileFieldKey[] = [
   'activityRegion',
   'defaultCta',
-  'defaultTone',
   ...optionalSections.flatMap((section) => section.fields.map((field) => field.key)),
 ];
 
-function getConsultationLinkError(value: string): string | undefined {
-  const trimmedValue = value.trim();
-  if (!trimmedValue) return undefined;
-
-  try {
-    const url = new URL(trimmedValue);
-    if (url.protocol === 'http:' || url.protocol === 'https:') return undefined;
-  } catch {
-    // The message below covers invalid URL input without exposing technical details.
-  }
-
-  return '예약·상담 링크는 http:// 또는 https://로 시작하는 전체 주소로 입력해 주세요.';
-}
-
-function OptionalProfileField({
+function ProfileField({
   field,
   value,
   disabled,
+  required = false,
   errorMessage,
   onChange,
+  onBlur,
 }: {
-  readonly field: OptionalFieldDefinition;
+  readonly field: ProfileFieldDefinition;
   readonly value: string;
   readonly disabled: boolean;
+  readonly required?: boolean;
   readonly errorMessage?: string | undefined;
-  readonly onChange: (field: OptionalField, value: string) => void;
+  readonly onChange: (field: ProfileFieldKey, value: string) => void;
+  readonly onBlur?: (field: ProfileFieldKey) => void;
 }) {
   const inputId = `brand-${field.key}`;
   const helpId = field.help ? `${inputId}-help` : undefined;
@@ -284,15 +222,18 @@ function OptionalProfileField({
     <div className={`field-group ${field.wide ? 'is-wide' : ''}`}>
       <label htmlFor={inputId}>
         {field.label}
-        <span>선택</span>
+        <span>{required ? '필수' : '선택'}</span>
       </label>
       {field.multiline ? (
         <textarea
           id={inputId}
+          form="brand-profile-form"
           className="brand-textarea"
           value={value}
           maxLength={field.maxLength}
           disabled={disabled}
+          required={required}
+          onBlur={() => onBlur?.(field.key)}
           autoComplete={field.autoComplete}
           aria-invalid={Boolean(errorMessage)}
           aria-describedby={describedBy}
@@ -302,10 +243,13 @@ function OptionalProfileField({
       ) : (
         <input
           id={inputId}
+          form="brand-profile-form"
           type={field.inputType ?? 'text'}
           value={value}
           maxLength={field.maxLength}
           disabled={disabled}
+          required={required}
+          onBlur={() => onBlur?.(field.key)}
           autoComplete={field.autoComplete}
           aria-invalid={Boolean(errorMessage)}
           aria-describedby={describedBy}
@@ -327,15 +271,26 @@ function OptionalProfileField({
   );
 }
 
-export function BrandProfileScreen({ userId }: { readonly userId: string }) {
+export function BrandProfileScreen({ userId, onContinue, onBusyChange }: {
+  readonly userId: string;
+  readonly onContinue?: () => void;
+  readonly onBusyChange?: (busy: boolean) => void;
+}) {
   const [form, setForm] = useState<ProfileForm>(emptyProfile);
+  const [productPrices, setProductPrices] = useState<ProductPrices>({});
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isProductsSaving, setIsProductsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    onBusyChange?.(isSaving || isProductsSaving);
+    return () => onBusyChange?.(false);
+  }, [isSaving, isProductsSaving, onBusyChange]);
 
   useEffect(() => {
     let active = true;
@@ -347,9 +302,11 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
         if (response.profile) {
           const {
             updatedAt,
+            productPrices: savedPrices = {},
             ...savedProfile
           } = response.profile;
           setForm(savedProfile);
+          setProductPrices(savedPrices);
           setSavedAt(updatedAt);
         }
       } else {
@@ -371,37 +328,34 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
 
     if (
       (
-        (field === 'brandName' || field === 'industry' || field === 'brandIntroduction')
+        (field in requiredBrandProfileLabels)
         && value.trim()
       )
-      || field === 'consultationLink'
     ) {
       setFieldErrors((current) => ({ ...current, [field]: undefined }));
     }
   };
 
-  const validateField = (field: RequiredField): void => {
+  const validateField = (field: ProfileFieldKey): void => {
+    if (!(field in requiredBrandProfileLabels)) return;
     setFieldErrors((current) => ({
       ...current,
       [field]: form[field].trim()
         ? undefined
-        : requiredFieldMessages[field],
+        : requiredFieldMessages[field as RequiredField],
     }));
   };
 
   const saveProfile = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    const nextErrors = (Object.keys(requiredFieldLabels) as RequiredField[])
+    if (isSaving || isProductsSaving) return;
+    const nextErrors = requiredBrandProfileFields
       .reduce<FieldErrors>((errors, field) => {
         if (!form[field].trim()) {
           errors[field] = requiredFieldMessages[field];
         }
         return errors;
       }, {});
-    const consultationLinkError = getConsultationLinkError(form.consultationLink);
-    if (consultationLinkError) {
-      nextErrors.consultationLink = consultationLinkError;
-    }
 
 
     if (Object.keys(nextErrors).length > 0) {
@@ -415,34 +369,37 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
     setIsSaving(true);
     setNotice(null);
     setErrorMessage(null);
-    const response = await window.blowBrandProfile.save(userId, form);
+    try {
+      const response = await window.blowBrandProfile.save(userId, { ...form, productPrices });
 
-    if (response.ok && response.profile) {
-      const {
-        updatedAt,
-        ...savedProfile
-      } = response.profile;
-      setForm(savedProfile);
-      setSavedAt(updatedAt);
-      setIsDirty(false);
-      setFieldErrors({});
-      setNotice('다음 글부터 저장한 브랜드 정보를 기본값으로 사용합니다.');
-    } else {
-      setErrorMessage(
-        response.ok
-          ? '브랜드 정보를 저장하지 못했습니다.'
-          : response.error.message,
-      );
+      if (response.ok && response.profile) {
+        const {
+          updatedAt,
+          productPrices: savedPrices = {},
+          ...savedProfile
+        } = response.profile;
+        setForm(savedProfile);
+        setProductPrices(savedPrices);
+        setSavedAt(updatedAt);
+        setIsDirty(false);
+        setFieldErrors({});
+        setNotice('다음 글부터 저장한 브랜드 정보를 기본값으로 사용합니다.');
+      } else {
+        setErrorMessage(
+          response.ok
+            ? '브랜드 정보를 저장하지 못했습니다.'
+            : response.error.message,
+        );
+      }
+    } catch {
+      setErrorMessage('저장하지 못했습니다. 입력 내용은 유지됩니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsSaving(false);
   };
 
-  const hasRequiredFields = Boolean(
-    form.brandName.trim()
-    && form.industry.trim()
-    && form.brandIntroduction.trim(),
-  );
+  const requiredFieldCount = requiredBrandProfileFields.filter((field) => form[field].trim()).length;
+  const hasRequiredFields = requiredFieldCount === requiredBrandProfileFields.length;
   const optionalFieldCount = optionalFieldKeys
     .filter((field) => form[field].trim()).length;
   const statusLabel = isLoading
@@ -457,9 +414,9 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
     <>
       <header className="page-head">
         <div>
-          <h1>브랜드 프로필</h1>
+          <h1>블로그 세팅</h1>
           <p>
-            글마다 반복하지 않을 브랜드 기본 정보를 이 PC에 저장합니다.
+            브랜드 정보를 저장하고 AI와 네이버를 연결하세요. 준비가 끝나면 새 글을 작성할 수 있습니다.
           </p>
         </div>
       </header>
@@ -468,7 +425,7 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
         <div className="message error-message" role="alert">
           <XCircle aria-hidden="true" />
           <div>
-            <h2>브랜드 프로필 작업을 완료하지 못했습니다</h2>
+            <h2>블로그 세팅을 완료하지 못했습니다</h2>
             <p>{errorMessage}</p>
           </div>
         </div>
@@ -478,8 +435,13 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
         <div className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
-            <h2>브랜드 프로필 저장 완료</h2>
+            <h2>블로그 세팅 저장 완료</h2>
             <p>{notice}</p>
+            {onContinue && savedAt && !isDirty ? (
+              <button className="button secondary setup-next-button" type="button" onClick={onContinue}>
+                다음: AI 연결
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -487,201 +449,215 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
       <section
         className="connection-workbench brand-profile-workbench"
         aria-labelledby="brand-profile-heading"
-        aria-busy={isLoading || isSaving}
+        aria-busy={isLoading || isSaving || isProductsSaving}
       >
         <div className="connection-form-panel">
-          <header className="panel-heading compact">
+          <header className="panel-heading brand-category-heading">
             <div>
-              <h2 id="brand-profile-heading">브랜드 기본 정보</h2>
-              <p>사실에 근거한 정보만 입력하면 글 생성 때 일관되게 반영됩니다.</p>
+              <h2 id="brand-profile-heading">필수 사항</h2>
+              <p>아래 10개 항목을 모두 입력해 주세요. 상품·서비스 목록은 아래 별도 영역에서 저장합니다.</p>
             </div>
           </header>
 
-          <form
-            className="connection-form brand-profile-form"
-            noValidate
-            onSubmit={(event) => void saveProfile(event)}
-          >
-            <div className="brand-profile-grid">
-              <div className="field-group">
-                <label htmlFor="brand-brandName">
-                  브랜드명
-                  <span>필수</span>
-                </label>
-                <input
-                  id="brand-brandName"
-                  value={form.brandName}
-                  maxLength={80}
-                  autoComplete="organization"
-                  disabled={isLoading || isSaving}
-                  required
-                  aria-invalid={Boolean(fieldErrors.brandName)}
-                  aria-describedby={fieldErrors.brandName ? 'brand-name-error' : undefined}
-                  onBlur={() => validateField('brandName')}
-                  onChange={(event) => updateField('brandName', event.target.value)}
-                />
-                {fieldErrors.brandName ? (
-                  <p id="brand-name-error" className="field-error">
-                    {fieldErrors.brandName}
-                  </p>
-                ) : null}
+          <div className="connection-form brand-profile-form">
+            <form
+              id="brand-profile-form"
+              className="brand-required-fields"
+              noValidate
+              onSubmit={(event) => void saveProfile(event)}
+            >
+              <div className="brand-profile-grid">
+                <div className="field-group">
+                  <label htmlFor="brand-brandName">
+                    브랜드명
+                    <span>필수</span>
+                  </label>
+                  <input
+                    id="brand-brandName"
+                    value={form.brandName}
+                    maxLength={80}
+                    autoComplete="organization"
+                    disabled={isLoading || isSaving || isProductsSaving}
+                    required
+                    aria-invalid={Boolean(fieldErrors.brandName)}
+                    aria-describedby={fieldErrors.brandName ? 'brand-name-error' : undefined}
+                    onBlur={() => validateField('brandName')}
+                    onChange={(event) => updateField('brandName', event.target.value)}
+                  />
+                  {fieldErrors.brandName ? (
+                    <p id="brand-name-error" className="field-error">
+                      {fieldErrors.brandName}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="field-group">
+                  <label htmlFor="brand-industry">
+                    업종
+                    <span>필수</span>
+                  </label>
+                  <input
+                    id="brand-industry"
+                    value={form.industry}
+                    maxLength={80}
+                    autoComplete="off"
+                    disabled={isLoading || isSaving || isProductsSaving}
+                    required
+                    aria-invalid={Boolean(fieldErrors.industry)}
+                    aria-describedby={fieldErrors.industry ? 'brand-industry-error' : undefined}
+                    placeholder="예: 미용실, 음식점, 전문 서비스"
+                    onBlur={() => validateField('industry')}
+                    onChange={(event) => updateField('industry', event.target.value)}
+                  />
+                  {fieldErrors.industry ? (
+                    <p id="brand-industry-error" className="field-error">
+                      {fieldErrors.industry}
+                    </p>
+                  ) : null}
+                </div>
               </div>
 
               <div className="field-group">
-                <label htmlFor="brand-industry">
-                  업종
+                <label htmlFor="brand-brandIntroduction">
+                  브랜드·사업 소개
                   <span>필수</span>
                 </label>
-                <input
-                  id="brand-industry"
-                  value={form.industry}
-                  maxLength={80}
-                  autoComplete="off"
-                  disabled={isLoading || isSaving}
+                <textarea
+                  id="brand-brandIntroduction"
+                  className="brand-textarea"
+                  value={form.brandIntroduction}
+                  maxLength={1_000}
+                  disabled={isLoading || isSaving || isProductsSaving}
                   required
-                  aria-invalid={Boolean(fieldErrors.industry)}
-                  aria-describedby={fieldErrors.industry ? 'brand-industry-error' : undefined}
-                  placeholder="예: 미용실, 음식점, 전문 서비스"
-                  onBlur={() => validateField('industry')}
-                  onChange={(event) => updateField('industry', event.target.value)}
+                  aria-invalid={Boolean(fieldErrors.brandIntroduction)}
+                  aria-describedby={
+                    fieldErrors.brandIntroduction
+                      ? 'brand-introduction-help brand-introduction-error'
+                      : 'brand-introduction-help'
+                  }
+                  placeholder="예: 개인과 사업자를 대상으로 보험 분석과 보장 점검을 제공합니다."
+                  onBlur={() => validateField('brandIntroduction')}
+                  onChange={(event) => updateField('brandIntroduction', event.target.value)}
                 />
-                {fieldErrors.industry ? (
-                  <p id="brand-industry-error" className="field-error">
-                    {fieldErrors.industry}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="field-group">
-              <label htmlFor="brand-brandIntroduction">
-                브랜드·사업 소개
-                <span>필수</span>
-              </label>
-              <textarea
-                id="brand-brandIntroduction"
-                className="brand-textarea"
-                value={form.brandIntroduction}
-                maxLength={1_000}
-                disabled={isLoading || isSaving}
-                required
-                aria-invalid={Boolean(fieldErrors.brandIntroduction)}
-                aria-describedby={
-                  fieldErrors.brandIntroduction
-                    ? 'brand-introduction-help brand-introduction-error'
-                    : 'brand-introduction-help'
-                }
-                placeholder="예: 개인과 사업자를 대상으로 보험 분석과 보장 점검을 제공합니다."
-                onBlur={() => validateField('brandIntroduction')}
-                onChange={(event) => updateField('brandIntroduction', event.target.value)}
-              />
-              <p id="brand-introduction-help" className="field-help">
-                누구에게 어떤 도움을 제공하는 브랜드인지 전체적인 특징을 적어 주세요.
-              </p>
-              {fieldErrors.brandIntroduction ? (
-                <p id="brand-introduction-error" className="field-error">
-                  {fieldErrors.brandIntroduction}
+                <p id="brand-introduction-help" className="field-help">
+                  누구에게 어떤 도움을 제공하는 브랜드인지 전체적인 특징을 적어 주세요.
                 </p>
-              ) : null}
-            </div>
-
-            <div className="brand-profile-grid">
-              <div className="field-group">
-                <label htmlFor="brand-activityRegion">
-                  활동 지역
-                  <span>선택</span>
-                </label>
-                <input
-                  id="brand-activityRegion"
-                  value={form.activityRegion}
-                  maxLength={120}
-                  autoComplete="off"
-                  disabled={isLoading || isSaving}
-                  placeholder="예: 서울 강남·서초"
-                  onChange={(event) => updateField('activityRegion', event.target.value)}
-                />
+                {fieldErrors.brandIntroduction ? (
+                  <p id="brand-introduction-error" className="field-error">
+                    {fieldErrors.brandIntroduction}
+                  </p>
+                ) : null}
               </div>
 
-              <div className="field-group">
-                <label htmlFor="brand-defaultTone">
-                  기본 말투
-                  <span>선택</span>
-                </label>
-                <input
-                  id="brand-defaultTone"
-                  value={form.defaultTone}
-                  maxLength={300}
-                  autoComplete="off"
-                  disabled={isLoading || isSaving}
-                  placeholder="예: 쉽고 친절한 존댓말"
-                  onChange={(event) => updateField('defaultTone', event.target.value)}
+              {additionalRequiredFields.map((field) => (
+                <ProfileField
+                  key={field.key}
+                  field={field}
+                  value={form[field.key]}
+                  required
+                  disabled={isLoading || isSaving || isProductsSaving}
+                  errorMessage={fieldErrors[field.key as RequiredField]}
+                  onChange={updateField}
+                  onBlur={validateField}
                 />
-              </div>
-            </div>
+              ))}
 
-            <div className="field-group">
-              <label htmlFor="brand-defaultCta">
-                기본 행동 유도 문구
-                <span>선택</span>
-              </label>
-              <textarea
-                id="brand-defaultCta"
-                className="brand-textarea"
-                value={form.defaultCta}
-                maxLength={300}
-                disabled={isLoading || isSaving}
-                aria-describedby="brand-cta-help"
-                placeholder="예: 자세한 일정은 상담으로 확인해 주세요."
-                onChange={(event) => updateField('defaultCta', event.target.value)}
-              />
-              <p id="brand-cta-help" className="field-help">
-                글 마지막에 독자에게 안내할 다음 행동입니다. 비워 두어도 됩니다.
-              </p>
-            </div>
-
+            </form>
+            <BrandProductsEditor
+              userId={userId}
+              savedValue={form.productsAndServices}
+              savedPrices={productPrices}
+              profileReady={Boolean(savedAt)}
+              disabled={isLoading || isSaving}
+              onBusyChange={setIsProductsSaving}
+              onSaved={(profile) => {
+                setForm((current) => ({ ...current, productsAndServices: profile.productsAndServices }));
+                setProductPrices(profile.productPrices ?? {});
+                setSavedAt(profile.updatedAt);
+              }}
+            />
 
             <section className="brand-optional-sections" aria-labelledby="brand-optional-heading">
-              <header className="brand-optional-heading">
-                <h3 id="brand-optional-heading">추가 선택 정보</h3>
+              <header className="brand-optional-heading brand-category-heading">
+                <h2 id="brand-optional-heading">선택 사항</h2>
                 <p>
-                  필요한 항목만 열어 입력하세요. 비워 둔 내용은 AI가 임의로 만들지 않습니다.
+                  아래 5개 항목은 필요한 내용만 입력하세요. 비워 두어도 저장할 수 있습니다.
                 </p>
               </header>
+
+              <div className="brand-profile-grid">
+                <div className="field-group">
+                  <label htmlFor="brand-activityRegion">
+                    활동 지역
+                    <span>선택</span>
+                  </label>
+                  <input
+                    id="brand-activityRegion"
+                    form="brand-profile-form"
+                    value={form.activityRegion}
+                    maxLength={120}
+                    autoComplete="off"
+                    disabled={isLoading || isSaving || isProductsSaving}
+                    placeholder="예: 서울 강남·서초"
+                    onChange={(event) => updateField('activityRegion', event.target.value)}
+                  />
+                </div>
+
+              </div>
+
+              <div className="field-group">
+                <label htmlFor="brand-defaultCta">
+                  글 마지막 안내 문구
+                  <span>선택</span>
+                </label>
+                <textarea
+                  id="brand-defaultCta"
+                  form="brand-profile-form"
+                  className="brand-textarea"
+                  value={form.defaultCta}
+                  maxLength={300}
+                  disabled={isLoading || isSaving || isProductsSaving}
+                  aria-describedby="brand-cta-help"
+                  placeholder="예: 자세한 일정은 상담으로 확인해 주세요."
+                  onChange={(event) => updateField('defaultCta', event.target.value)}
+                />
+                <p id="brand-cta-help" className="field-help">
+                  글 마지막에 독자에게 안내할 다음 행동입니다. 비워 두어도 됩니다.
+                </p>
+              </div>
 
               {optionalSections.map((section) => {
                 const filledCount = section.fields
                   .filter((field) => form[field.key].trim()).length;
 
                 return (
-                  <details className="brand-optional-section" key={section.title}>
-                    <summary>
-                      <span className="brand-optional-summary">
-                        <strong>{section.title}</strong>
-                        <small>{section.description}</small>
-                      </span>
+                  <section
+                    className="brand-optional-section"
+                    key={section.title}
+                    aria-labelledby={`brand-section-${section.fields[0]?.key}`}
+                  >
+                    <header className="brand-optional-section-heading">
+                      <div className="brand-optional-summary">
+                        <h3 id={`brand-section-${section.fields[0]?.key}`}>{section.title}</h3>
+                        <p>{section.description}</p>
+                      </div>
                       <span className="brand-optional-count">
                         {filledCount}/{section.fields.length}개 입력
                       </span>
-                      <ChevronDown className="brand-optional-chevron" aria-hidden="true" />
-                    </summary>
+                    </header>
 
                     <div className="brand-optional-fields">
                       {section.fields.map((field) => (
-                        <OptionalProfileField
+                        <ProfileField
                           key={field.key}
                           field={field}
                           value={form[field.key]}
-                          disabled={isLoading || isSaving}
-                          errorMessage={
-                            field.key === 'consultationLink'
-                              ? fieldErrors.consultationLink
-                              : undefined
-                          }
+                          disabled={isLoading || isSaving || isProductsSaving}
                           onChange={updateField}
                         />
                       ))}
                     </div>
-                  </details>
+                  </section>
                 );
               })}
 
@@ -700,32 +676,33 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
               <button
                 className="button primary connection-primary"
                 type="submit"
-                disabled={isLoading || isSaving}
+                form="brand-profile-form"
+                disabled={isLoading || isSaving || isProductsSaving}
               >
                 {isSaving ? (
                   <LoaderCircle className="is-spinning" aria-hidden="true" />
                 ) : (
                   <Save aria-hidden="true" />
                 )}
-                {isSaving ? '저장 중…' : '브랜드 프로필 저장'}
+                {isSaving ? '저장 중…' : '블로그 세팅 저장'}
               </button>
               {isDirty ? (
                 <span className="unsaved-label">저장하지 않은 변경사항이 있습니다.</span>
               ) : null}
             </div>
-          </form>
+          </div>
         </div>
 
-        <aside className="connection-progress" aria-label="브랜드 프로필 준비 상태">
+        <aside className="connection-progress" aria-label="블로그 세팅 준비 상태">
           <header className="panel-heading compact">
             <div>
-              <h2>저장 상태</h2>
-              <p>현재 로그인 계정과 이 PC에만 연결됩니다.</p>
+              <h2>작성한 정보는 이렇게 쓰여요</h2>
+              <p>이 계정과 PC에서 만드는 글의 기본 정보가 됩니다.</p>
             </div>
           </header>
 
           <div className="live-status" role="status" aria-live="polite">
-            {isLoading || isSaving ? (
+            {isLoading || isSaving || isProductsSaving ? (
               <LoaderCircle className="is-spinning" aria-hidden="true" />
             ) : savedAt && !isDirty ? (
               <CheckCircle2 aria-hidden="true" />
@@ -737,7 +714,7 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
               <small>
                 {savedAt
                   ? `마지막 저장: ${formatSavedAt(savedAt)}`
-                  : '아직 저장된 브랜드 프로필이 없습니다.'}
+                  : '아직 저장된 블로그 세팅이 없습니다.'}
               </small>
             </div>
           </div>
@@ -748,8 +725,8 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
                 {hasRequiredFields ? <CheckCircle2 aria-hidden="true" /> : <Circle aria-hidden="true" />}
               </span>
               <span className="step-copy">
-                <strong>필수 정보</strong>
-                <small>브랜드명, 업종, 브랜드·사업 소개</small>
+                <strong>필수 사항</strong>
+                <small>필수 항목 {requiredFieldCount}/{requiredBrandProfileFields.length}개 입력</small>
               </span>
               <span className="step-state">{hasRequiredFields ? '입력됨' : '입력 필요'}</span>
             </li>
@@ -758,7 +735,7 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
                 {optionalFieldCount > 0 ? <CheckCircle2 aria-hidden="true" /> : <Circle aria-hidden="true" />}
               </span>
               <span className="step-copy">
-                <strong>선택 정보</strong>
+                <strong>선택 사항</strong>
                 <small>선택 항목 {optionalFieldCount}/{optionalFieldKeys.length}개 입력</small>
               </span>
               <span className="step-state">{optionalFieldCount > 0 ? '반영' : '선택'}</span>
@@ -776,6 +753,7 @@ export function BrandProfileScreen({ userId }: { readonly userId: string }) {
           </ol>
         </aside>
       </section>
+
     </>
   );
 }

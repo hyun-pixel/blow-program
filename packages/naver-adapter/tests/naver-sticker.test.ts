@@ -585,3 +585,17 @@ describe('네이버 스티커 묶음 선택과 무작위 삽입', () => {
 });
 
 expect(NaverStickerError).toBeDefined();
+
+it('verifies repeated sticker insertions against the same original paragraphs', async () => {
+  const paragraphs = Array.from({ length: 10 }, (_, index) => `${index + 1}번째 안내 문단입니다.`);
+  const { page } = createStickerPage({ paragraphs });
+  const adapter = new NaverStickerAdapter(page);
+  const categories = await adapter.listStickerCategories(paragraphs, 1, 'after');
+  for (const paragraphNumber of Array.from({ length: 10 }, (_, index) => index + 1)) {
+    const result = await adapter.insertRandomSticker(
+      paragraphs, paragraphNumber, 'after', categories.categories[0]!.id,
+    );
+    expect(result.paragraphNumber).toBe(paragraphNumber);
+    expect(result.stickerCount).toBe(paragraphNumber);
+  }
+});

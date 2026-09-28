@@ -1,3 +1,7 @@
+import { getConnectedBlogId } from './naver-workflow.js';
+import { WritingSteps } from './WritingSteps.js';
+import { defaultPostDecorations, decorationPlacementLabel, resolveDecorationTargets, isDecorationStyleAvailable, type DecorationTarget, type PostDecorations } from './post-decoration.js';
+import { DecorationPlacementFields } from './DecorationPlacementFields.js';
 import {
   Check,
   CheckCircle2,
@@ -25,13 +29,13 @@ import {
 } from 'lucide-react';
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 import type {
   NaverConnectionStatus,
   NaverDividerInsertionResult,
-  NaverDividerPosition,
   NaverDividerStyle,
   NaverDividerStyleSelection,
   NaverDraftSaveResult,
@@ -42,12 +46,10 @@ import type {
   NaverStructureChangeTestResult,
   NaverSelectedImageFile,
   NaverQuoteInsertionResult,
-  NaverQuotePosition,
   NaverQuoteStyle,
   NaverQuoteStyleSelection,
   NaverStickerCategory,
   NaverStickerInsertionResult,
-  NaverStickerPosition,
   NaverUserInteractionResult,
   NaverUserInteractionType,
 } from '@blow/naver-adapter';
@@ -179,9 +181,9 @@ function safeHostLabel(value?: string): string {
   }
 }
 
-const sampleTitle = '[BLOW 입력 테스트] 네이버 편집기 확인';
+const sampleTitle = '[BLOW] 네이버 편집기 입력 확인';
 const sampleBody = [
-  'BLOW가 제목과 본문 입력을 확인하는 테스트 글입니다.',
+  'BLOW가 제목과 본문 입력을 확인하는 예시 글입니다.',
   '한글·English·1234와 문장부호, 특수문자 입력을 확인합니다.',
   '빈 줄과 여러 문단이 그대로 유지되는지 확인합니다. 🙂',
 ].join('\n\n');
@@ -212,75 +214,6 @@ function getImageLayoutLabel(layout: NaverImageLayout): string {
   return imageLayoutOptions.find((option) => option.value === layout)!.label;
 }
 
-const dividerPositionOptions: readonly {
-  readonly value: NaverDividerPosition;
-  readonly label: string;
-  readonly description: string;
-}[] = [
-  {
-    value: 'before',
-    label: '문단 앞',
-    description: '선택한 문단이 시작되기 전에 넣습니다.',
-  },
-  {
-    value: 'after',
-    label: '문단 뒤',
-    description: '선택한 문단이 끝난 다음에 넣습니다.',
-  },
-];
-
-function getDividerPositionLabel(position: NaverDividerPosition): string {
-  return dividerPositionOptions.find(
-    (option) => option.value === position,
-  )!.label;
-}
-
-const stickerPositionOptions: readonly {
-  readonly value: NaverStickerPosition;
-  readonly label: string;
-  readonly description: string;
-}[] = [
-  {
-    value: 'before',
-    label: '문단 앞',
-    description: '선택한 문단이 시작되기 전에 넣습니다.',
-  },
-  {
-    value: 'after',
-    label: '문단 뒤',
-    description: '선택한 문단이 끝난 다음에 넣습니다.',
-  },
-];
-
-function getStickerPositionLabel(position: NaverStickerPosition): string {
-  return stickerPositionOptions.find(
-    (option) => option.value === position,
-  )!.label;
-}
-
-const quotePositionOptions: readonly {
-  readonly value: NaverQuotePosition;
-  readonly label: string;
-  readonly description: string;
-}[] = [
-  {
-    value: 'before',
-    label: '문단 앞',
-    description: '선택한 문단이 시작되기 전에 넣습니다.',
-  },
-  {
-    value: 'after',
-    label: '문단 뒤',
-    description: '선택한 문단이 끝난 다음에 넣습니다.',
-  },
-];
-
-function getQuotePositionLabel(position: NaverQuotePosition): string {
-  return quotePositionOptions.find(
-    (option) => option.value === position,
-  )!.label;
-}
-
 function formatFileSize(sizeBytes: number): string {
   if (sizeBytes < 1_024 * 1_024) {
     return `${Math.max(1, Math.round(sizeBytes / 1_024)).toLocaleString('ko-KR')} KB`;
@@ -300,9 +233,22 @@ function parseDraftParagraphs(value: string): readonly string[] {
 export function ConnectionScreen({
   userId,
   initialDraft,
+  mode = 'draft',
+  onConnectionChange,
+  onBusyChange,
+  onContinue,
+  onBack,
+  resetToken = 0,
 }: {
   readonly userId: string;
+  readonly mode?: 'setup' | 'draft';
+  readonly onConnectionChange?: (blogId: string | null) => void;
+  readonly onBusyChange?: (busy: boolean) => void;
+  readonly onContinue?: () => void;
+  readonly onBack?: () => void;
+  readonly resetToken?: number;
   readonly initialDraft?: {
+    readonly decorations?: PostDecorations;
     readonly title: string;
     readonly body: string;
     readonly images: readonly GeneratedBlogImage[];
@@ -321,6 +267,11 @@ export function ConnectionScreen({
     };
   } | undefined;
 }) {
+  const isSetup = mode === 'setup';
+  const showDiagnostics = import.meta.env.DEV;
+  const loadedDraftRef = useRef(initialDraft);
+  const [needsNewWriter, setNeedsNewWriter] = useState(false);
+  const decorationPlan = initialDraft?.decorations;
   const [blogUrl, setBlogUrl] = useState('');
   const blogUrlInputRef = useRef<HTMLInputElement>(null);
   const draftTitleInputRef = useRef<HTMLInputElement>(null);
@@ -333,6 +284,30 @@ export function ConnectionScreen({
   const [draftBody, setDraftBody] = useState(
     initialDraft?.body ?? sampleBody,
   );
+  const [placements, setPlacements] = useState<PostDecorations>(decorationPlan ?? defaultPostDecorations);
+  const [decorationProgress, setDecorationProgress] = useState({ divider: 0, quote: 0, sticker: 0 });
+  const decorationStarted = useRef({ divider: false, quote: false, sticker: false });
+  const resetDecorationProgress = (): void => {
+    decorationStarted.current = { divider: false, quote: false, sticker: false };
+    setDecorationProgress({ divider: 0, quote: 0, sticker: 0 });
+  };
+  // Freeze each random plan across style loading, progress updates, and other decoration edits.
+  const dividerTargets = useMemo(() => resolveDecorationTargets(
+    { enabled: true, count: placements.divider.count }, parseDraftParagraphs(draftBody),
+  ), [placements.divider.count, draftBody]);
+  const quoteTargets = useMemo(() => resolveDecorationTargets(
+    { enabled: true, count: placements.quote.count }, parseDraftParagraphs(draftBody),
+  ), [placements.quote.count, draftBody]);
+  const stickerTargets = useMemo(() => resolveDecorationTargets(
+    { enabled: true, count: placements.sticker.count }, parseDraftParagraphs(draftBody),
+  ), [placements.sticker.count, draftBody]);
+  const decorationTargets = { divider: dividerTargets, quote: quoteTargets, sticker: stickerTargets };
+  const dividerParagraphNumber = decorationTargets.divider[0]?.paragraphNumber ?? 0;
+  const quoteParagraphNumber = decorationTargets.quote[0]?.paragraphNumber ?? 0;
+  const stickerParagraphNumber = decorationTargets.sticker[0]?.paragraphNumber ?? 0;
+  const dividerPosition = 'after' as const;
+  const quotePosition = 'after' as const;
+  const stickerPosition = 'after' as const;
   const [draftErrors, setDraftErrors] = useState<{
     readonly title: string;
     readonly body: string;
@@ -370,33 +345,24 @@ export function ConnectionScreen({
   const [slowNetworkResult, setSlowNetworkResult] =
     useState<SlowNetworkTestResult | null>(null);
   const [slowNetworkError, setSlowNetworkError] = useState<string | null>(null);
-  const [dividerParagraphNumber, setDividerParagraphNumber] = useState(1);
-  const [dividerPosition, setDividerPosition] =
-    useState<NaverDividerPosition>('after');
   const [dividerResult, setDividerResult] =
     useState<NaverDividerInsertionResult | null>(null);
   const [dividerStyles, setDividerStyles] = useState<
     readonly NaverDividerStyle[]
   >([]);
   const [dividerStyleSelection, setDividerStyleSelection] =
-    useState<NaverDividerStyleSelection>('random');
-  const [stickerParagraphNumber, setStickerParagraphNumber] = useState(1);
-  const [stickerPosition, setStickerPosition] =
-    useState<NaverStickerPosition>('after');
+    useState<NaverDividerStyleSelection>(decorationPlan?.divider.style ?? 'random');
   const [stickerCategories, setStickerCategories] = useState<
     readonly NaverStickerCategory[]
   >([]);
   const [stickerCategoryId, setStickerCategoryId] = useState('');
   const [stickerResult, setStickerResult] =
     useState<NaverStickerInsertionResult | null>(null);
-  const [quoteParagraphNumber, setQuoteParagraphNumber] = useState(1);
-  const [quotePosition, setQuotePosition] =
-    useState<NaverQuotePosition>('after');
   const [quoteStyles, setQuoteStyles] = useState<
     readonly NaverQuoteStyle[]
   >([]);
   const [quoteStyleSelection, setQuoteStyleSelection] =
-    useState<NaverQuoteStyleSelection>('random');
+    useState<NaverQuoteStyleSelection>(decorationPlan?.quote.style ?? 'random');
   const [quoteResult, setQuoteResult] =
     useState<NaverQuoteInsertionResult | null>(null);
   const [selectedImages, setSelectedImages] = useState<
@@ -413,6 +379,7 @@ export function ConnectionScreen({
   } | null>(null);
   const operationVersionRef = useRef(0);
   const sessionStoppedRef = useRef(false);
+  const lastResetTokenRef = useRef(resetToken);
   const [isStopping, setIsStopping] = useState(false);
   const [stopNotice, setStopNotice] = useState(false);
 
@@ -428,6 +395,74 @@ export function ConnectionScreen({
   const fieldError = error?.code === 'INVALID_BLOG_URL'
     ? error.message
     : null;
+
+  const connectedBlogId = getConnectedBlogId(status, browserOpen, Boolean(error));
+
+  useEffect(() => {
+    if (lastResetTokenRef.current === resetToken) return;
+    lastResetTokenRef.current = resetToken;
+    operationVersionRef.current += 1;
+    sessionStoppedRef.current = true;
+    setStatus(null);
+    setBrowserOpen(false);
+    setInputResult(null);
+    resetDecorationProgress();
+    setDraftSaveResult(null);
+    setImageResult(null);
+    setSelectedImages([]);
+    setDividerResult(null);
+    setQuoteResult(null);
+    setStickerResult(null);
+    setDividerStyles([]);
+    setQuoteStyles([]);
+    setStickerCategories([]);
+    setError({
+      code: 'NAVER_SESSION_CHANGED',
+      message: '작업 내역에서 다른 임시글을 열었습니다. 새 글을 이어 쓰려면 네이버를 다시 연결해 주세요. 작성한 내용은 유지됩니다.',
+    });
+  }, [resetToken]);
+
+  useEffect(() => {
+    onConnectionChange?.(connectedBlogId);
+  }, [connectedBlogId, onConnectionChange]);
+
+  useEffect(() => {
+    onBusyChange?.(isActivelyRunning);
+  }, [isActivelyRunning, onBusyChange]);
+
+  useEffect(() => {
+    // Keep one connection mounted across settings, composition, and transfer.
+    if (!initialDraft || loadedDraftRef.current === initialDraft) return;
+    setNeedsNewWriter(Boolean(loadedDraftRef.current));
+    loadedDraftRef.current = initialDraft;
+    const plan = initialDraft.decorations;
+    setPlacements(initialDraft.decorations ?? defaultPostDecorations);
+    setDraftTitle(initialDraft.title);
+    setDraftBody(initialDraft.body);
+    setDraftErrors({ title: '', body: '' });
+    setInputResult(null);
+    resetDecorationProgress();
+    setDraftSaveResult(null);
+    setHistorySaveWarning(null);
+    setSelectedImages([]);
+    setImageResult(null);
+    setImageLayout('individual');
+    setDividerStyles([]);
+    setDividerResult(null);
+    setDividerStyleSelection(plan?.divider.style ?? 'random');
+
+
+    setQuoteStyles([]);
+    setQuoteResult(null);
+    setQuoteStyleSelection(plan?.quote.style ?? 'random');
+
+
+    setStickerCategories([]);
+    setStickerCategoryId('');
+    setStickerResult(null);
+
+
+  }, [initialDraft]);
 
   const beginOperation = (action: ActionName): number => {
     const operationVersion = operationVersionRef.current;
@@ -484,7 +519,7 @@ export function ConnectionScreen({
   const runConnectionCommand = async (
     action: 'open' | 'verify' | 'writer',
     command: () => ReturnType<typeof window.blowNaver.open>,
-  ): Promise<void> => {
+  ): Promise<NaverConnectionStatus | null> => {
     const operationVersion = beginOperation(action);
     setError(null);
 
@@ -492,7 +527,7 @@ export function ConnectionScreen({
       const response = await command();
 
       if (!isOperationCurrent(operationVersion)) {
-        return;
+        return null;
       }
 
       if (response.ok) {
@@ -502,22 +537,28 @@ export function ConnectionScreen({
           setBrowserOpen(true);
         }
 
+        if (action === 'open' || action === 'writer') setNeedsNewWriter(false);
+        if (action !== 'open' && response.status.stage === 'LOGIN_REQUIRED') {
+          setError({ code: 'NAVER_AUTH_REQUIRED', message: 'Chrome에서 로그인한 뒤 ‘연결 다시 확인’을 눌러 주세요.' });
+        }
+
         if (action === 'open' || action === 'writer') {
           setInputResult(null);
-          setDividerParagraphNumber(1);
-          setDividerPosition('after');
+          resetDecorationProgress();
+
+
           setDividerStyles([]);
-          setDividerStyleSelection('random');
+          setDividerStyleSelection(decorationPlan?.divider.style ?? 'random');
           setDividerResult(null);
-          setStickerParagraphNumber(1);
-          setStickerPosition('after');
+
+
           setStickerCategories([]);
           setStickerCategoryId('');
           setStickerResult(null);
-          setQuoteParagraphNumber(1);
-          setQuotePosition('after');
+
+
           setQuoteStyles([]);
-          setQuoteStyleSelection('random');
+          setQuoteStyleSelection(decorationPlan?.quote.style ?? 'random');
           setQuoteResult(null);
           setDraftSaveResult(null);
           setInteractionResult(null);
@@ -537,6 +578,7 @@ export function ConnectionScreen({
           setImageLayout('individual');
           setImageResult(null);
         }
+        return response.status;
       } else {
         setError(response.error);
 
@@ -550,7 +592,7 @@ export function ConnectionScreen({
       }
     } catch {
       if (!isOperationCurrent(operationVersion)) {
-        return;
+        return null;
       }
 
       setError({
@@ -559,6 +601,16 @@ export function ConnectionScreen({
       });
     } finally {
       finishOperation(operationVersion);
+    }
+    return null;
+  };
+
+  const openVerifiedWriter = async (): Promise<void> => {
+    if (needsNewWriter && !window.confirm('새 글쓰기 화면을 열면 현재 네이버 편집기를 벗어납니다. 기존 글을 먼저 임시저장했는지 확인해 주세요. 새 글쓰기 화면을 열까요?')) return;
+    // verify() navigates to the blog home: never run it over an in-progress editor automatically.
+    const verified = await runConnectionCommand('verify', () => window.blowNaver.verify());
+    if (getConnectedBlogId(verified, true, false) && verified?.stage === 'WRITER_LINK_READY') {
+      await runConnectionCommand('writer', () => window.blowNaver.openWriter());
     }
   };
 
@@ -580,11 +632,8 @@ export function ConnectionScreen({
       return;
     }
 
-    if (status?.stage === 'WRITER_LINK_READY') {
-      void runConnectionCommand(
-        'writer',
-        () => window.blowNaver.openWriter(),
-      );
+    if (!isSetup && (status?.stage === 'WRITER_LINK_READY' || needsNewWriter)) {
+      void openVerifiedWriter();
       return;
     }
 
@@ -636,20 +685,21 @@ export function ConnectionScreen({
       setBrowserOpen(false);
       setStatus(null);
       setInputResult(null);
-      setDividerParagraphNumber(1);
-      setDividerPosition('after');
+      resetDecorationProgress();
+
+
       setDividerStyles([]);
-      setDividerStyleSelection('random');
+      setDividerStyleSelection(decorationPlan?.divider.style ?? 'random');
       setDividerResult(null);
-      setStickerParagraphNumber(1);
-      setStickerPosition('after');
+
+
       setStickerCategories([]);
       setStickerCategoryId('');
       setStickerResult(null);
-      setQuoteParagraphNumber(1);
-      setQuotePosition('after');
+
+
       setQuoteStyles([]);
-      setQuoteStyleSelection('random');
+      setQuoteStyleSelection(decorationPlan?.quote.style ?? 'random');
       setQuoteResult(null);
       setDraftSaveResult(null);
       setInteractionResult(null);
@@ -685,10 +735,10 @@ export function ConnectionScreen({
     const title = draftTitle.trim();
     const paragraphs = parseDraftParagraphs(draftBody);
     const nextErrors = {
-      title: title ? '' : '테스트할 제목을 입력해 주세요.',
+      title: title ? '' : '입력할 제목을 작성해 주세요.',
       body: paragraphs.length > 0
         ? ''
-        : '테스트할 본문을 입력해 주세요.',
+        : '입력할 본문을 작성해 주세요.',
     };
 
     setDraftErrors(nextErrors);
@@ -705,16 +755,17 @@ export function ConnectionScreen({
 
     const operationVersion = beginOperation('input');
     setInputResult(null);
+    resetDecorationProgress();
     setDividerStyles([]);
-    setDividerStyleSelection('random');
+    setDividerStyleSelection(decorationPlan?.divider.style ?? 'random');
     setDividerResult(null);
     setStickerCategories([]);
     setStickerCategoryId('');
     setStickerResult(null);
-    setQuoteParagraphNumber(1);
-    setQuotePosition('after');
+
+
     setQuoteStyles([]);
-    setQuoteStyleSelection('random');
+    setQuoteStyleSelection(decorationPlan?.quote.style ?? 'random');
     setQuoteResult(null);
     setDraftSaveResult(null);
     setInteractionResult(null);
@@ -733,10 +784,10 @@ export function ConnectionScreen({
 
       if (response.ok) {
         setInputResult(response.result);
-        setDividerParagraphNumber(1);
-        setDividerPosition('after');
+
+
         setDividerStyles([]);
-        setDividerStyleSelection('random');
+        setDividerStyleSelection(decorationPlan?.divider.style ?? 'random');
         setDividerResult(null);
         if (initialDraft?.images.length) {
           const imageResponse = await window.blowNaver.prepareGeneratedImages(
@@ -840,17 +891,6 @@ export function ConnectionScreen({
 
       if (response.ok) {
         setImageResult(response.result);
-        setDividerStyles([]);
-        setDividerStyleSelection('random');
-        setDividerResult(null);
-        setStickerCategories([]);
-        setStickerCategoryId('');
-        setStickerResult(null);
-        setQuoteParagraphNumber(1);
-        setQuotePosition('after');
-        setQuoteStyles([]);
-        setQuoteStyleSelection('random');
-        setQuoteResult(null);
         setDraftSaveResult(null);
       } else {
         setError(response.error);
@@ -876,14 +916,13 @@ export function ConnectionScreen({
     ) {
       setError({
         code: 'INVALID_DIVIDER_REQUEST',
-        message: '구분선을 넣을 문단과 위치를 다시 선택해 주세요.',
+        message: '구분선을 넣을 배치 설정을 확인해 주세요.',
       });
       return;
     }
 
     const operationVersion = beginOperation('divider-styles');
     setDividerStyles([]);
-    setDividerStyleSelection('random');
     setError(null);
 
     try {
@@ -915,67 +954,47 @@ export function ConnectionScreen({
     }
   };
 
-  const insertDivider = async (): Promise<void> => {
-    if (
-      dividerParagraphNumber < 1 ||
-      dividerParagraphNumber > draftParagraphs.length
-    ) {
-      setError({
-        code: 'INVALID_DIVIDER_REQUEST',
-        message: '구분선을 넣을 문단과 위치를 다시 선택해 주세요.',
-      });
-      return;
-    }
-
-    if (dividerStyles.length === 0) {
-      setError({
-        code: 'DIVIDER_STYLE_NOT_FOUND',
-        message: '구분선 디자인을 먼저 불러와 주세요.',
-      });
-      return;
-    }
-
-    const operationVersion = beginOperation('divider');
-    setDividerResult(null);
+  const runDecorationInsert = async <T,>(
+    kind: keyof PostDecorations,
+    insert: (target: DecorationTarget) => Promise<{ ok: true; result: T } | { ok: false; error: { code: string; message: string } }>,
+    onComplete: (result: T) => void,
+  ): Promise<void> => {
+    if (isUiBusy || decorationStarted.current[kind] || !decorationTargets[kind].length) return;
+    decorationStarted.current[kind] = true;
+    const operationVersion = beginOperation(kind);
     setError(null);
-
+    setDraftSaveResult(null);
     try {
-      const response = await window.blowNaver.insertDivider(
-        dividerParagraphNumber,
-        dividerPosition,
-        dividerStyleSelection,
-      );
-
-      if (!isOperationCurrent(operationVersion)) {
-        return;
-      }
-
-      if (response.ok) {
-        setDividerResult(response.result);
-        setStickerParagraphNumber(1);
-        setStickerPosition('after');
-        setStickerResult(null);
-        setQuoteParagraphNumber(1);
-        setQuotePosition('after');
-        setQuoteStyles([]);
-        setQuoteStyleSelection('random');
-        setQuoteResult(null);
-        setDraftSaveResult(null);
-      } else {
-        setError(response.error);
+      const targets = decorationTargets[kind];
+      for (let index = 0; index < targets.length; index += 1) {
+        if (!isOperationCurrent(operationVersion)) return;
+        const response = await insert(targets[index]!);
+        if (!isOperationCurrent(operationVersion)) return;
+        if (!response.ok) {
+          setError(response.error);
+          return;
+        }
+        setDecorationProgress((current) => ({ ...current, [kind]: index + 1 }));
+        if (index === targets.length - 1) onComplete(response.result);
       }
     } catch {
-      if (!isOperationCurrent(operationVersion)) {
-        return;
-      }
-
-      setError({
-        code: 'DIVIDER_INSERT_UNCONFIRMED',
-        message: '구분선 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
+      if (isOperationCurrent(operationVersion)) setError({
+        code: `${kind.toUpperCase()}_INSERT_UNCONFIRMED`,
+        message: '삽입 결과를 확인하지 못해 남은 작업을 멈췄습니다. 자동 재시도하지 않습니다. Chrome에서 결과를 확인해 주세요.',
       });
     } finally {
       finishOperation(operationVersion);
     }
+  };
+
+  const insertDivider = async (): Promise<void> => {
+    if (!isDecorationStyleAvailable(dividerStyleSelection, dividerStyles)) {
+      setError({ code: 'DIVIDER_STYLE_NOT_FOUND', message: '구분선 목록을 확인하고 사용 가능한 디자인을 선택해 주세요.' });
+      return;
+    }
+    await runDecorationInsert('divider', (target) => window.blowNaver.insertDivider(
+      target.paragraphNumber, target.position, dividerStyleSelection,
+    ), setDividerResult);
   };
 
   const loadStickerCategories = async (): Promise<void> => {
@@ -985,7 +1004,7 @@ export function ConnectionScreen({
     ) {
       setError({
         code: 'INVALID_STICKER_REQUEST',
-        message: '스티커를 넣을 문단과 위치를 다시 선택해 주세요.',
+        message: '스티커를 넣을 배치 설정을 확인해 주세요.',
       });
       return;
     }
@@ -994,11 +1013,6 @@ export function ConnectionScreen({
     setStickerCategories([]);
     setStickerCategoryId('');
     setStickerResult(null);
-    setQuoteParagraphNumber(1);
-    setQuotePosition('after');
-    setQuoteStyles([]);
-    setQuoteStyleSelection('random');
-    setQuoteResult(null);
     setDraftSaveResult(null);
     setError(null);
 
@@ -1014,6 +1028,10 @@ export function ConnectionScreen({
 
       if (response.ok) {
         setStickerCategories(response.result.categories);
+        if (decorationPlan?.sticker.categoryMode === 'random') {
+          const categories = response.result.categories;
+          setStickerCategoryId(categories[Math.floor(Math.random() * categories.length)]?.id ?? '');
+        }
       } else {
         setError(response.error);
       }
@@ -1032,68 +1050,15 @@ export function ConnectionScreen({
   };
 
   const insertRandomSticker = async (): Promise<void> => {
-    if (
-      stickerParagraphNumber < 1 ||
-      stickerParagraphNumber > draftParagraphs.length ||
-      !stickerCategoryId
-    ) {
-      setError({
-        code: 'INVALID_STICKER_REQUEST',
-        message: '스티커를 넣을 문단·위치·묶음을 다시 선택해 주세요.',
-      });
+    if (!stickerCategoryId) {
+      setError({ code: 'INVALID_STICKER_REQUEST', message: '사용할 스티커 묶음을 선택해 주세요.' });
       return;
     }
-
-    const operationVersion = beginOperation('sticker');
-    setStickerResult(null);
-    setQuoteParagraphNumber(1);
-    setQuotePosition('after');
-    setQuoteStyles([]);
-    setQuoteStyleSelection('random');
-    setQuoteResult(null);
-    setDraftSaveResult(null);
-    setError(null);
-
-    try {
-      const response = await window.blowNaver.insertRandomSticker(
-        stickerParagraphNumber,
-        stickerPosition,
-        stickerCategoryId,
-      );
-
-      if (!isOperationCurrent(operationVersion)) {
-        return;
-      }
-
-      if (response.ok) {
-        setStickerResult(response.result);
-        setQuoteParagraphNumber(1);
-        setQuotePosition('after');
-        setQuoteStyles([]);
-        setQuoteStyleSelection('random');
-        setQuoteResult(null);
-        setDraftSaveResult(null);
-      } else {
-        if (response.error.code === 'STICKER_CATEGORY_STALE') {
-          setStickerCategories([]);
-          setStickerCategoryId('');
-        }
-
-        setError(response.error);
-      }
-    } catch {
-      if (!isOperationCurrent(operationVersion)) {
-        return;
-      }
-
-      setError({
-        code: 'STICKER_INSERT_UNCONFIRMED',
-        message: '스티커 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
-      });
-    } finally {
-      finishOperation(operationVersion);
-    }
+    await runDecorationInsert('sticker', (target) => window.blowNaver.insertRandomSticker(
+      target.paragraphNumber, target.position, stickerCategoryId,
+    ), setStickerResult);
   };
+
   const loadQuoteStyles = async (): Promise<void> => {
     if (
       quoteParagraphNumber < 1 ||
@@ -1101,14 +1066,13 @@ export function ConnectionScreen({
     ) {
       setError({
         code: 'INVALID_QUOTE_REQUEST',
-        message: '인용구를 넣을 문단과 위치를 다시 선택해 주세요.',
+        message: '인용구를 넣을 배치 설정을 확인해 주세요.',
       });
       return;
     }
 
     const operationVersion = beginOperation('quote-styles');
     setQuoteStyles([]);
-    setQuoteStyleSelection('random');
     setQuoteResult(null);
     setDraftSaveResult(null);
     setError(null);
@@ -1143,63 +1107,13 @@ export function ConnectionScreen({
   };
 
   const insertQuote = async (): Promise<void> => {
-    if (
-      quoteParagraphNumber < 1 ||
-      quoteParagraphNumber > draftParagraphs.length
-    ) {
-      setError({
-        code: 'INVALID_QUOTE_REQUEST',
-        message: '인용구를 넣을 문단과 위치를 다시 선택해 주세요.',
-      });
+    if (!isDecorationStyleAvailable(quoteStyleSelection, quoteStyles)) {
+      setError({ code: 'QUOTE_STYLE_NOT_FOUND', message: '인용구 목록을 확인하고 사용 가능한 디자인을 선택해 주세요.' });
       return;
     }
-
-    if (quoteStyles.length === 0) {
-      setError({
-        code: 'QUOTE_STYLE_NOT_FOUND',
-        message: '인용구 디자인을 먼저 불러와 주세요.',
-      });
-      return;
-    }
-
-    const operationVersion = beginOperation('quote');
-    setQuoteResult(null);
-    setDraftSaveResult(null);
-    setError(null);
-
-    try {
-      const response = await window.blowNaver.insertQuote(
-        quoteParagraphNumber,
-        quotePosition,
-        quoteStyleSelection,
-      );
-
-      if (!isOperationCurrent(operationVersion)) {
-        return;
-      }
-
-      if (response.ok) {
-        setQuoteResult(response.result);
-      } else {
-        if (response.error.code === 'QUOTE_STYLE_STALE') {
-          setQuoteStyles([]);
-          setQuoteStyleSelection('random');
-        }
-
-        setError(response.error);
-      }
-    } catch {
-      if (!isOperationCurrent(operationVersion)) {
-        return;
-      }
-
-      setError({
-        code: 'QUOTE_INSERT_UNCONFIRMED',
-        message: '인용구 삽입을 완료하지 못했습니다. Chrome 화면을 확인해 주세요.',
-      });
-    } finally {
-      finishOperation(operationVersion);
-    }
+    await runDecorationInsert('quote', (target) => window.blowNaver.insertQuote(
+      target.paragraphNumber, target.position, quoteStyleSelection,
+    ), setQuoteResult);
   };
 
   const saveDraft = async (): Promise<void> => {
@@ -1543,10 +1457,14 @@ export function ConnectionScreen({
           ? '로그인·블로그 자동 확인 중…'
           : requiresReauthentication
             ? '연결 다시 확인'
-            : !browserOpen
+            : isSetup && connectedBlogId
+              ? '연결 확인 완료'
+              : !isSetup && needsNewWriter
+                ? '새 글쓰기 화면 열기'
+                : !browserOpen
           ? '전용 Chrome 열기'
           : status?.stage === 'WRITER_LINK_READY'
-            ? '글쓰기 화면 열기'
+            ? '연결 확인 후 글쓰기 화면 열기'
             : status?.stage === 'WRITER_READY'
               ? '진입 확인 완료'
               : '연결 다시 확인';
@@ -1586,13 +1504,11 @@ export function ConnectionScreen({
         'DIVIDER_POSITION_MISMATCH',
       ].includes(error.code)
     : false;
-  const dividerRetryBlocked = [
+  const dividerRetryBlocked = decorationStarted.current.divider || [
     'DIVIDER_INSERT_UNCONFIRMED',
     'DIVIDER_STYLE_MISMATCH',
     'DIVIDER_POSITION_MISMATCH',
   ].includes(error?.code ?? '');
-  const selectedDividerPositionLabel =
-    getDividerPositionLabel(dividerPosition);
   const quoteError = error
     ? [
         'INVALID_QUOTE_REQUEST',
@@ -1612,7 +1528,7 @@ export function ConnectionScreen({
         'QUOTE_POSITION_MISMATCH',
       ].includes(error.code)
     : false;
-  const quoteRetryBlocked = [
+  const quoteRetryBlocked = decorationStarted.current.quote || [
     'QUOTE_INSERT_UNCONFIRMED',
     'QUOTE_STYLE_MISMATCH',
     'QUOTE_POSITION_MISMATCH',
@@ -1634,7 +1550,7 @@ export function ConnectionScreen({
         'STICKER_POSITION_MISMATCH',
       ].includes(error.code)
     : false;
-  const stickerRetryBlocked = [
+  const stickerRetryBlocked = decorationStarted.current.sticker || [
     'STICKER_INSERT_UNCONFIRMED',
     'STICKER_POSITION_MISMATCH',
   ].includes(error?.code ?? '');
@@ -1700,12 +1616,12 @@ export function ConnectionScreen({
     : false;
 
   return (
-    <>
+    <div className="naver-compose-page">
       <header className="page-head">
         <div>
-          <h1>네이버 자동 입력 확인</h1>
+          {isSetup ? <h2 id="brand-naver-heading" tabIndex={-1}>네이버 연결</h2> : <h1>네이버 임시저장</h1>}
           <p>
-            등록 블로그를 연결한 뒤 네이버 편집기에 제목, 본문, 이미지와 서식을 안전하게 입력합니다.
+            {isSetup ? '글을 작성하기 전에 저장할 블로그와 로그인 계정을 확인합니다.' : '연결을 다시 확인하고 글을 옮긴 뒤 임시저장하세요. 최종 발행은 네이버에서 직접 해주세요.'}
           </p>
         </div>
         {browserOpen || isActivelyRunning ? (
@@ -1738,16 +1654,34 @@ export function ConnectionScreen({
         ) : null}
       </header>
 
-      {initialDraft ? (
+      {!isSetup ? (
+        <>
+          <WritingSteps current={4} />
+          <button className="button secondary workflow-back" type="button" disabled={isActivelyRunning} onClick={onBack}>글 확인으로 돌아가기</button>
+        </>
+      ) : null}
+
+      {!isSetup && initialDraft ? (
         <section className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
-            <h2>생성된 콘텐츠를 불러왔습니다</h2>
-            <p>아래 제목, 본문과 이미지를 확인한 뒤 전용 Chrome 연결을 진행해 주세요. 아직 네이버 입력이나 임시저장은 실행하지 않았습니다.</p>
+            <h2>작성한 글을 가져왔어요</h2>
+            <p>작성한 제목·본문·이미지를 준비했습니다. 아래에서 글쓰기 화면을 확인한 뒤 옮겨 주세요. 이 화면으로 이동하는 것만으로 입력하거나 저장하지 않습니다.</p>
           </div>
         </section>
       ) : null}
 
+      {!isSetup && decorationPlan ? (
+        <section className="decoration-plan-summary" aria-label="미리 선택한 꾸미기">
+          <h2>미리 선택한 꾸미기</h2>
+          <p>{[
+            decorationPlan.quote.enabled ? `인용구: ${decorationPlacementLabel(placements.quote)}` : null,
+            decorationPlan.sticker.enabled ? `스티커: ${decorationPlacementLabel(placements.sticker)}` : null,
+            decorationPlan.divider.enabled ? `구분선: ${decorationPlacementLabel(placements.divider)}` : null,
+          ].filter(Boolean).join(' · ') || '사용 안 함'}</p>
+          <p className="field-help">본문을 옮긴 뒤 선택한 항목이 아래에 표시됩니다. 실제 디자인 목록을 확인하고 삽입해 주세요.</p>
+        </section>
+      ) : null}
       <section className="status-strip" aria-label="네이버 연결 상태">
         <div className="status-item">
           <PanelsTopLeft aria-hidden="true" />
@@ -1868,8 +1802,7 @@ export function ConnectionScreen({
           <div>
             <h2>인용구 위치를 확인했습니다</h2>
             <p>
-              {quoteResult.paragraphNumber}번째 문단의{' '}
-              {getQuotePositionLabel(quoteResult.position)}에 기본 인용구가 삽입됐습니다.
+              {decorationPlacementLabel(placements.quote)} 설정으로 인용구 {decorationProgress.quote}회 삽입을 확인했습니다.
               임시저장과 최종 발행은 실행하지 않았습니다.
             </p>
           </div>
@@ -1880,10 +1813,7 @@ export function ConnectionScreen({
           <div>
             <h2>스티커 위치를 확인했습니다</h2>
             <p>
-              {stickerResult.paragraphNumber}번째 문단의{' '}
-              {getStickerPositionLabel(stickerResult.position)}에{' '}
-              {stickerResult.categoryLabel ?? '선택한 묶음'}의 무작위 스티커가
-              삽입됐습니다. 임시저장과 최종 발행은 실행하지 않았습니다.
+              {decorationPlacementLabel(placements.sticker)} 설정으로 스티커 {decorationProgress.sticker}회 삽입을 확인했습니다. 임시저장과 최종 발행은 실행하지 않았습니다.
             </p>
           </div>
         </section>
@@ -1893,9 +1823,7 @@ export function ConnectionScreen({
           <div>
             <h2>구분선 위치를 확인했습니다</h2>
             <p>
-              {dividerResult.paragraphNumber}번째 문단의{' '}
-              {getDividerPositionLabel(dividerResult.position)}에{' '}
-              {dividerResult.styleLabel ?? '구분선'}이 삽입됐습니다.
+              {decorationPlacementLabel(placements.divider)} 설정으로 구분선 {decorationProgress.divider}회 삽입을 확인했습니다.
               임시저장과 최종 발행은 실행하지 않았습니다.
             </p>
           </div>
@@ -1927,7 +1855,7 @@ export function ConnectionScreen({
           <div>
             <h2>글쓰기 화면 진입을 확인했습니다</h2>
             <p>
-              아래 테스트 문안을 확인한 뒤 제목·본문 입력을 시작할 수 있습니다.
+              아래 입력 문안을 확인한 뒤 제목과 본문 입력을 시작할 수 있습니다.
             </p>
           </div>
         </section>
@@ -1943,6 +1871,17 @@ export function ConnectionScreen({
         </section>
       ) : null}
 
+      {isSetup && connectedBlogId ? (
+        <div className="message success-message" role="status">
+          <CheckCircle2 aria-hidden="true" />
+          <div>
+            <h3>네이버 연결 확인 완료</h3>
+            <p>연결된 블로그: {connectedBlogId}. 글을 작성하는 동안 전용 Chrome을 열어 두세요.</p>
+            <button className="button primary setup-next-button" type="button" disabled={isActivelyRunning} onClick={onContinue}>연결됐어요, 새 글 작성</button>
+          </div>
+        </div>
+      ) : null}
+
       <section
         className="connection-workbench"
         aria-busy={isUiBusy || isAutoChecking}
@@ -1951,8 +1890,8 @@ export function ConnectionScreen({
         <div className="connection-form-panel">
           <header className="panel-heading">
             <div>
-              <h2 id="connection-form-heading">블로그 주소</h2>
-              <p>본인이 관리하는 네이버 블로그 주소 한 개를 입력합니다.</p>
+              {isSetup ? <h3 id="connection-form-heading">어느 블로그에 저장할까요?</h3> : <h2 id="connection-form-heading">어느 블로그에 저장할까요?</h2>}
+              <p>본인이 관리하는 블로그 주소를 넣고, 열리는 Chrome에서 네이버에 로그인하세요.</p>
             </div>
             <span className="document-state">저장하지 않음</span>
           </header>
@@ -2032,7 +1971,7 @@ export function ConnectionScreen({
                 isActivelyRunning ||
                 isInteractionPaused ||
                 isAutoChecking ||
-                (status?.stage === 'WRITER_READY' && !requiresReauthentication)
+                ((isSetup ? Boolean(connectedBlogId) : status?.stage === 'WRITER_READY' && !needsNewWriter) && !requiresReauthentication)
               }
             >
               {isActivelyRunning || isAutoChecking ? (
@@ -2057,7 +1996,7 @@ export function ConnectionScreen({
         >
           <header className="panel-heading compact">
             <div>
-              <h2 id="connection-progress-heading">연결 순서</h2>
+              {isSetup ? <h3 id="connection-progress-heading">연결 순서</h3> : <h2 id="connection-progress-heading">연결 순서</h2>}
               <p>각 화면이 확실할 때만 다음 단계로 이동합니다.</p>
             </div>
           </header>
@@ -2087,7 +2026,7 @@ export function ConnectionScreen({
           </div>
 
           <ol className="step-list">
-            {connectionSteps.map((step, index) => {
+            {(isSetup ? connectionSteps.slice(0, 3) : connectionSteps).map((step, index) => {
               const stepStatus = getConnectionStepStatus(
                 index,
                 status,
@@ -2125,7 +2064,8 @@ export function ConnectionScreen({
         </aside>
       </section>
 
-      {status?.stage === 'WRITER_READY' ? (
+      <div className="naver-transfer-panels" hidden={isSetup || !initialDraft || loadedDraftRef.current !== initialDraft}>
+      {showDiagnostics && status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"
           aria-labelledby="network-test-heading"
@@ -2225,7 +2165,7 @@ export function ConnectionScreen({
         </section>
       ) : null}
 
-      {status?.stage === 'WRITER_READY' ? (
+      {showDiagnostics && status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"
           aria-labelledby="structure-test-heading"
@@ -2325,7 +2265,7 @@ export function ConnectionScreen({
         </section>
       ) : null}
 
-      {status?.stage === 'WRITER_READY' ? (
+      {showDiagnostics && status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"
           aria-labelledby="force-exit-test-heading"
@@ -2388,7 +2328,7 @@ export function ConnectionScreen({
         </section>
       ) : null}
 
-      {status?.stage === 'WRITER_READY' ? (
+      {showDiagnostics && status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"
           aria-labelledby="compatibility-environment-heading"
@@ -2484,7 +2424,7 @@ export function ConnectionScreen({
         </section>
       ) : null}
 
-      {status?.stage === 'WRITER_READY' ? (
+      {showDiagnostics && status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"
           aria-labelledby="writer-navigation-repeat-heading"
@@ -2601,7 +2541,7 @@ export function ConnectionScreen({
           </div>
         </section>
       ) : null}
-      {status?.stage === 'WRITER_READY' ? (
+      {showDiagnostics && status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"
           aria-labelledby="slow-network-test-heading"
@@ -2705,7 +2645,7 @@ export function ConnectionScreen({
         </section>
       ) : null}
 
-      {status?.stage === 'WRITER_READY' ? (
+      {showDiagnostics && status?.stage === 'WRITER_READY' ? (
         <section
           className="divider-test-panel"
           aria-labelledby="interaction-test-heading"
@@ -2816,7 +2756,7 @@ export function ConnectionScreen({
           </div>
         </section>
       ) : null}
-      {status?.stage === 'WRITER_READY' ? (
+      {status?.stage === 'WRITER_READY' && !needsNewWriter ? (
         <section
           className="editor-test-panel"
           aria-labelledby="editor-test-heading"
@@ -2824,7 +2764,7 @@ export function ConnectionScreen({
         >
           <header className="panel-heading">
             <div>
-              <h2 id="editor-test-heading">제목·본문 입력 테스트</h2>
+              <h2 id="editor-test-heading">제목과 본문 입력</h2>
               <p>
                 입력할 문안을 먼저 확인한 뒤 빈 네이버 글쓰기 화면에 입력합니다.
               </p>
@@ -2844,7 +2784,7 @@ export function ConnectionScreen({
             >
               <div className="field-group">
                 <label htmlFor="editor-test-title">
-                  테스트 제목 <span>필수</span>
+                  제목 <span>필수</span>
                 </label>
                 <input
                   id="editor-test-title"
@@ -2882,7 +2822,7 @@ export function ConnectionScreen({
 
               <div className="field-group">
                 <label htmlFor="editor-test-body">
-                  테스트 본문 <span>필수</span>
+                  본문 <span>필수</span>
                 </label>
                 <textarea
                   id="editor-test-body"
@@ -2956,7 +2896,7 @@ export function ConnectionScreen({
               </button>
             </form>
 
-            <aside className="editor-test-summary" aria-label="입력 테스트 범위">
+            <aside className="editor-test-summary" aria-label="입력 범위">
               <FileText aria-hidden="true" />
               <div>
                 <h3>{inputResult ? '처리 결과' : '이번 단계에서 확인할 내용'}</h3>
@@ -2991,125 +2931,13 @@ export function ConnectionScreen({
 
       {inputResult ? (
         <section
-          className="divider-test-panel"
-          aria-labelledby="draft-save-heading"
-          aria-busy={activeAction === 'save-draft'}
-        >
-          <header className="panel-heading">
-            <div>
-              <h2 id="draft-save-heading">네이버 임시저장</h2>
-              <p>
-                제목·본문 입력 직후 사진과 장식 테스트를 건너뛰고 바로 임시저장할 수 있습니다.
-              </p>
-            </div>
-            <span className="document-state">
-              {draftSaveResult
-                ? '임시저장 실행 완료'
-                : activeAction === 'save-draft'
-                  ? '임시저장 실행 중'
-                  : '저장 전'}
-            </span>
-          </header>
-
-          <div className="divider-test-layout">
-            <div className="divider-test-form">
-              <div className="editor-input-note">
-                <ShieldCheck aria-hidden="true" />
-                <p>
-                  네이버의 저장 버튼은 한 번만 조작하며 자동으로 다시 누르지 않습니다. 최종 발행은 실행하지 않습니다.
-                </p>
-              </div>
-
-              {draftSaveError && error ? (
-                <div className="editor-inline-error">
-                  <XCircle aria-hidden="true" />
-                  <div>
-                    <strong>임시저장을 실행하지 못했습니다</strong>
-                    <p>{error.message}</p>
-                  </div>
-                </div>
-              ) : null}
-
-              <button
-                className="button primary divider-insert-button"
-                type="button"
-                disabled={
-                  isUiBusy ||
-                  Boolean(draftSaveResult) ||
-                  draftSaveRetryBlocked
-                }
-                onClick={() => void saveDraft()}
-              >
-                {activeAction === 'save-draft' ? (
-                  <LoaderCircle className="is-spinning" aria-hidden="true" />
-                ) : draftSaveResult ? (
-                  <Check aria-hidden="true" />
-                ) : (
-                  <Save aria-hidden="true" />
-                )}
-                {activeAction === 'save-draft'
-                  ? '임시저장 실행 중…'
-                  : draftSaveResult
-                    ? '임시저장 실행 완료'
-                    : '임시저장 실행'}
-              </button>
-            </div>
-
-            <aside
-              className="divider-test-summary"
-              aria-label="네이버 임시저장 처리 범위"
-            >
-              <Save aria-hidden="true" />
-              <div>
-                <h3>
-                  {draftSaveResult
-                    ? '처리 결과'
-                    : '이번 단계에서 확인할 내용'}
-                </h3>
-                {draftSaveResult ? (
-                  <dl className="editor-result-values">
-                    <div>
-                      <dt>저장 결과</dt>
-                      <dd>임시저장 실행 완료</dd>
-                    </div>
-
-                    <div>
-                      <dt>처리 기록</dt>
-                      <dd>
-                        {draftSaveResult.signals
-                          .map((signal) => signal.label)
-                          .join(' · ')}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>최종 발행</dt>
-                      <dd>실행하지 않음</dd>
-                    </div>
-                  </dl>
-                ) : (
-                  <ol>
-                    <li>사진·서식 단계를 건너뛰고 바로 실행 가능</li>
-                    <li>제목과 본문이 입력 원문과 같은지 확인</li>
-                    <li>표시된 저장 버튼이 정확히 하나인지 확인</li>
-                    <li>저장 버튼 조작이 오류 없이 완료됐는지 확인</li>
-                    <li>네이버 응답과 개수 변화는 참고 정보로 수집</li>
-                    <li>최종 발행 기능은 탐색하거나 조작하지 않음</li>
-                  </ol>
-                )}
-              </div>
-            </aside>
-          </div>
-        </section>
-      ) : null}
-      {inputResult ? (
-        <section
-          className="image-test-panel"
+          className="image-test-panel optional-editor-panel"
           aria-labelledby="image-test-heading"
           aria-busy={activeAction === 'select-images' || activeAction === 'images'}
         >
           <header className="panel-heading">
             <div>
-              <h2 id="image-test-heading">사진 배치 테스트</h2>
+              <h2 id="image-test-heading">사진 배치</h2>
               <p>
                 {initialDraft?.images.length
                   ? '생성 이미지를 확인하고 배치 방식을 선택해 네이버 편집기에 첨부합니다.'
@@ -3274,7 +3102,7 @@ export function ConnectionScreen({
               </button>
             </div>
 
-            <aside className="image-test-summary" aria-label="이미지 첨부 테스트 범위">
+            <aside className="image-test-summary" aria-label="이미지 첨부 범위">
               <Images aria-hidden="true" />
               <div>
                 <h3>{imageResult ? '처리 결과' : '이번 단계에서 확인할 내용'}</h3>
@@ -3307,9 +3135,9 @@ export function ConnectionScreen({
         </section>
       ) : null}
 
-      {imageResult ? (
+      {inputResult && (!decorationPlan || decorationPlan.divider.enabled) ? (
         <section
-          className="divider-test-panel"
+          className="divider-test-panel optional-editor-panel"
           aria-labelledby="divider-test-heading"
           aria-busy={
             activeAction === 'divider-styles' ||
@@ -3318,9 +3146,9 @@ export function ConnectionScreen({
         >
           <header className="panel-heading">
             <div>
-              <h2 id="divider-test-heading">구분선 위치·디자인 테스트</h2>
+              <h2 id="divider-test-heading">구분선</h2>
               <p>
-                본문 위치와 디자인을 하나씩 선택해 네이버 편집기에 구분선을 넣습니다.
+                내용이 전환되거나 마무리되는 문단을 우선으로 구분선을 랜덤 배치합니다.
               </p>
             </div>
             <span className="document-state">
@@ -3334,90 +3162,22 @@ export function ConnectionScreen({
 
           <div className="divider-test-layout">
             <div className="divider-test-form">
-              <div className="divider-location-grid">
-                <div className="field-group">
-                  <label htmlFor="divider-paragraph">
-                    기준 문단 <span>필수</span>
-                  </label>
-                  <select
-                    id="divider-paragraph"
-                    value={dividerParagraphNumber}
-                    disabled={
-                      isUiBusy ||
-                      Boolean(dividerResult) ||
-                      dividerRetryBlocked
-                    }
-                    aria-describedby="divider-paragraph-help"
-                    onChange={(event) => {
-                      setDividerParagraphNumber(Number(event.target.value));
-                      setDividerStyles([]);
-                      setDividerStyleSelection('random');
-                      setError(null);
-                    }}
-                  >
-                    {draftParagraphs.map((paragraph, index) => (
-                      <option value={index + 1} key={index}>
-                        {index + 1}번째 문단 ·{' '}
-                        {paragraph.length > 30
-                          ? `${paragraph.slice(0, 30)}…`
-                          : paragraph}
-                      </option>
-                    ))}
-                  </select>
-                  <p id="divider-paragraph-help" className="field-help">
-                    이번 기술검증에서는 입력이 확인된 본문 문단만 위치 기준으로 사용합니다.
-                  </p>
-                </div>
-
-                <fieldset
-                  className="divider-position-fieldset"
-                  disabled={
-                    isUiBusy ||
-                    Boolean(dividerResult) ||
-                    dividerRetryBlocked
-                  }
-                  aria-describedby="divider-position-help"
-                >
-                  <legend className="field-label">
-                    삽입 위치 <span>필수</span>
-                  </legend>
-                  <div className="divider-position-options">
-                    {dividerPositionOptions.map((option) => (
-                      <label
-                        className={`divider-position-option${
-                          dividerPosition === option.value
-                            ? ' is-selected'
-                            : ''
-                        }`}
-                        key={option.value}
-                      >
-                        <input
-                          type="radio"
-                          name="divider-position"
-                          value={option.value}
-                          checked={dividerPosition === option.value}
-                          onChange={() => {
-                            setDividerPosition(option.value);
-                            setDividerStyles([]);
-                            setDividerStyleSelection('random');
-                            setError(null);
-                          }}
-                        />
-                        <span>
-                          <strong>{option.label}</strong>
-                          <small>{option.description}</small>
-                        </span>
-                        {dividerPosition === option.value ? (
-                          <Check aria-hidden="true" />
-                        ) : null}
-                      </label>
-                    ))}
-                  </div>
-                  <p id="divider-position-help" className="layout-selection-help">
-                    위치를 바꾸면 현재 디자인 목록을 다시 불러옵니다.
-                  </p>
-                </fieldset>
-              </div>
+              <DecorationPlacementFields id="transfer-divider" value={placements.divider}
+                disabled={isUiBusy || decorationStarted.current.divider || Boolean(dividerResult)}
+                onChange={(placement) => {
+                  setPlacements((current) => ({ ...current, divider: { ...current.divider, ...placement } }));
+                  setDividerStyles([]);
+                  setError(null);
+                }} />
+              <p className="field-help" role="status">
+                실제 배치: {decorationTargets.divider.length}회
+                {decorationTargets.divider.length < placements.divider.count
+                  ? ' — 짧은 글이거나 적절한 위치가 부족해 횟수를 줄였습니다.' : ' — 내용 전환·마무리 위치를 우선으로 골랐습니다.'}
+              </p>
+              {decorationStarted.current.divider ? <p className="field-help" role="status">
+                삽입 확인 {decorationProgress.divider}/{decorationTargets.divider.length}회
+                {!dividerResult && activeAction !== 'divider' ? ' · 작업이 끝나지 않았습니다. 중복 삽입을 막기 위해 다시 실행하지 않습니다. Chrome에서 결과를 확인해 주세요.' : ''}
+              </p> : null}
 
               <div className="divider-style-row">
                 <div className="field-group">
@@ -3442,6 +3202,11 @@ export function ConnectionScreen({
                     }}
                   >
                     <option value="random">무작위 (추천)</option>
+                    {dividerStyleSelection !== 'random' && !dividerStyles.some((style) => style.id === dividerStyleSelection) ? (
+                      <option value={dividerStyleSelection} disabled>
+                        {dividerStyles.length ? '선택한 디자인 없음 · 다시 선택' : '미리 선택한 디자인 · 목록 확인 필요'}
+                      </option>
+                    ) : null}
                     {dividerStyles.map((style) => (
                       <option value={style.id} key={style.id}>
                         {style.label}
@@ -3501,7 +3266,7 @@ export function ConnectionScreen({
                 type="button"
                 disabled={
                   isUiBusy ||
-                  dividerStyles.length === 0 ||
+                  !isDecorationStyleAvailable(dividerStyleSelection, dividerStyles) ||
                   Boolean(dividerResult) ||
                   dividerRetryBlocked
                 }
@@ -3518,13 +3283,13 @@ export function ConnectionScreen({
                   ? '삽입·검증 중…'
                   : dividerResult
                     ? '삽입 확인 완료'
-                    : '구분선 삽입'}
+                    : `구분선 ${decorationTargets.divider.length}회 삽입`}
               </button>
             </div>
 
             <aside
               className="divider-test-summary"
-              aria-label="구분선 위치 테스트 범위"
+              aria-label="구분선 위치 선택 범위"
             >
               <Minus aria-hidden="true" />
               <div>
@@ -3534,12 +3299,8 @@ export function ConnectionScreen({
                 {dividerResult ? (
                   <dl className="editor-result-values">
                     <div>
-                      <dt>기준</dt>
-                      <dd>{dividerResult.paragraphNumber}번째 문단</dd>
-                    </div>
-                    <div>
-                      <dt>위치</dt>
-                      <dd>{getDividerPositionLabel(dividerResult.position)}</dd>
+                      <dt>배치</dt>
+                      <dd>{decorationPlacementLabel(placements.divider)}</dd>
                     </div>
                     <div>
                       <dt>디자인</dt>
@@ -3547,15 +3308,15 @@ export function ConnectionScreen({
                     </div>
                     <div>
                       <dt>구분선</dt>
-                      <dd>{dividerResult.dividerCount}개</dd>
+                      <dd>{decorationProgress.divider}회 확인</dd>
                     </div>
                   </dl>
                 ) : (
                   <ol>
                     <li>본문 문단이 입력 원문과 같은지 확인</li>
-                    <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
+                    <li>글 길이를 기준으로 정한 문단 사이에 커서 지정</li>
                     <li>현재 네이버 편집기의 구분선 디자인 목록 확인</li>
-                    <li>무작위 또는 선택한 디자인 한 개만 조작</li>
+                    <li>위치마다 한 번씩 삽입하고 확인 후 다음 위치 진행</li>
                     <li>디자인·삽입 개수·문단 앞뒤 순서를 재확인</li>
                   </ol>
                 )}
@@ -3564,9 +3325,9 @@ export function ConnectionScreen({
           </div>
         </section>
       ) : null}
-      {dividerResult ? (
+      {inputResult && (!decorationPlan || decorationPlan.sticker.enabled) ? (
         <section
-          className="divider-test-panel sticker-test-panel"
+          className="divider-test-panel sticker-test-panel optional-editor-panel"
           aria-labelledby="sticker-test-heading"
           aria-busy={
             activeAction === 'sticker-categories' ||
@@ -3575,9 +3336,9 @@ export function ConnectionScreen({
         >
           <header className="panel-heading">
             <div>
-              <h2 id="sticker-test-heading">스티커 묶음·무작위 삽입 테스트</h2>
+              <h2 id="sticker-test-heading">스티커</h2>
               <p>
-                전용 Chrome에 표시된 묶음 하나를 선택하고, 그 안의 스티커 한 개를 무작위로 넣습니다.
+                사용 가능한 묶음 하나를 선택하면 각 배치 위치에 스티커를 무작위로 넣습니다.
               </p>
             </div>
             <span className="document-state">
@@ -3591,91 +3352,22 @@ export function ConnectionScreen({
 
           <div className="divider-test-layout">
             <div className="divider-test-form">
-              <div className="divider-location-grid">
-                <div className="field-group">
-                  <label htmlFor="sticker-paragraph">
-                    기준 문단 <span>필수</span>
-                  </label>
-                  <select
-                    id="sticker-paragraph"
-                    value={stickerParagraphNumber}
-                    disabled={
-                      isUiBusy ||
-                      Boolean(stickerResult) ||
-                      stickerRetryBlocked
-                    }
-                    aria-describedby="sticker-paragraph-help"
-                    onChange={(event) => {
-                      setStickerParagraphNumber(Number(event.target.value));
-                      setStickerCategories([]);
-                      setStickerCategoryId('');
-                      setError(null);
-                    }}
-                  >
-                    {draftParagraphs.map((paragraph, index) => (
-                      <option value={index + 1} key={index}>
-                        {index + 1}번째 문단 ·{' '}
-                        {paragraph.length > 30
-                          ? paragraph.slice(0, 30) + '…'
-                          : paragraph}
-                      </option>
-                    ))}
-                  </select>
-                  <p id="sticker-paragraph-help" className="field-help">
-                    입력이 확인된 본문 문단만 위치 기준으로 사용합니다.
-                  </p>
-                </div>
-
-                <fieldset
-                  className="divider-position-fieldset"
-                  disabled={
-                    isUiBusy ||
-                    Boolean(stickerResult) ||
-                    stickerRetryBlocked
-                  }
-                  aria-describedby="sticker-position-help"
-                >
-                  <legend className="field-label">
-                    삽입 위치 <span>필수</span>
-                  </legend>
-                  <div className="divider-position-options">
-                    {stickerPositionOptions.map((option) => (
-                      <label
-                        className={
-                          'divider-position-option' +
-                          (stickerPosition === option.value
-                            ? ' is-selected'
-                            : '')
-                        }
-                        key={option.value}
-                      >
-                        <input
-                          type="radio"
-                          name="sticker-position"
-                          value={option.value}
-                          checked={stickerPosition === option.value}
-                          onChange={() => {
-                            setStickerPosition(option.value);
-                            setStickerCategories([]);
-                            setStickerCategoryId('');
-                            setError(null);
-                          }}
-                        />
-                        <span>
-                          <strong>{option.label}</strong>
-                          <small>{option.description}</small>
-                        </span>
-                        {stickerPosition === option.value ? (
-                          <Check aria-hidden="true" />
-                        ) : null}
-                      </label>
-                    ))}
-                  </div>
-                  <p id="sticker-position-help" className="layout-selection-help">
-                    위치를 바꾸면 현재 묶음 목록을 다시 불러옵니다.
-                  </p>
-                </fieldset>
-              </div>
+              <DecorationPlacementFields id="transfer-sticker" value={placements.sticker}
+                disabled={isUiBusy || decorationStarted.current.sticker || Boolean(stickerResult)}
+                onChange={(placement) => {
+                  setPlacements((current) => ({ ...current, sticker: { ...current.sticker, ...placement } }));
+                  setStickerCategories([]); setStickerCategoryId('');
+                  setError(null);
+                }} />
+              <p className="field-help" role="status">
+                실제 배치: {decorationTargets.sticker.length}회
+                {decorationTargets.sticker.length < placements.sticker.count
+                  ? ' — 짧은 글이거나 적절한 위치가 부족해 횟수를 줄였습니다.' : ' — 내용 전환·마무리 위치를 우선으로 골랐습니다.'}
+              </p>
+              {decorationStarted.current.sticker ? <p className="field-help" role="status">
+                삽입 확인 {decorationProgress.sticker}/{decorationTargets.sticker.length}회
+                {!stickerResult && activeAction !== 'sticker' ? ' · 작업이 끝나지 않았습니다. 중복 삽입을 막기 위해 다시 실행하지 않습니다. Chrome에서 결과를 확인해 주세요.' : ''}
+              </p> : null}
 
               <div className="sticker-category-row">
                 <div className="field-group">
@@ -3737,7 +3429,7 @@ export function ConnectionScreen({
               <div className="editor-input-note">
                 <ShieldCheck aria-hidden="true" />
                 <p>
-                  선택한 묶음 안에서 한 개만 무작위로 고릅니다. 본문 원문과 스티커 개수, 실제 순서를 다시 확인하며 항목을 확실히 식별하지 못하면 작업을 멈춥니다.
+                  각 위치마다 선택한 묶음에서 스티커를 무작위로 고릅니다. 본문 원문과 스티커 개수, 실제 순서를 다시 확인하며 항목을 확실히 식별하지 못하면 작업을 멈춥니다.
                 </p>
               </div>
 
@@ -3773,13 +3465,13 @@ export function ConnectionScreen({
                   ? '무작위 삽입·검증 중…'
                   : stickerResult
                     ? '삽입 확인 완료'
-                    : '무작위 스티커 삽입'}
+                    : `스티커 ${decorationTargets.sticker.length}회 삽입`}
               </button>
             </div>
 
             <aside
               className="divider-test-summary"
-              aria-label="스티커 묶음·무작위 삽입 테스트 범위"
+              aria-label="스티커 묶음과 무작위 삽입 범위"
             >
               <Sticker aria-hidden="true" />
               <div>
@@ -3789,12 +3481,8 @@ export function ConnectionScreen({
                 {stickerResult ? (
                   <dl className="editor-result-values">
                     <div>
-                      <dt>기준</dt>
-                      <dd>{stickerResult.paragraphNumber}번째 문단</dd>
-                    </div>
-                    <div>
-                      <dt>위치</dt>
-                      <dd>{getStickerPositionLabel(stickerResult.position)}</dd>
+                      <dt>배치</dt>
+                      <dd>{decorationPlacementLabel(placements.sticker)}</dd>
                     </div>
                     <div>
                       <dt>묶음</dt>
@@ -3806,7 +3494,7 @@ export function ConnectionScreen({
                     </div>
                     <div>
                       <dt>스티커</dt>
-                      <dd>{stickerResult.stickerCount}개</dd>
+                      <dd>{decorationProgress.sticker}회 확인</dd>
                     </div>
                   </dl>
                 ) : (
@@ -3821,9 +3509,10 @@ export function ConnectionScreen({
             </aside>
           </div>
         </section>
-      ) : null}      {stickerResult ? (
+      ) : null}
+      {inputResult && (!decorationPlan || decorationPlan.quote.enabled) ? (
         <section
-          className="divider-test-panel quote-test-panel"
+          className="divider-test-panel quote-test-panel optional-editor-panel"
           aria-labelledby="quote-test-heading"
           aria-busy={
             activeAction === 'quote-styles' ||
@@ -3832,9 +3521,9 @@ export function ConnectionScreen({
         >
           <header className="panel-heading">
             <div>
-              <h2 id="quote-test-heading">인용구 위치·디자인 테스트</h2>
+              <h2 id="quote-test-heading">인용구</h2>
               <p>
-                본문 위치와 디자인을 하나씩 선택해 네이버 편집기에 인용구를 넣습니다.
+                내용이 전환되거나 마무리되는 문단을 우선으로 인용구 디자인을 랜덤 배치합니다.
               </p>
             </div>
             <span className="document-state">
@@ -3848,94 +3537,22 @@ export function ConnectionScreen({
 
           <div className="divider-test-layout">
             <div className="divider-test-form">
-              <div className="divider-location-grid">
-                <div className="field-group">
-                  <label htmlFor="quote-paragraph">
-                    기준 문단 <span>필수</span>
-                  </label>
-                  <select
-                    id="quote-paragraph"
-                    value={quoteParagraphNumber}
-                    disabled={
-                      isUiBusy ||
-                      Boolean(quoteResult) ||
-                      quoteRetryBlocked
-                    }
-                    aria-describedby="quote-paragraph-help"
-                    onChange={(event) => {
-                      setQuoteParagraphNumber(Number(event.target.value));
-                      setQuoteStyles([]);
-                      setQuoteStyleSelection('random');
-                      setQuoteResult(null);
-                      setDraftSaveResult(null);
-                      setError(null);
-                    }}
-                  >
-                    {draftParagraphs.map((paragraph, index) => (
-                      <option value={index + 1} key={index}>
-                        {index + 1}번째 문단 ·{' '}
-                        {paragraph.length > 30
-                          ? `${paragraph.slice(0, 30)}…`
-                          : paragraph}
-                      </option>
-                    ))}
-                  </select>
-                  <p id="quote-paragraph-help" className="field-help">
-                    이번 기술검증에서는 입력이 확인된 본문 문단만 위치 기준으로 사용합니다.
-                  </p>
-                </div>
-
-                <fieldset
-                  className="divider-position-fieldset"
-                  disabled={
-                    isUiBusy ||
-                    Boolean(quoteResult) ||
-                    quoteRetryBlocked
-                  }
-                  aria-describedby="quote-position-help"
-                >
-                  <legend className="field-label">
-                    삽입 위치 <span>필수</span>
-                  </legend>
-                  <div className="divider-position-options">
-                    {quotePositionOptions.map((option) => (
-                      <label
-                        className={`divider-position-option${
-                          quotePosition === option.value
-                            ? ' is-selected'
-                            : ''
-                        }`}
-                        key={option.value}
-                      >
-                        <input
-                          type="radio"
-                          name="quote-position"
-                          value={option.value}
-                          checked={quotePosition === option.value}
-                          onChange={() => {
-                            setQuotePosition(option.value);
-                            setQuoteStyles([]);
-                            setQuoteStyleSelection('random');
-                            setQuoteResult(null);
-                            setDraftSaveResult(null);
-                            setError(null);
-                          }}
-                        />
-                        <span>
-                          <strong>{option.label}</strong>
-                          <small>{option.description}</small>
-                        </span>
-                        {quotePosition === option.value ? (
-                          <Check aria-hidden="true" />
-                        ) : null}
-                      </label>
-                    ))}
-                  </div>
-                  <p id="quote-position-help" className="layout-selection-help">
-                    위치를 바꾸면 현재 디자인 목록을 다시 불러옵니다.
-                  </p>
-                </fieldset>
-              </div>
+              <DecorationPlacementFields id="transfer-quote" value={placements.quote}
+                disabled={isUiBusy || decorationStarted.current.quote || Boolean(quoteResult)}
+                onChange={(placement) => {
+                  setPlacements((current) => ({ ...current, quote: { ...current.quote, ...placement } }));
+                  setQuoteStyles([]);
+                  setError(null);
+                }} />
+              <p className="field-help" role="status">
+                실제 배치: {decorationTargets.quote.length}회
+                {decorationTargets.quote.length < placements.quote.count
+                  ? ' — 짧은 글이거나 적절한 위치가 부족해 횟수를 줄였습니다.' : ' — 내용 전환·마무리 위치를 우선으로 골랐습니다.'}
+              </p>
+              {decorationStarted.current.quote ? <p className="field-help" role="status">
+                삽입 확인 {decorationProgress.quote}/{decorationTargets.quote.length}회
+                {!quoteResult && activeAction !== 'quote' ? ' · 작업이 끝나지 않았습니다. 중복 삽입을 막기 위해 다시 실행하지 않습니다. Chrome에서 결과를 확인해 주세요.' : ''}
+              </p> : null}
 
               <div className="divider-style-row">
                 <div className="field-group">
@@ -3960,6 +3577,11 @@ export function ConnectionScreen({
                     }}
                   >
                     <option value="random">무작위 (추천)</option>
+                    {quoteStyleSelection !== 'random' && !quoteStyles.some((style) => style.id === quoteStyleSelection) ? (
+                      <option value={quoteStyleSelection} disabled>
+                        {quoteStyles.length ? '선택한 디자인 없음 · 다시 선택' : '미리 선택한 디자인 · 목록 확인 필요'}
+                      </option>
+                    ) : null}
                     {quoteStyles.map((style) => (
                       <option value={style.id} key={style.id}>
                         {style.label}
@@ -4019,7 +3641,7 @@ export function ConnectionScreen({
                 type="button"
                 disabled={
                   isUiBusy ||
-                  quoteStyles.length === 0 ||
+                  !isDecorationStyleAvailable(quoteStyleSelection, quoteStyles) ||
                   Boolean(quoteResult) ||
                   quoteRetryBlocked
                 }
@@ -4036,13 +3658,13 @@ export function ConnectionScreen({
                   ? '삽입·검증 중…'
                   : quoteResult
                     ? '삽입 확인 완료'
-                    : '인용구 삽입'}
+                    : `인용구 ${decorationTargets.quote.length}회 삽입`}
               </button>
             </div>
 
             <aside
               className="divider-test-summary"
-              aria-label="인용구 위치·디자인 테스트 범위"
+              aria-label="인용구 위치와 디자인 선택 범위"
             >
               <Quote aria-hidden="true" />
               <div>
@@ -4052,12 +3674,8 @@ export function ConnectionScreen({
                 {quoteResult ? (
                   <dl className="editor-result-values">
                     <div>
-                      <dt>기준</dt>
-                      <dd>{quoteResult.paragraphNumber}번째 문단</dd>
-                    </div>
-                    <div>
-                      <dt>위치</dt>
-                      <dd>{getQuotePositionLabel(quoteResult.position)}</dd>
+                      <dt>배치</dt>
+                      <dd>{decorationPlacementLabel(placements.quote)}</dd>
                     </div>
                     <div>
                       <dt>디자인</dt>
@@ -4065,15 +3683,15 @@ export function ConnectionScreen({
                     </div>
                     <div>
                       <dt>인용구</dt>
-                      <dd>{quoteResult.quoteCount}개</dd>
+                      <dd>{decorationProgress.quote}회 확인</dd>
                     </div>
                   </dl>
                 ) : (
                   <ol>
                     <li>본문 문단이 입력 원문과 같은지 확인</li>
-                    <li>선택한 문단의 시작 또는 끝에 커서 지정</li>
+                    <li>글 길이를 기준으로 정한 문단 사이에 커서 지정</li>
                     <li>현재 네이버 편집기의 인용구 디자인 목록 확인</li>
-                    <li>무작위 또는 선택한 디자인 한 개만 조작</li>
+                    <li>위치마다 한 번씩 삽입하고 확인 후 다음 위치 진행</li>
                     <li>디자인·삽입 개수·문단 앞뒤 순서를 재확인</li>
                   </ol>
                 )}
@@ -4082,6 +3700,126 @@ export function ConnectionScreen({
           </div>
         </section>
       ) : null}
-    </>
+      {inputResult ? (
+        <section
+          className="divider-test-panel"
+          aria-labelledby="draft-save-heading"
+          aria-busy={activeAction === 'save-draft'}
+        >
+          <header className="panel-heading">
+            <div>
+              <h2 id="draft-save-heading">네이버 임시저장</h2>
+              <p>
+                선택한 이미지와 꾸미기를 확인한 뒤 저장하세요. 꾸미기를 생략하고 저장할 수도 있습니다.
+              </p>
+            </div>
+            <span className="document-state">
+              {draftSaveResult
+                ? '임시저장 실행 완료'
+                : activeAction === 'save-draft'
+                  ? '임시저장 실행 중'
+                  : '저장 전'}
+            </span>
+          </header>
+
+          <div className="divider-test-layout">
+            <div className="divider-test-form">
+              <div className="editor-input-note">
+                <ShieldCheck aria-hidden="true" />
+                <p>
+                  네이버의 저장 버튼은 한 번만 조작하며 자동으로 다시 누르지 않습니다. 최종 발행은 실행하지 않습니다.
+                </p>
+              </div>
+
+              {decorationPlan && (
+                (decorationPlan.divider.enabled && !dividerResult) ||
+                (decorationPlan.sticker.enabled && !stickerResult) ||
+                (decorationPlan.quote.enabled && !quoteResult)
+              ) ? (
+                <p className="field-help" role="status">미리 선택한 꾸미기 중 완료되지 않은 항목이 있습니다. 지금 저장하면 실제 삽입이 확인된 내용까지만 반영됩니다.</p>
+              ) : null}
+              {draftSaveError && error ? (
+                <div className="editor-inline-error">
+                  <XCircle aria-hidden="true" />
+                  <div>
+                    <strong>임시저장을 실행하지 못했습니다</strong>
+                    <p>{error.message}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              <button
+                className="button primary divider-insert-button"
+                type="button"
+                disabled={
+                  isUiBusy ||
+                  Boolean(draftSaveResult) ||
+                  draftSaveRetryBlocked
+                }
+                onClick={() => void saveDraft()}
+              >
+                {activeAction === 'save-draft' ? (
+                  <LoaderCircle className="is-spinning" aria-hidden="true" />
+                ) : draftSaveResult ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Save aria-hidden="true" />
+                )}
+                {activeAction === 'save-draft'
+                  ? '임시저장 실행 중…'
+                  : draftSaveResult
+                    ? '임시저장 실행 완료'
+                    : '임시저장 실행'}
+              </button>
+            </div>
+
+            <aside
+              className="divider-test-summary"
+              aria-label="네이버 임시저장 처리 범위"
+            >
+              <Save aria-hidden="true" />
+              <div>
+                <h3>
+                  {draftSaveResult
+                    ? '처리 결과'
+                    : '이번 단계에서 확인할 내용'}
+                </h3>
+                {draftSaveResult ? (
+                  <dl className="editor-result-values">
+                    <div>
+                      <dt>저장 결과</dt>
+                      <dd>임시저장 실행 완료</dd>
+                    </div>
+
+                    <div>
+                      <dt>처리 기록</dt>
+                      <dd>
+                        {draftSaveResult.signals
+                          .map((signal) => signal.label)
+                          .join(' · ')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>최종 발행</dt>
+                      <dd>실행하지 않음</dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <ol>
+                    <li>사진·서식 단계를 건너뛰고 바로 실행 가능</li>
+                    <li>제목과 본문이 입력 원문과 같은지 확인</li>
+                    <li>표시된 저장 버튼이 정확히 하나인지 확인</li>
+                    <li>저장 버튼 조작이 오류 없이 완료됐는지 확인</li>
+                    <li>네이버 응답과 개수 변화는 참고 정보로 수집</li>
+                    <li>최종 발행 기능은 탐색하거나 조작하지 않음</li>
+                  </ol>
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
+      </div>
+    </div>
   );
 }

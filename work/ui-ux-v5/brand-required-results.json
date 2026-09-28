@@ -1,0 +1,12 @@
+{
+  "results": [
+    "All 15 fields visible in one vertical column; 10 required / 5 optional with large category headings",
+    "Keyboard tab order follows all fields from top to bottom",
+    "Required-field errors still block save and focus first invalid field; all 10 required fields enforced while optional fields may stay blank",
+    "Removed settings are absent and products use their own save area",
+    "All 15 values preserved exactly in save payload and across menu navigation",
+    "All fields remain stacked without horizontal overflow at 1920, 1366, 768 and 375px",
+    "Legacy profile still loads with existing values and prompts for seven new required fields on save"
+  ],
+  "errors": []
+}

@@ -1,3 +1,5 @@
+import { formatProductCatalog } from '../shared/product-services.js';
+import { writingTargetLengths } from '../shared/writing-options.js';
 import type { BrandProfile } from './brand-profile.js';
 
 const reasoningEfforts = new Set([
@@ -8,7 +10,7 @@ const reasoningEfforts = new Set([
   'xhigh',
   'max',
 ]);
-const targetLengths = new Set([1_200, 1_800, 2_500]);
+const targetLengths = new Set<number>(writingTargetLengths);
 
 export interface BlogGenerationRequest {
   readonly userId: string;
@@ -236,10 +238,9 @@ function buildBrandFacts(profile: BrandProfile): Record<string, string> {
     브랜드명: profile.brandName,
     업종: profile.industry,
     '브랜드·사업 소개': profile.brandIntroduction,
-    '상품·서비스 목록': profile.productsAndServices,
+    '상품·서비스 목록': formatProductCatalog(profile.productsAndServices, profile.productPrices),
     '콘텐츠 방향': profile.contentDirection,
     '활동 지역': profile.activityRegion,
-    '가격 정보': profile.priceInfo,
     영업시간: profile.businessHours,
     '핵심 강점': profile.coreStrengths,
     '주요 고객': profile.targetCustomers,
@@ -249,11 +250,10 @@ function buildBrandFacts(profile: BrandProfile): Record<string, string> {
     '기본 말투': profile.defaultTone,
     전화번호: profile.phoneNumber,
     주소: profile.address,
-    '예약·상담 링크': profile.consultationLink,
   };
 }
 
-function readOutputText(payload: unknown): string | null {
+export function readOutputText(payload: unknown): string | null {
   if (!isRecord(payload)) return null;
   if (typeof payload.output_text === 'string') return payload.output_text;
   if (!Array.isArray(payload.output)) return null;

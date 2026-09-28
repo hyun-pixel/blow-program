@@ -11,9 +11,10 @@ const profile: BrandProfile = {
   industry: '보험 상담',
   brandIntroduction: '복잡한 보험 내용을 쉽게 설명합니다.',
   productsAndServices: '실손보험 상담',
+  productPrices: { '실손보험 상담': '초회 무료' },
   contentDirection: '쉬운 정보형 글',
   activityRegion: '서울',
-  priceInfo: '',
+  priceInfo: '숨겨진 예전 가격',
   businessHours: '',
   coreStrengths: '쉬운 설명',
   targetCustomers: '보험을 처음 알아보는 고객',
@@ -26,7 +27,7 @@ const profile: BrandProfile = {
   imageStyle: '',
   phoneNumber: '',
   address: '',
-  consultationLink: '',
+  consultationLink: 'https://example.invalid/retired-booking',
   updatedAt: '2026-09-13T00:00:00.000Z',
 };
 
@@ -34,7 +35,7 @@ const generationRequest = {
   userId: '8573e7bb-9257-49bc-a419-6f0f5ad9f1fb',
   topic: '실손보험 가입 전에 확인할 내용을 설명해 주세요.',
   articleType: '정보형',
-  targetLength: 1_200,
+  targetLength: 1_000,
   keywords: [{ value: '실손보험', repetitions: 3 }],
   service: '실손보험 상담',
   cta: '',
@@ -44,10 +45,18 @@ const generationRequest = {
 
 function makeValidBody(): string {
   const keywordText = generationRequest.keywords[0].value.repeat(3);
-  return `${keywordText}${'가'.repeat(1_200 - [...keywordText].length)}`;
+  return `${keywordText}${'가'.repeat(1_000 - [...keywordText].length)}`;
 }
 
 describe('OpenAI blog generation', () => {
+  it.each([700, 1_000, 1_500, 1_800, 2_000, 2_500])('accepts the %i-character writing option', (targetLength) => {
+    expect(normalizeBlogGenerationRequest({ ...generationRequest, targetLength }).targetLength).toBe(targetLength);
+  });
+
+  it('rejects the removed 1,200-character option', () => {
+    expect(() => normalizeBlogGenerationRequest({ ...generationRequest, targetLength: 1_200 })).toThrow('입력값');
+  });
+
   it('rejects unsupported generation settings before making a request', () => {
     expect(() => normalizeBlogGenerationRequest({
       ...generationRequest,
@@ -63,7 +72,7 @@ describe('OpenAI blog generation', () => {
     );
 
     expect(verification.valid).toBe(true);
-    expect(verification.bodyLength).toBe(1_200);
+    expect(verification.bodyLength).toBe(1_000);
     expect(verification.blockingIssues).toEqual([]);
 
     const invalidDraft = verifyGeneratedBlogDraft(
@@ -84,12 +93,12 @@ describe('OpenAI blog generation', () => {
     );
     expect(longDraft.valid).toBe(false);
     expect(longDraft.issues).toEqual(expect.arrayContaining([
-      expect.stringContaining('목표 범위 1,080–1,320자'),
+      expect.stringContaining('목표 범위 900–1,100자'),
     ]));
     expect(longDraft.blockingIssues).toEqual([]);
 
     const keywordMismatch = verifyGeneratedBlogDraft(
-      { title: '실손보험 가입 전 확인사항', body: '가'.repeat(1_200) },
+      { title: '실손보험 가입 전 확인사항', body: '가'.repeat(1_000) },
       generationRequest,
     );
     expect(keywordMismatch.blockingIssues).toEqual(expect.arrayContaining([
@@ -136,9 +145,9 @@ describe('OpenAI blog generation', () => {
       format: { type: 'json_schema', strict: true },
       verbosity: 'high',
     });
-    expect(requestedBody.instructions).toEqual(expect.stringContaining('1080–1320자'));
-    expect(requestedBody.instructions).toEqual(expect.stringContaining('1200자 안팎'));
-    expect(requestedBody.instructions).toEqual(expect.stringContaining('1284자를 넘기지 마세요'));
+    expect(requestedBody.instructions).toEqual(expect.stringContaining('900–1100자'));
+    expect(requestedBody.instructions).toEqual(expect.stringContaining('1000자 안팎'));
+    expect(requestedBody.instructions).toEqual(expect.stringContaining('1070자를 넘기지 마세요'));
     expect(requestedBody.instructions).toEqual(expect.stringContaining('제목의 사용 횟수를 본문 횟수에 합산하지 마세요'));
     expect(requestedBody.instructions).toEqual(expect.stringContaining('직접 점검'));
     expect(JSON.parse(String(requestedBody.input))).toMatchObject({
@@ -147,6 +156,9 @@ describe('OpenAI blog generation', () => {
         '본문 사용 횟수': 3,
       }],
     });
+    expect(JSON.stringify(requestedBody)).toContain('실손보험 상담 (가격: 초회 무료)');
+    expect(JSON.stringify(requestedBody)).not.toContain(profile.priceInfo);
+    expect(JSON.stringify(requestedBody)).not.toContain(profile.consultationLink);
     expect(requestCount).toBe(1);
     expect(JSON.stringify(requestedBody)).not.toContain('sk-test-key');
   });

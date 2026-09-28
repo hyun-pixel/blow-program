@@ -45,6 +45,7 @@ import {
   generateOpenAiBlogDraft,
   normalizeBlogGenerationRequest,
 } from './openai-generation.js';
+import { recommendOpenAiTopics, normalizeTopicRecommendationRequest } from './openai-topic-recommendation.js';
 import {
   decodeGeneratedBlogImageDataUrl,
   generateOpenAiBlogImages,
@@ -54,6 +55,7 @@ import {
   normalizeBrandProfileUserId,
   readBrandProfile,
   saveBrandProfile,
+  saveBrandProfileProducts,
 } from './brand-profile.js';
 import {
   completePendingGeneratedImages,
@@ -85,12 +87,14 @@ const ipcChannels = {
   openAiCredentialSave: 'openai:credential-save',
   openAiCredentialRemove: 'openai:credential-remove',
   openAiConnectionTest: 'openai:connection-test',
+  openAiRecommendTopics: 'openai:recommend-topics',
   openAiGenerateDraft: 'openai:generate-draft',
   openAiGenerateImages: 'openai:generate-images',
   openAiGenerationCancel: 'openai:generation-cancel',
   brandProfileGet: 'brand-profile:get',
   openAiModelList: 'openai:model-list',
   brandProfileSave: 'brand-profile:save',
+  brandProfileProductsSave: 'brand-profile:products-save',
   workHistoryList: 'work-history:list',
   workHistoryAdd: 'work-history:add',
   workHistoryDelete: 'work-history:delete',
@@ -102,6 +106,7 @@ const ipcChannels = {
   naverState: 'naver:state',
   naverVerify: 'naver:verify',
   naverOpenWriter: 'naver:open-writer',
+  naverPrepareAutomaticWriter: 'naver:prepare-automatic-writer',
   naverEnterContent: 'naver:enter-content',
   naverListDividerStyles: 'naver:list-divider-styles',
   naverInsertDivider: 'naver:insert-divider',
@@ -797,6 +802,32 @@ function registerNaverIpc(): void {
           message: '네이버 연결 상태를 확인하지 못했습니다. 다시 시도해 주세요.',
         },
       };
+    } finally {
+      activeRun = false;
+    }
+  });
+
+  ipcMain.handle(ipcChannels.naverPrepareAutomaticWriter, async (event, blogId: unknown) => {
+    requireTrustedSender(event);
+    if (activeRun) return busyResponse();
+    const session = activeNaverSession;
+    const appWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!session || typeof blogId !== 'string' || blogId !== session.profile.blogId) {
+      return { ok: false, error: { code: 'WRITER_NOT_READY', message: '블로그 세팅에서 저장할 네이버 블로그를 다시 연결해 주세요.' } };
+    }
+    if (!appWindow || appWindow.isDestroyed() || !appWindow.isFocused()) {
+      return { ok: false, error: { code: 'USER_INTERACTION_DETECTED', message: 'BLOW 창을 맨 앞으로 두고 다시 시작해 주세요.' } };
+    }
+    naverWatchVersion += 1;
+    activeRun = true;
+    try {
+      const status = await session.prepareAutomaticWriter(blogId);
+      // Our own new Chrome tab can take focus. Restore BLOW before the guarded input operations.
+      if (!appWindow.isDestroyed()) appWindow.focus();
+      return { ok: true, status };
+    } catch (error) {
+      return { ok: false, error: error instanceof NaverConnectionRunnerError
+        ? error.failure : { code: 'WRITER_NOT_READY', message: '새 글쓰기 화면을 준비하지 못했습니다. 네이버 연결을 확인해 주세요.' } };
     } finally {
       activeRun = false;
     }
@@ -2669,6 +2700,62 @@ function registerIpc(): void {
     }
   });
   ipcMain.handle(
+    ipcChannels.openAiRecommendTopics,
+    async (event, rawInput: unknown) => {
+      requireTrustedSender(event);
+
+      if (activeOpenAiGeneration) {
+        return {
+          ok: false,
+          code: 'GENERATION_IN_PROGRESS',
+          message: '이미 콘텐츠를 생성하고 있습니다. 완료되거나 중단된 뒤 다시 시도해 주세요.',
+        };
+      }
+
+      const controller = new AbortController();
+      activeOpenAiGeneration = controller;
+      try {
+        const input = normalizeTopicRecommendationRequest(rawInput);
+        const [apiKey, profile] = await Promise.all([
+          readOpenAiCredential(getOpenAiCredentialPath(), safeStorage),
+          readBrandProfile(getBrandProfilePath(input.userId)),
+        ]);
+
+        if (!apiKey) {
+          return {
+            ok: false,
+            code: 'CREDENTIAL_MISSING',
+            message: '먼저 OpenAI API 키를 안전하게 저장해 주세요.',
+          };
+        }
+
+        if (!profile) {
+          return {
+            ok: false,
+            code: 'BRAND_PROFILE_MISSING',
+            message: '먼저 브랜드 프로필의 필수 정보를 저장해 주세요.',
+          };
+        }
+
+        return await recommendOpenAiTopics(
+          apiKey,
+          input,
+          profile,
+          fetch,
+          controller.signal,
+        );
+      } catch {
+        return {
+          ok: false,
+          code: 'GENERATION_INPUT_INVALID',
+          message: '추천 요청 내용을 확인한 뒤 다시 시도해 주세요.',
+        };
+      } finally {
+        if (activeOpenAiGeneration === controller) activeOpenAiGeneration = null;
+      }
+    },
+  );
+  ipcMain.handle(
     ipcChannels.openAiGenerateDraft,
     async (event, rawInput: unknown) => {
       requireTrustedSender(event);
@@ -2681,6 +2768,8 @@ function registerIpc(): void {
         };
       }
 
+      const controller = new AbortController();
+      activeOpenAiGeneration = controller;
       try {
         const input = normalizeBlogGenerationRequest(rawInput);
         const [apiKey, profile] = await Promise.all([
@@ -2704,28 +2793,21 @@ function registerIpc(): void {
           };
         }
 
-        const controller = new AbortController();
-        activeOpenAiGeneration = controller;
-
-        try {
-          return await generateOpenAiBlogDraft(
-            apiKey,
-            input,
-            profile,
-            fetch,
-            controller.signal,
-          );
-        } finally {
-          if (activeOpenAiGeneration === controller) {
-            activeOpenAiGeneration = null;
-          }
-        }
+        return await generateOpenAiBlogDraft(
+          apiKey,
+          input,
+          profile,
+          fetch,
+          controller.signal,
+        );
       } catch {
         return {
           ok: false,
           code: 'GENERATION_INPUT_INVALID',
           message: '글 생성 입력값을 확인한 뒤 다시 시도해 주세요.',
         };
+      } finally {
+        if (activeOpenAiGeneration === controller) activeOpenAiGeneration = null;
       }
     },
   );
@@ -2742,6 +2824,8 @@ function registerIpc(): void {
         };
       }
 
+      const controller = new AbortController();
+      activeOpenAiGeneration = controller;
       try {
         const input = normalizeBlogImageGenerationRequest(rawInput);
         const [apiKey, profile] = await Promise.all([
@@ -2765,28 +2849,21 @@ function registerIpc(): void {
           };
         }
 
-        const controller = new AbortController();
-        activeOpenAiGeneration = controller;
-
-        try {
-          return await generateOpenAiBlogImages(
-            apiKey,
-            input,
-            profile,
-            fetch,
-            controller.signal,
-          );
-        } finally {
-          if (activeOpenAiGeneration === controller) {
-            activeOpenAiGeneration = null;
-          }
-        }
+        return await generateOpenAiBlogImages(
+          apiKey,
+          input,
+          profile,
+          fetch,
+          controller.signal,
+        );
       } catch {
         return {
           ok: false,
           code: 'GENERATION_INPUT_INVALID',
           message: '이미지 생성 설정을 확인한 뒤 다시 시도해 주세요.',
         };
+      } finally {
+        if (activeOpenAiGeneration === controller) activeOpenAiGeneration = null;
       }
     },
   );
@@ -2839,6 +2916,20 @@ function registerIpc(): void {
       }
     },
   );
+  ipcMain.handle(ipcChannels.brandProfileProductsSave, async (event, userId: unknown, input: unknown) => {
+    requireTrustedSender(event);
+    try {
+      return { ok: true, profile: await saveBrandProfileProducts(getBrandProfilePath(userId), input) };
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: 'BRAND_PRODUCTS_SAVE_FAILED',
+          message: '상품·서비스를 저장하지 못했습니다. 기본 블로그 세팅의 저장 여부와 목록을 확인한 뒤 다시 시도해 주세요.',
+        },
+      };
+    }
+  });
   ipcMain.handle(ipcChannels.workHistoryList, async (event, userId: unknown) => {
     requireTrustedSender(event);
 
@@ -3013,7 +3104,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: 620,
     show: false,
     backgroundColor: '#f4f5f7',
-    title: 'BLOW 개발 작업대',
+    title: 'BLOW',
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),

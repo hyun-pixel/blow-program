@@ -111,10 +111,7 @@ export function AuthScreen() {
       <main className="auth-page">
         <section className="auth-card" aria-labelledby="auth-heading">
           <div className="auth-brand" aria-label="BLOW">
-            <span className="wordmark-sign" aria-hidden="true">
-              B
-            </span>
-            <strong>BLOW</strong>
+            <span>blow</span><span className="wordmark-dot">.</span>
           </div>
           <header className="auth-heading">
             <h1 id="auth-heading">앱 연결 설정이 필요합니다</h1>
@@ -129,10 +126,7 @@ export function AuthScreen() {
     <main className="auth-page">
       <section className="auth-card" aria-labelledby="auth-heading">
         <div className="auth-brand" aria-label="BLOW">
-          <span className="wordmark-sign" aria-hidden="true">
-            B
-          </span>
-          <strong>BLOW</strong>
+          <span>blow</span><span className="wordmark-dot">.</span>
         </div>
 
         <header className="auth-heading">

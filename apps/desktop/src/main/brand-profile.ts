@@ -1,11 +1,14 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { normalizeProductCatalog, normalizeProductPrices, type ProductPrices } from '../shared/product-services.js';
+import { requiredBrandProfileFields, requiredBrandProfileLabels } from '../shared/brand-profile-requirements.js';
 
 export interface BrandProfileInput {
   readonly brandName: string;
   readonly industry: string;
   readonly brandIntroduction: string;
   readonly productsAndServices: string;
+  readonly productPrices?: ProductPrices;
   readonly contentDirection: string;
   readonly activityRegion: string;
   readonly priceInfo: string;
@@ -113,7 +116,10 @@ export function normalizeBrandProfile(input: unknown): BrandProfileInput {
     throw new Error('예약·상담 링크 형식을 확인해 주세요.');
   }
 
-  return profile;
+  return candidate.productPrices === undefined ? profile : {
+    ...profile,
+    productPrices: normalizeProductPrices(candidate.productPrices, profile.productsAndServices),
+  };
 }
 
 export function normalizeBrandProfileUserId(input: unknown): string {
@@ -151,6 +157,27 @@ export async function saveBrandProfile(
     ...normalizeBrandProfile(input),
     updatedAt: new Date().toISOString(),
   };
+  // Validate new saves without rejecting older profiles when reading them.
+  const missingFields = requiredBrandProfileFields.filter((field) => !profile[field]);
+  if (missingFields.length > 0) {
+    throw new Error(`${missingFields.map((field) => requiredBrandProfileLabels[field]).join(', ')} 항목을 입력해 주세요.`);
+  }
+
+  return writeBrandProfile(filePath, profile);
+}
+
+export async function saveBrandProfileProducts(filePath: string, input: unknown): Promise<BrandProfile> {
+  const catalog = normalizeProductCatalog(input);
+  const saved = await readBrandProfile(filePath);
+  if (!saved) throw new Error('먼저 블로그 세팅을 저장해 주세요.');
+  return writeBrandProfile(filePath, {
+    ...saved,
+    ...catalog,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function writeBrandProfile(filePath: string, profile: BrandProfile): Promise<BrandProfile> {
   const temporaryPath = `${filePath}.tmp`;
 
   await mkdir(dirname(filePath), { recursive: true });

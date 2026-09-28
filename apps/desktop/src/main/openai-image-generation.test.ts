@@ -96,6 +96,8 @@ describe('OpenAI blog image generation', () => {
       quality: 'low',
       output_format: 'jpeg',
     });
+    expect(requestedBody.prompt).not.toContain(profile.imageStyle);
+    expect(requestedBody.prompt).toContain(imageRequest.style);
     expect(JSON.stringify(requestedBody)).not.toContain('sk-test-key');
   });
 

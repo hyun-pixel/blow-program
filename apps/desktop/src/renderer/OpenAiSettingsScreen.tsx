@@ -19,7 +19,7 @@ interface Notice {
   readonly detail: string;
 }
 
-export function OpenAiSettingsScreen() {
+export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonly onContinue?: () => void; readonly embedded?: boolean }) {
   const [credentialState, setCredentialState] = useState<CredentialState>('loading');
   const [apiKey, setApiKey] = useState('');
   const [isKeyVisible, setIsKeyVisible] = useState(false);
@@ -122,8 +122,8 @@ export function OpenAiSettingsScreen() {
     <>
       <header className="page-head">
         <div>
-          <h1>OpenAI 연결</h1>
-          <p>개인 API 키를 이 Windows 계정에서만 열 수 있도록 암호화해 보관합니다.</p>
+          {embedded ? <h2 id="brand-ai-heading" tabIndex={-1}>AI 연결</h2> : <h1>AI 연결</h1>}
+          <p>글을 작성할 AI를 연결합니다. 본인의 OpenAI API 키를 한 번 저장해 주세요.</p>
         </div>
       </header>
 
@@ -143,6 +143,11 @@ export function OpenAiSettingsScreen() {
           <div>
             <h2>{notice.title}</h2>
             <p>{notice.detail}</p>
+            {onContinue && connectionState === 'connected' ? (
+              <button className="button secondary setup-next-button" type="button" onClick={onContinue}>
+                다음: 네이버 연결
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -151,8 +156,8 @@ export function OpenAiSettingsScreen() {
         <div className="connection-form-panel">
           <header className="panel-heading compact">
             <div>
-              <h2 id="openai-key-heading">API 키 보관</h2>
-              <p>저장된 키 원문은 화면에 다시 표시하지 않습니다.</p>
+              {embedded ? <h3 id="openai-key-heading">OpenAI API 키 입력</h3> : <h2 id="openai-key-heading">OpenAI API 키 입력</h2>}
+              <p>API 키는 AI 서비스를 이용하기 위한 연결 코드입니다. 저장한 키는 다시 표시하지 않습니다.</p>
             </div>
           </header>
 
@@ -206,7 +211,7 @@ export function OpenAiSettingsScreen() {
                 <>
                   <button className="button secondary" type="button" disabled={isBusy} onClick={() => void testConnection()}>
                     {connectionState === 'checking' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}
-                    {connectionState === 'checking' ? '확인 중…' : '연결 검사'}
+                    {connectionState === 'checking' ? '확인 중…' : '연결 확인'}
                   </button>
                   <button className="button danger" type="button" disabled={isBusy} onClick={() => void removeCredential()}>
                     <Trash2 aria-hidden="true" />
@@ -221,8 +226,8 @@ export function OpenAiSettingsScreen() {
         <aside className="connection-progress" aria-label="OpenAI 연결 준비 상태">
           <header className="panel-heading compact">
             <div>
-              <h2>보안 상태</h2>
-              <p>키 원문을 노출하지 않고 상태만 표시합니다.</p>
+              {embedded ? <h3>연결 상태</h3> : <h2>연결 상태</h2>}
+              <p>키를 저장한 뒤 ‘연결 확인’을 눌러 주세요.</p>
             </div>
           </header>
 

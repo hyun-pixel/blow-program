@@ -34,6 +34,7 @@ import type {
   BlogGenerationRequest,
   OpenAiGenerationResult,
 } from '../main/openai-generation.js';
+import type { TopicRecommendationRequest, TopicRecommendationResult } from '../main/openai-topic-recommendation.js';
 import type {
   BlogImageGenerationRequest,
   OpenAiImageGenerationResult,
@@ -212,6 +213,7 @@ interface BrandProfileInput {
   readonly industry: string;
   readonly brandIntroduction: string;
   readonly productsAndServices: string;
+  readonly productPrices?: Readonly<Record<string, string>>;
   readonly contentDirection: string;
   readonly activityRegion: string;
   readonly priceInfo: string;
@@ -280,12 +282,14 @@ declare global {
       remove(): Promise<OpenAiCredentialResponse>;
       testConnection(): Promise<OpenAiConnectionResponse>;
       listModels(): Promise<OpenAiModelListResponse>;
+      recommendTopics(input: TopicRecommendationRequest): Promise<TopicRecommendationResult>;
       generateDraft(input: BlogGenerationRequest): Promise<OpenAiGenerationResult>;
       generateImages(input: BlogImageGenerationRequest): Promise<OpenAiImageGenerationResult>;
       cancelGeneration(): Promise<OpenAiGenerationCancelResponse>;
     };
     readonly blowBrandProfile: {
       get(userId: string): Promise<BrandProfileResponse>;
+      saveProducts(userId: string, items: readonly { readonly name: string; readonly price: string }[]): Promise<BrandProfileResponse>;
       save(
         userId: string,
         input: BrandProfileInput,
@@ -320,6 +324,7 @@ declare global {
       ): () => void;
       verify(): Promise<NaverErrorResponse | NaverSuccessResponse>;
       openWriter(): Promise<NaverErrorResponse | NaverSuccessResponse>;
+      prepareAutomaticWriter(blogId: string): Promise<NaverErrorResponse | NaverSuccessResponse>;
       enterContent(
         content: DraftContent,
       ): Promise<NaverErrorResponse | NaverInputSuccessResponse>;

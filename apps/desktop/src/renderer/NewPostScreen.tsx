@@ -1,7 +1,9 @@
+import { getProductPrice, type ProductPrices } from '../shared/product-services.js';
 import {
   CheckCircle2,
   CircleAlert,
   FilePenLine,
+
   ImageIcon,
   LoaderCircle,
   Plus,
@@ -25,13 +27,16 @@ import {
   reasoningEffortLabels,
   type ReasoningEffort,
 } from './model-options.js';
+import { writingTargetLengths } from '../shared/writing-options.js';
 import { supabase } from './supabase.js';
+import { PostDecorationFields } from './PostDecorationFields.js';
+import { defaultPostDecorations, type PostDecorations } from './post-decoration.js';
+import { WritingSteps } from './WritingSteps.js';
+import { TopicRecommendations } from './TopicRecommendations.js';
+import { WritingQueuePanel } from './WritingQueuePanel.js';
+import { useWritingQueue } from './useWritingQueue.js';
+import type { WritingConfig, WritingJob } from './writing-queue.js';
 import type {
-  BlogDraftVerification,
-  GeneratedBlogDraft,
-} from '../main/openai-generation.js';
-import type {
-  GeneratedBlogImage,
   ImageAspectRatio,
   ImageQualityMode,
 } from '../main/openai-image-generation.js';
@@ -56,31 +61,22 @@ interface KeywordRow {
 
 export function NewPostScreen({
   userId,
+  active = true,
+  connectedBlogId,
+  onBusyChange,
   onOpenBrandProfile,
-  onPrepareNaverDraft,
+  onReviewSaved,
 }: {
   readonly userId: string;
+  readonly active?: boolean;
+  readonly connectedBlogId: string | null;
+  readonly onBusyChange: (busy: boolean) => void;
   readonly onOpenBrandProfile: () => void;
-  readonly onPrepareNaverDraft: (
-    draft: GeneratedBlogDraft & {
-      readonly images: readonly GeneratedBlogImage[];
-      readonly modelId: string;
-      readonly modelName: string;
-      readonly reasoningEffort: string;
-      readonly reasoningLabel: string;
-      readonly settings: {
-        readonly articleType: string;
-        readonly targetLength: number;
-        readonly useGeneratedImages: boolean;
-        readonly imageCount: number;
-        readonly imageAspectRatio: ImageAspectRatio;
-        readonly imageQualityMode: ImageQualityMode;
-        readonly imageStyle: string;
-      };
-    },
-  ) => void;
+  readonly onReviewSaved: () => void;
 }) {
+  const [decorations, setDecorations] = useState<PostDecorations>(defaultPostDecorations);
   const [topic, setTopic] = useState('');
+  const [isTopicRecommending, setIsTopicRecommending] = useState(false);
   const [articleType, setArticleType] = useState('');
   const [targetLength, setTargetLength] = useState(1_800);
   const [keywords, setKeywords] = useState<readonly KeywordRow[]>([{
@@ -88,12 +84,12 @@ export function NewPostScreen({
     value: '',
     repetitions: '3',
   }]);
-  const [recommendationCount, setRecommendationCount] = useState(5);
   const [serviceSelection, setServiceSelection] = useState('');
   const [customService, setCustomService] = useState('');
   const [cta, setCta] = useState('');
   const [brandName, setBrandName] = useState('');
   const [serviceOptions, setServiceOptions] = useState<readonly string[]>([]);
+  const [productPrices, setProductPrices] = useState<ProductPrices>({});
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [errors, setErrors] = useState<CoreDraftErrors>({});
@@ -107,36 +103,35 @@ export function NewPostScreen({
   const [modelId, setModelId] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | ''>('');
   const [modelReloadToken, setModelReloadToken] = useState(0);
-  const [generationStatus, setGenerationStatus] = useState<
-    'idle' | 'generating' | 'generatingImages' | 'complete' | 'error'
-  >('idle');
-  const [generationError, setGenerationError] = useState<string | null>(null);
-  const [generationResult, setGenerationResult] = useState<{
-    readonly draft: GeneratedBlogDraft;
-    readonly verification: BlogDraftVerification;
-  } | null>(null);
+  const [editingId, setEditingId] = useState<string | undefined>();
   const [useGeneratedImages, setUseGeneratedImages] = useState(false);
   const [imageCount, setImageCount] = useState(1);
   const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>('landscape');
   const [imageQualityMode, setImageQualityMode] = useState<ImageQualityMode>('economy');
   const [imageStyle, setImageStyle] = useState('');
-  const [imageGenerationStatus, setImageGenerationStatus] = useState<
-    'idle' | 'generating' | 'complete' | 'error'
-  >('idle');
-  const [imageGenerationError, setImageGenerationError] = useState<string | null>(null);
-  const [generatedImages, setGeneratedImages] = useState<readonly GeneratedBlogImage[]>([]);
   const keywordSequence = useRef(0);
-  const resultRef = useRef<HTMLElement>(null);
+  const queue = useWritingQueue(userId, (config) => {
+    if (!connectedBlogId || config.blogId !== connectedBlogId) throw new Error('목록에 설정한 블로그와 현재 연결이 다릅니다. 블로그 세팅에서 다시 연결해 주세요.');
+    const model = selectableModels.find((item) => item.modelId === config.request.modelId);
+    if (modelStatus !== 'ready' || !model || !model.allowedReasoningEfforts.includes(config.request.reasoningEffort as ReasoningEffort)) throw new Error('현재 사용할 수 없는 모델 또는 추론 강도입니다. 해당 글의 설정을 수정해 주세요.');
+    if (!brandName || isProfileLoading || profileError) throw new Error('블로그 세팅을 먼저 확인해 주세요.');
+  });
 
   useEffect(() => {
-    let active = true;
+    if (!active) return;
+    setIsProfileLoading(true);
+    setProfileError(null);
+    let current = true;
 
     void window.blowBrandProfile.get(userId).then((response) => {
-      if (!active) return;
+      if (!current) return;
 
       if (response.ok && response.profile) {
         setBrandName(response.profile.brandName);
-        setServiceOptions(parseProductOptions(response.profile.productsAndServices));
+        const services = parseProductOptions(response.profile.productsAndServices);
+        setServiceOptions(services);
+        setProductPrices(response.profile.productPrices ?? {});
+        setServiceSelection((current) => current === '__custom__' || services.includes(current) ? current : '');
         setCta(response.profile.defaultCta);
       } else if (!response.ok) {
         setProfileError(response.error.message);
@@ -145,19 +140,20 @@ export function NewPostScreen({
     });
 
     return () => {
-      active = false;
+      current = false;
     };
-  }, [userId]);
+  }, [active, userId]);
 
   useEffect(() => {
-    let active = true;
+    if (!active) return;
+    let current = true;
 
     const loadModels = async (): Promise<void> => {
       setModelStatus('loading');
       setModelError(null);
 
       if (!supabase) {
-        if (active) {
+        if (current) {
           setModelStatus('error');
           setModelError('Supabase 연결 설정을 확인해 주세요.');
         }
@@ -181,7 +177,7 @@ export function NewPostScreen({
         window.blowOpenAi.listModels(),
       ]);
 
-      if (!active) return;
+      if (!current) return;
 
       if (allowedResult.error) {
         setModelStatus('error');
@@ -237,20 +233,23 @@ export function NewPostScreen({
     void loadModels();
 
     return () => {
-      active = false;
+      current = false;
     };
-  }, [modelReloadToken, userId]);
+  }, [active, modelReloadToken, userId]);
 
   const selectedService = serviceSelection === '__custom__'
     ? customService.trim()
     : serviceSelection;
   const selectedModel = selectableModels.find((model) => model.modelId === modelId);
+  const recommendationModel = selectedModel
+    ?? selectableModels.find((model) => model.isDefault)
+    ?? selectableModels[0];
   const hasErrors = hasCoreDraftErrors(errors);
   const showKeywordWarning = hasExcessiveKeywords(keywords);
-  const isGenerating = generationStatus === 'generating'
-    || generationStatus === 'generatingImages';
-  const hasBlockingKeywordIssues =
-    (generationResult?.verification.blockingIssues.length ?? 0) > 0;
+  const isGenerating = queue.busy;
+  useEffect(() => {
+    onBusyChange(queue.busy || isTopicRecommending);
+  }, [queue.busy, isTopicRecommending, onBusyChange]);
 
   const clearError = (field: keyof CoreDraftErrors): void => {
     setErrors((current) => ({ ...current, [field]: undefined }));
@@ -325,165 +324,83 @@ export function NewPostScreen({
     clearError('keywords');
   };
 
-  const resetImageResult = (): void => {
-    setImageGenerationStatus('idle');
-    setImageGenerationError(null);
-    setGeneratedImages([]);
-    setNotice(null);
+  const resetImageResult = (): void => setNotice(null);
+
+  const editJob = (job: WritingJob): void => {
+    const { request, images, decorations } = job.config;
+    setEditingId(job.id);
+    setTopic(request.topic);
+    setArticleType(request.articleType);
+    setTargetLength(request.targetLength);
+    setKeywords(request.keywords.map((item, index) => ({ id: index === 0 ? 'primary' : `secondary-${++keywordSequence.current}`, value: item.value, repetitions: String(item.repetitions) })));
+    setServiceSelection(request.service ? '__custom__' : '');
+    setCustomService(request.service);
+    setCta(request.cta);
+    setModelId(request.modelId);
+    setReasoningEffort(request.reasoningEffort as ReasoningEffort);
+    setUseGeneratedImages(images.enabled);
+    setImageCount(images.count);
+    setImageAspectRatio(images.aspectRatio);
+    setImageQualityMode(images.qualityMode);
+    setImageStyle(images.style);
+    setDecorations(structuredClone(decorations));
+    setErrors({});
+    setNotice('목록에 담긴 글의 설정을 수정하고 있습니다.');
+    document.getElementById('new-post-topic')?.focus();
   };
 
-  const generateImagesForDraft = async (
-    draft: GeneratedBlogDraft,
-  ): Promise<void> => {
-    setGenerationStatus('generatingImages');
-    setImageGenerationStatus('generating');
-    setImageGenerationError(null);
-    setNotice(null);
-
-    try {
-      const response = await window.blowOpenAi.generateImages({
-        userId,
-        topic: topic.trim(),
-        articleTitle: draft.title,
-        articleBody: draft.body,
-        count: imageCount,
-        aspectRatio: imageAspectRatio,
-        qualityMode: imageQualityMode,
-        style: imageStyle.trim(),
-      });
-
-      if (!response.ok) {
-        setGenerationStatus('complete');
-        setImageGenerationStatus('error');
-        setImageGenerationError(response.message);
-        return;
-      }
-
-      setGeneratedImages(response.images);
-      setImageGenerationStatus('complete');
-      setGenerationStatus('complete');
-      setNotice(`제목과 본문, 이미지 ${response.images.length}장을 생성했습니다.`);
-      window.setTimeout(() => resultRef.current?.focus(), 0);
-    } catch {
-      setGenerationStatus('complete');
-      setImageGenerationStatus('error');
-      setImageGenerationError('프로그램을 다시 연 뒤 이미지만 다시 생성해 주세요.');
-    }
-  };
-
-  const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault();
-    const nextErrors = validateCoreDraft({
-      topic,
-      articleType,
-      modelId,
-      reasoningEffort,
-      keywords,
-    });
+  const saveSettings = (startImmediately: boolean): void => {
+    if (queue.busy || isTopicRecommending || !queue.ready) return;
+    const nextErrors = validateCoreDraft({ topic, articleType, modelId, reasoningEffort, keywords });
     setErrors(nextErrors);
     setNotice(null);
-    setGenerationError(null);
-
     if (hasCoreDraftErrors(nextErrors)) {
-      const firstKeywordErrorIndex = nextErrors.keywords?.findIndex(
-        (keyword) => keyword.value || keyword.repetitions,
-      ) ?? -1;
-      const firstKeywordError = firstKeywordErrorIndex >= 0
-        ? nextErrors.keywords?.[firstKeywordErrorIndex]
-        : undefined;
-      const firstInvalidId = nextErrors.topic
-        ? 'new-post-topic'
-        : nextErrors.articleType
-          ? 'new-post-article-type'
-          : nextErrors.modelId
-            ? 'new-post-model'
-            : nextErrors.reasoningEffort
-              ? 'new-post-reasoning'
-              : firstKeywordError?.value
-                ? `new-post-keyword-${firstKeywordErrorIndex}`
-                : `new-post-repetitions-${firstKeywordErrorIndex}`;
-      document.getElementById(firstInvalidId)?.focus();
+      const index = nextErrors.keywords?.findIndex((keyword) => keyword.value || keyword.repetitions) ?? 0;
+      document.getElementById(nextErrors.topic ? 'new-post-topic' : nextErrors.articleType ? 'new-post-article-type'
+        : nextErrors.modelId ? 'new-post-model' : nextErrors.reasoningEffort ? 'new-post-reasoning' : `new-post-keyword-${Math.max(index, 0)}`)?.focus();
       return;
     }
-
-    if (!brandName) {
-      setGenerationStatus('error');
-      setGenerationError('먼저 브랜드 프로필의 필수 정보를 저장해 주세요.');
+    const config: WritingConfig = {
+      request: { userId, topic: topic.trim(), articleType, targetLength,
+        keywords: keywords.map((keyword) => ({ value: keyword.value.trim(), repetitions: Number(keyword.repetitions) })),
+        service: selectedService, cta: cta.trim(), modelId, reasoningEffort },
+      blogId: connectedBlogId ?? '', modelName: selectedModel?.displayName ?? modelId,
+      reasoningLabel: reasoningEffort ? reasoningEffortLabels[reasoningEffort] : '',
+      decorations: structuredClone(decorations),
+      images: { enabled: useGeneratedImages, count: imageCount, aspectRatio: imageAspectRatio, qualityMode: imageQualityMode, style: imageStyle.trim() },
+    };
+    const id = queue.add(config, editingId);
+    if (!id) { document.getElementById('writing-queue')?.scrollIntoView({ block: 'start' }); return; }
+    if (startImmediately) {
+      // Keep the form linked to this job until execution is explicitly confirmed.
+      // Canceling and trying again updates the same job instead of losing input or adding duplicates.
+      setEditingId(id);
+      queue.start(id);
       return;
     }
-
-    setGenerationStatus('generating');
-    setImageGenerationStatus('idle');
-    setImageGenerationError(null);
-    setGeneratedImages([]);
-
-    try {
-      const response = await window.blowOpenAi.generateDraft({
-        userId,
-        topic: topic.trim(),
-        articleType,
-        targetLength,
-        keywords: keywords.map((keyword) => ({
-          value: keyword.value.trim(),
-          repetitions: Number(keyword.repetitions),
-        })),
-        service: selectedService,
-        cta: cta.trim(),
-        modelId,
-        reasoningEffort,
-      });
-
-      if (!response.ok) {
-        setGenerationStatus('error');
-        setGenerationError(response.message);
-        return;
-      }
-
-      setGenerationResult({
-        draft: response.draft,
-        verification: response.verification,
-      });
-
-      if (response.verification.blockingIssues.length > 0) {
-        setGenerationStatus('complete');
-        setNotice('설정한 키워드 횟수를 충족하지 못해 이미지 생성을 시작하지 않았습니다.');
-        window.setTimeout(() => resultRef.current?.focus(), 0);
-        return;
-      }
-
-      if (useGeneratedImages) {
-        await generateImagesForDraft(response.draft);
-        return;
-      }
-
-      setGenerationStatus('complete');
-      setNotice(response.verification.valid
-        ? '제목과 본문을 생성하고 권장 기준을 충족했습니다.'
-        : '제목과 본문을 생성했습니다. 권장 기준을 벗어난 항목을 확인해 주세요.');
-      window.setTimeout(() => resultRef.current?.focus(), 0);
-    } catch {
-      setGenerationStatus('error');
-      setGenerationError('프로그램을 다시 연 뒤 글 생성을 다시 시도해 주세요.');
-    }
+    setEditingId(undefined);
+    setTopic('');
+    setKeywords([{ id: 'primary', value: '', repetitions: '3' }]);
+    setNotice('글별 설정을 목록에 저장했습니다. 다음 주제를 입력하거나 목록을 실행하세요.');
+    document.getElementById('writing-queue')?.scrollIntoView({ block: 'start' });
   };
 
-  const cancelGeneration = async (): Promise<void> => {
-    try {
-      await window.blowOpenAi.cancelGeneration();
-    } catch {
-      setGenerationStatus('error');
-      setGenerationError('작업을 중단하지 못했습니다. 프로그램을 다시 열어 주세요.');
-    }
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    saveSettings(false);
   };
 
   return (
-    <>
+    <div className="compose-page">
       <header className="page-head">
         <div>
           <h1>새 글 작성</h1>
-          <p>먼저 글의 핵심을 정하고, 다음 단계에서 표현과 이미지 설정을 이어갑니다.</p>
+          <p>글별 주제와 꾸미기를 정하면 네이버 임시저장까지 자동으로 진행합니다. 저장된 글은 마지막에 확인하세요.</p>
         </div>
       </header>
+
+      <WritingSteps current={queue.busy ? 3 : queue.jobs.length > 0 && queue.jobs.every((job) => job.status === 'saved') ? 4 : 2} />
+      <p className="connected-blog-note"><CheckCircle2 aria-hidden="true" />저장할 블로그: {connectedBlogId ?? '연결 재확인 필요'}</p>
 
       {hasErrors ? (
         <div className="message error-message" role="alert">
@@ -495,61 +412,68 @@ export function NewPostScreen({
         </div>
       ) : null}
 
-      {isGenerating ? (
-        <div className="message new-post-generation-progress" role="status" aria-live="polite">
-          <LoaderCircle className="is-spinning" aria-hidden="true" />
-          <div>
-            <h2>
-              {generationStatus === 'generatingImages'
-                ? '글에 사용할 이미지를 만들고 있습니다'
-                : '제목과 본문을 작성하고 있습니다'}
-            </h2>
-            <p>완료될 때까지 이 화면을 열어 두세요. 정확한 남은 시간은 표시하지 않습니다.</p>
-          </div>
-        </div>
-      ) : null}
-
-      {generationError ? (
-        <div className="message error-message" role="alert">
-          <XCircle aria-hidden="true" />
-          <div>
-            <h2>글을 생성하지 못했습니다</h2>
-            <p>{generationError}</p>
-          </div>
-        </div>
-      ) : null}
+      <WritingQueuePanel jobs={queue.jobs} busy={queue.busy} stopping={queue.stopping}
+        disabled={!queue.ready || isTopicRecommending || Boolean(editingId)} error={queue.error}
+        confirmation={queue.confirmation} onCancelStart={queue.cancelStart}
+        onConfirmStart={() => void queue.confirmStart(() => {
+          if (editingId) {
+            setEditingId(undefined);
+            setTopic('');
+            setKeywords([{ id: 'primary', value: '', repetitions: '3' }]);
+            setErrors({});
+          }
+          setNotice(null);
+          document.getElementById('writing-queue')?.scrollIntoView({ block: 'start' });
+        })}
+        onStart={() => void queue.start()} onStop={queue.stop} onEdit={editJob} onRemove={queue.remove}
+        onReview={onReviewSaved} />
 
       {notice ? (
         <div className="message success-message" role="status">
           <CheckCircle2 aria-hidden="true" />
           <div>
-            <h2>글 생성 완료</h2>
+            <h2>작성 목록 안내</h2>
             <p>{notice}</p>
           </div>
         </div>
       ) : null}
 
-      <section className="connection-workbench new-post-workbench" aria-labelledby="new-post-heading">
-        <div className="connection-form-panel">
-          <header className="panel-heading compact">
-            <div>
-              <h2 id="new-post-heading">글의 핵심</h2>
-              <p>현재 글에 실제로 사용할 내용만 입력해 주세요.</p>
-            </div>
-          </header>
 
-          <form
-            id="new-post-form"
-            className="connection-form new-post-form"
-            aria-busy={isGenerating}
-            noValidate
-            onSubmit={(event) => void submit(event)}
-          >
-            <div className="field-group">
-              <label htmlFor="new-post-topic">주제 또는 작성 요청 <span>필수</span></label>
+          {!isProfileLoading && !brandName ? (
+            <div className="new-post-profile-warning">
+              <CircleAlert aria-hidden="true" />
+              <div>
+                <strong>블로그 세팅을 먼저 완료해 주세요</strong>
+                <p>실제 글을 만들기 전 브랜드 기본 정보를 먼저 저장해 주세요.</p>
+                <button className="button secondary" type="button" onClick={onOpenBrandProfile}>
+                  블로그 세팅 열기
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {profileError ? (
+            <div className="new-post-profile-warning" role="alert">
+              <CircleAlert aria-hidden="true" />
+              <div>
+                <strong>브랜드 정보를 불러오지 못했습니다</strong>
+                <p>{profileError}</p>
+              </div>
+            </div>
+          ) : null}
+
+<form id="new-post-form" className="compose-stack" aria-busy={isGenerating} noValidate onSubmit={submit}>
+<fieldset className="compose-fields" disabled={isGenerating || !queue.ready}>
+<legend className="compose-editor-title">{editingId ? '목록의 글 설정 수정' : '글별 설정'}</legend>
+{editingId ? <button className="button secondary" type="button" onClick={() => { setEditingId(undefined); setNotice('목록의 기존 설정은 변경하지 않았습니다.'); }}>수정 취소</button> : null}
+<section className="compose-section" aria-labelledby="compose-section-01">
+<header className="compose-section-heading"><span className="compose-section-number" aria-hidden="true">01</span><div><h2 id="compose-section-01">글 주제</h2><p>어떤 내용을 전하고 싶은지 적어 주세요.</p></div><span className="compose-section-kind">필수</span></header>
+<div className="compose-section-body">            <div className="field-group">
+              <label htmlFor="new-post-topic">쓰고 싶은 내용 <span>필수</span></label>
               <textarea
                 id="new-post-topic"
                 className="new-post-topic"
+                disabled={isGenerating || isTopicRecommending}
                 value={topic}
                 maxLength={500}
                 required
@@ -571,45 +495,27 @@ export function NewPostScreen({
               </p>
               {errors.topic ? <p id="new-post-topic-error" className="field-error">{errors.topic}</p> : null}
             </div>
+            <TopicRecommendations
+              userId={userId}
+              topic={topic}
+              model={recommendationModel}
+              reasoningEffort={selectedModel ? reasoningEffort : ''}
+              unavailableReason={isProfileLoading ? '블로그 세팅을 불러오는 중입니다.'
+                : !brandName ? '블로그 세팅을 먼저 저장해 주세요.'
+                : modelStatus === 'loading' ? '사용 가능한 AI를 확인하는 중입니다.'
+                : modelStatus === 'error' ? modelError ?? '블로그 세팅의 AI 연결을 확인해 주세요.'
+                : !connectedBlogId ? '네이버 연결을 먼저 확인해 주세요.'
+                : !recommendationModel ? '추천에 사용할 AI가 없습니다. AI 연결을 확인해 주세요.' : null}
+              disabled={isGenerating}
+              onSelect={(content) => { setTopic(content); clearError('topic'); }}
+              onBusyChange={setIsTopicRecommending}
+            />
 
-            <div className="field-group">
-              <label htmlFor="new-post-service">이번 글의 상품·서비스 <span>선택</span></label>
-              <select
-                id="new-post-service"
-                value={serviceSelection}
-                onChange={(event) => {
-                  setServiceSelection(event.target.value);
-                  setNotice(null);
-                }}
-              >
-                <option value="">지정하지 않음</option>
-                {serviceOptions.map((service) => (
-                  <option key={service} value={service}>{service}</option>
-                ))}
-                <option value="__custom__">직접 입력</option>
-              </select>
-              <p className="field-help">선택한 항목만 이번 글에 우선 반영합니다.</p>
-            </div>
-
-            {serviceSelection === '__custom__' ? (
-              <div className="field-group">
-                <label htmlFor="new-post-custom-service">직접 입력할 상품·서비스 <span>선택</span></label>
-                <input
-                  id="new-post-custom-service"
-                  value={customService}
-                  maxLength={200}
-                  placeholder="예: 자동차보험 갱신 상담"
-                  onChange={(event) => {
-                    setCustomService(event.target.value);
-                    setNotice(null);
-                  }}
-                />
-              </div>
-            ) : null}
-
-            <div className="new-post-grid">
-              <div className="field-group">
-                <label htmlFor="new-post-article-type">글 유형 <span>필수</span></label>
+</div></section>
+<section className="compose-section" aria-labelledby="compose-section-02">
+<header className="compose-section-heading"><span className="compose-section-number" aria-hidden="true">02</span><div><h2 id="compose-section-02">글 유형</h2><p>목적에 맞는 글의 방식을 선택하세요.</p></div><span className="compose-section-kind">필수</span></header>
+<div className="compose-section-body">              <div className="field-group">
+                <label htmlFor="new-post-article-type">어떤 방식의 글인가요? <span>필수</span></label>
                 <select
                   id="new-post-article-type"
                   value={articleType}
@@ -633,7 +539,10 @@ export function NewPostScreen({
                 ) : null}
               </div>
 
-              <div className="field-group">
+</div></section>
+<section className="compose-section" aria-labelledby="compose-section-03">
+<header className="compose-section-heading"><span className="compose-section-number" aria-hidden="true">03</span><div><h2 id="compose-section-03">글 길이</h2><p>원하는 분량을 선택하세요.</p></div><span className="compose-section-kind">필수</span></header>
+<div className="compose-section-body">              <div className="field-group">
                 <label htmlFor="new-post-target-length">목표 글자 수 <span>공백 제외</span></label>
                 <select
                   id="new-post-target-length"
@@ -643,17 +552,17 @@ export function NewPostScreen({
                     setNotice(null);
                   }}
                 >
-                  {[1_200, 1_800, 2_500].map((length) => (
+                  {writingTargetLengths.map((length) => (
                     <option key={length} value={length}>{length.toLocaleString('ko-KR')}자</option>
                   ))}
                 </select>
                 <p className="field-help">생성 결과의 허용 범위는 목표값의 ±10%입니다.</p>
-              </div>
-            </div>
-
-            <fieldset className="new-post-keywords">
-              <legend>키워드</legend>
-              <p className="field-help">기본 키워드는 제목에 정확히 한 번, 모든 키워드는 본문에 지정한 횟수만큼 사용합니다.</p>
+              </div></div></section>
+<section className="compose-section" aria-labelledby="compose-section-04">
+<header className="compose-section-heading"><span className="compose-section-number" aria-hidden="true">04</span><div><h2 id="compose-section-04">키워드</h2><p>글에 꼭 들어갈 단어와 반복 횟수를 정하세요.</p></div><span className="compose-section-kind">필수</span></header>
+<div className="compose-section-body">            <fieldset className="new-post-keywords">
+              <legend>글에 꼭 넣을 키워드</legend>
+              <p className="field-help">핵심 단어를 입력하세요. 기본 키워드는 제목에 1번, 본문에는 아래 횟수만큼 들어갑니다.</p>
 
               <div className="new-post-keyword-list">
                 {keywords.map((keyword, index) => {
@@ -730,105 +639,58 @@ export function NewPostScreen({
                 <Plus aria-hidden="true" />
                 보조 키워드 추가
               </button>
-
-              <details className="new-post-keyword-recommendation">
-                <summary>
-                  <Sparkles aria-hidden="true" />
-                  GPT 키워드 추천
-                  <span>선택</span>
-                </summary>
-                <div className="new-post-recommendation-body">
-                  <div className="field-group">
-                    <label htmlFor="new-post-recommendation-count">추천 개수</label>
-                    <select
-                      id="new-post-recommendation-count"
-                      value={recommendationCount}
-                      onChange={(event) => setRecommendationCount(Number(event.target.value))}
-                    >
-                      {[3, 5, 8].map((count) => (
-                        <option key={count} value={count}>{count}개</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="new-post-recommendation-copy">
-                    <strong>{selectedModel && reasoningEffort ? 'AI 작성 설정 완료' : '먼저 AI 작성 설정을 완료해 주세요'}</strong>
-                    <p>추천 결과를 바로 적용하지 않고, 선택·수정한 키워드만 위 목록에 추가할 예정입니다.</p>
-                    <p id="new-post-recommendation-cost">추천 버튼을 누를 때만 본인의 OpenAI 계정에 API 사용료가 발생할 수 있습니다.</p>
-                  </div>
-                  <button
-                    className="button secondary"
-                    type="button"
-                    disabled
-                    aria-describedby="new-post-recommendation-cost"
-                  >
-                    <Sparkles aria-hidden="true" />
-                    다음 단계에서 추천 연결
-                  </button>
-                </div>
-              </details>
             </fieldset>
 
-            <details className="new-post-optional">
-              <summary>CTA 설정 <span>선택</span></summary>
+</div></section>
+<section className="compose-section" aria-labelledby="compose-section-05">
+<header className="compose-section-heading"><span className="compose-section-number" aria-hidden="true">05</span><div><h2 id="compose-section-05">상품·서비스</h2><p>이번 글에서 소개할 항목이 있다면 선택하세요.</p></div><span className="compose-section-kind">선택</span></header>
+<div className="compose-section-body">
+            <div className="field-group">
+              <label htmlFor="new-post-service">이번 글의 상품·서비스 <span>선택</span></label>
+              <select
+                id="new-post-service"
+                value={serviceSelection}
+                onChange={(event) => {
+                  setServiceSelection(event.target.value);
+                  setNotice(null);
+                }}
+              >
+                <option value="">지정하지 않음</option>
+                {serviceOptions.map((service) => (
+                  <option key={service} value={service}>{service}{getProductPrice(productPrices, service) ? ` — ${getProductPrice(productPrices, service)}` : ''}</option>
+                ))}
+                <option value="__custom__">직접 입력</option>
+              </select>
+              <p className="field-help">블로그 세팅에 저장한 {serviceOptions.length}개 항목입니다. 선택한 항목만 이번 글에 우선 반영합니다.</p>
+              <button className="button secondary" type="button" onClick={() => {
+                onOpenBrandProfile();
+                requestAnimationFrame(() => {
+                  const heading = document.getElementById('brand-products-heading');
+                  heading?.scrollIntoView({ block: 'start' });
+                  heading?.focus({ preventScroll: true });
+                });
+              }}>상품·서비스 관리</button>
+            </div>
+
+            {serviceSelection === '__custom__' ? (
               <div className="field-group">
-                <label htmlFor="new-post-cta">글 마지막 행동 유도 문구</label>
-                <textarea
-                  id="new-post-cta"
-                  value={cta}
-                  maxLength={300}
-                  placeholder="예: 상담이 필요하다면 편하게 문의해 주세요."
+                <label htmlFor="new-post-custom-service">직접 입력할 상품·서비스 <span>선택</span></label>
+                <input
+                  id="new-post-custom-service"
+                  value={customService}
+                  maxLength={200}
+                  placeholder="예: 자동차보험 갱신 상담"
                   onChange={(event) => {
-                    setCta(event.target.value);
+                    setCustomService(event.target.value);
                     setNotice(null);
                   }}
                 />
-                <p className="field-help">입력한 문구는 바꾸지 않고 글 마지막에 한 번 사용합니다.</p>
               </div>
-            </details>
-
-            <div className="new-post-actions">
-              <div>
-                <strong>OpenAI API 사용료 안내</strong>
-                <span>버튼을 누르면 입력 내용과 브랜드 정보가 OpenAI로 전송되며 본인 계정에 API 사용료가 발생할 수 있습니다. 민감정보는 입력하지 마세요.</span>
-              </div>
-              <div className="new-post-action-buttons">
-                {isGenerating ? (
-                  <button
-                    className="button danger"
-                    type="button"
-                    onClick={() => void cancelGeneration()}
-                  >
-                    <XCircle aria-hidden="true" />
-                    작업 중단
-                  </button>
-                ) : null}
-                <button
-                  className="button primary"
-                  type="submit"
-                  disabled={isGenerating}
-                >
-                  {isGenerating ? (
-                    <LoaderCircle className="is-spinning" aria-hidden="true" />
-                  ) : (
-                    <Sparkles aria-hidden="true" />
-                  )}
-                  {isGenerating ? '생성 중…' : '글 생성 시작'}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-
-        <aside className="connection-progress new-post-summary" aria-label="AI 작성 설정과 이번 글 요약">
-          <header className="panel-heading compact">
-            <div>
-              <h2>AI 작성 설정</h2>
-              <p>이번 글에 사용할 모델과 답을 준비하는 깊이를 선택합니다.</p>
-            </div>
-          </header>
-
-          <section className="new-post-model-settings" aria-labelledby="new-post-model-heading">
-            <h3 id="new-post-model-heading">GPT 모델</h3>
+            ) : null}</div></section>
+<section className="compose-section" aria-labelledby="compose-section-06">
+<header className="compose-section-heading"><span className="compose-section-number" aria-hidden="true">06</span><div><h2 id="compose-section-06">AI 모델과 검토 깊이</h2><p>글을 작성할 AI와 얼마나 깊이 검토할지 선택하세요.</p></div><span className="compose-section-kind">필수</span></header>
+<div className="compose-section-body"><div className="new-post-model-settings">
+            <p className="field-help">GPT-5.6 Luna는 비용 절약, GPT-5.6 Terra는 일반 글쓰기, GPT-6 Astra는 복잡한 글쓰기에 추천합니다. Astra는 사용료가 상대적으로 높습니다.</p>
 
             {modelStatus === 'loading' ? (
               <p className="new-post-model-status" role="status">사용 가능한 모델을 안전하게 확인하고 있습니다…</p>
@@ -852,13 +714,13 @@ export function NewPostScreen({
             ) : null}
 
             <div className="field-group">
-              <label htmlFor="new-post-model">사용할 GPT 모델 <span>필수</span></label>
+              <label htmlFor="new-post-model">AI 모델 <span>필수</span></label>
               <select
                 id="new-post-model"
                 form="new-post-form"
                 value={modelId}
                 required
-                disabled={modelStatus !== 'ready'}
+                disabled={modelStatus !== 'ready' || isTopicRecommending}
                 aria-invalid={Boolean(errors.modelId)}
                 aria-describedby={errors.modelId ? 'new-post-model-help new-post-model-error' : 'new-post-model-help'}
                 onBlur={() => setErrors((current) => ({
@@ -881,7 +743,7 @@ export function NewPostScreen({
                 ))}
               </select>
               <p id="new-post-model-help" className="field-help">
-                BLOW가 승인했고 현재 API 키로 사용할 수 있는 모델만 표시합니다.
+                BLOW가 선정한 3종 중 이 API 키로 사용할 수 있는 모델만 표시합니다. 선택한 설정은 이 PC에 기억됩니다.
               </p>
               {errors.modelId ? (
                 <p id="new-post-model-error" className="field-error">{errors.modelId}</p>
@@ -889,13 +751,13 @@ export function NewPostScreen({
             </div>
 
             <div className="field-group">
-              <label htmlFor="new-post-reasoning">추론 강도 <span>필수</span></label>
+              <label htmlFor="new-post-reasoning">AI 검토 깊이 <span>필수</span></label>
               <select
                 id="new-post-reasoning"
                 form="new-post-form"
                 value={reasoningEffort}
                 required
-                disabled={!selectedModel}
+                disabled={!selectedModel || isTopicRecommending}
                 aria-invalid={Boolean(errors.reasoningEffort)}
                 aria-describedby={errors.reasoningEffort ? 'new-post-reasoning-help new-post-reasoning-error' : 'new-post-reasoning-help'}
                 onBlur={() => setErrors((current) => ({
@@ -906,7 +768,7 @@ export function NewPostScreen({
                   event.target.value as ReasoningEffort | '',
                 )}
               >
-                <option value="">{selectedModel ? '추론 강도를 선택해 주세요' : '먼저 모델을 선택해 주세요'}</option>
+                <option value="">{selectedModel ? '검토 깊이를 선택해 주세요' : '먼저 모델을 선택해 주세요'}</option>
                 {selectedModel?.allowedReasoningEfforts.map((effort) => (
                   <option key={effort} value={effort}>
                     {reasoningEffortLabels[effort]}{effort === 'medium' ? ' (권장)' : ''}
@@ -914,7 +776,7 @@ export function NewPostScreen({
                 ))}
               </select>
               <p id="new-post-reasoning-help" className="field-help">
-                AI가 답을 준비하며 검토하는 깊이입니다. 대부분의 글에는 ‘중간’을 권장합니다.
+                추론 강도라고도 합니다. 대부분의 글에는 ‘중간’이 무난하며, 높이면 시간이 더 걸릴 수 있습니다.
               </p>
               {errors.reasoningEffort ? (
                 <p id="new-post-reasoning-error" className="field-error">{errors.reasoningEffort}</p>
@@ -922,7 +784,8 @@ export function NewPostScreen({
             </div>
 
             {selectedModel ? (
-              <article className="new-post-model-card">
+              <details className="new-post-model-card model-details">
+                <summary>선택한 모델 자세히 보기</summary>
                 <div>
                   <strong>{selectedModel.displayName}</strong>
                   {selectedModel.isDefault ? <span>권장</span> : null}
@@ -938,7 +801,7 @@ export function NewPostScreen({
                     <dd>{selectedModel.recommendedUse}</dd>
                   </div>
                 </dl>
-              </article>
+              </details>
             ) : null}
 
             {modelNotice ? <p className="new-post-model-notice" role="status">{modelNotice}</p> : null}
@@ -947,12 +810,13 @@ export function NewPostScreen({
               <FilePenLine aria-hidden="true" />
               <p>모델 확인과 선택만으로 콘텐츠 생성 비용은 발생하지 않습니다. 실제 추천·생성 버튼을 누를 때만 본인의 OpenAI 계정에 API 사용료가 발생할 수 있습니다.</p>
             </div>
-          </section>
-
-          <section className="new-post-image-settings" aria-labelledby="new-post-image-heading">
+          </div></div></section>
+<section className="compose-section" aria-labelledby="compose-section-07">
+<header className="compose-section-heading"><span className="compose-section-number" aria-hidden="true">07</span><div><h2 id="compose-section-07">AI 이미지</h2><p>이미지 사용 여부를 먼저 선택하고, 필요하면 세부 설정을 이어서 정하세요.</p></div><span className="compose-section-kind">선택</span></header>
+<div className="compose-section-body"><div className="new-post-image-settings">
             <div>
               <h3 id="new-post-image-heading">AI 이미지</h3>
-              <p>글을 만든 뒤 이미지를 이어서 생성합니다. AI가 만든 글은 목표 분량 ±10%를 간혹 벗어날 수 있습니다.</p>
+              <p>글과 어울리는 이미지를 함께 만듭니다. 이미지 생성 비용은 별도입니다.</p>
             </div>
 
             <fieldset className="new-post-image-choice">
@@ -1011,7 +875,7 @@ export function NewPostScreen({
                         <option key={count} value={count}>{count}장</option>
                       ))}
                     </select>
-                    <p className="field-help">이번 검증 단계에서는 한 번에 최대 4장을 생성합니다.</p>
+                    <p className="field-help">한 번에 최대 4장까지 만들 수 있습니다.</p>
                   </div>
 
                   <div className="field-group">
@@ -1086,18 +950,19 @@ export function NewPostScreen({
                       resetImageResult();
                     }}
                   />
-                  <p className="field-help">비워 두면 브랜드 프로필에 저장한 이미지 스타일을 사용합니다.</p>
+                  <p className="field-help">비워 두면 블로그 세팅에 저장한 이미지 스타일을 사용합니다.</p>
                 </div>
 
                 <div className="connection-note new-post-image-cost-note">
                   <ImageIcon aria-hidden="true" />
-                  <p>이미지 장수와 품질에 따라 본인의 OpenAI API 비용과 처리 시간이 늘어납니다. 첫 테스트는 1장·비용 절약형을 권장합니다.</p>
+                  <p>이미지 장수와 품질에 따라 본인의 OpenAI API 비용과 처리 시간이 늘어납니다. 처음에는 1장·비용 절약형을 권장합니다.</p>
                 </div>
               </>
             ) : null}
-          </section>
-
-          <section className="new-post-summary-section" aria-labelledby="new-post-summary-heading">
+          </div></div></section>
+<PostDecorationFields value={decorations} onChange={setDecorations} />
+          <details className="new-post-summary-section summary-disclosure">
+            <summary>입력 내용 한눈에 보기</summary>
             <h3 id="new-post-summary-heading">이번 글 요약</h3>
             <dl className="new-post-summary-list">
               <div><dt>브랜드</dt><dd>{isProfileLoading ? '불러오는 중…' : brandName || '입력 필요'}</dd></div>
@@ -1117,211 +982,23 @@ export function NewPostScreen({
                 </dd>
               </div>
             </dl>
-          </section>
+          </details>
 
-          {!isProfileLoading && !brandName ? (
-            <div className="new-post-profile-warning">
-              <CircleAlert aria-hidden="true" />
-              <div>
-                <strong>브랜드 프로필이 비어 있습니다</strong>
-                <p>실제 글을 만들기 전 브랜드 기본 정보를 먼저 저장해 주세요.</p>
-                <button className="button secondary" type="button" onClick={onOpenBrandProfile}>
-                  브랜드 프로필 입력
+
+            <div className="new-post-actions compose-footer">
+              <div><strong>설정을 마쳤나요?</strong><span>한 글은 바로 실행하고, 여러 글은 목록에 차례대로 담으세요. 실행 시 OpenAI API 사용료가 발생합니다.</span></div>
+              <div className="new-post-action-buttons">
+                <button className="button secondary" type="submit" disabled={isTopicRecommending}>
+                  <Plus aria-hidden="true" />{editingId ? '설정 수정 저장' : '목록에 추가'}
+                </button>
+                <button className="button primary" type="button" disabled={isTopicRecommending} onClick={() => saveSettings(true)}>
+                  <Sparkles aria-hidden="true" />이 글 자동 작성·저장
                 </button>
               </div>
             </div>
-          ) : null}
+</fieldset>
+</form>
 
-          {profileError ? (
-            <div className="new-post-profile-warning" role="alert">
-              <CircleAlert aria-hidden="true" />
-              <div>
-                <strong>브랜드 정보를 불러오지 못했습니다</strong>
-                <p>{profileError}</p>
-              </div>
-            </div>
-          ) : null}
-        </aside>
-      </section>
-
-      {generationResult ? (
-        <section
-          ref={resultRef}
-          className="new-post-generation-result"
-          aria-labelledby="new-post-generation-result-heading"
-          tabIndex={-1}
-        >
-          <header className="new-post-result-head">
-            <div>
-              <h2 id="new-post-generation-result-heading">생성된 글</h2>
-              <p>네이버에 입력하기 전에 내용과 사실관계를 직접 확인해 주세요.</p>
-            </div>
-            <span className={generationResult.verification.valid ? 'is-valid' : 'needs-review'}>
-              {hasBlockingKeywordIssues
-                ? '키워드 수정 필요'
-                : generationResult.verification.valid
-                  ? '권장 기준 충족'
-                  : '일부 항목 확인'}
-            </span>
-          </header>
-
-          {!generationResult.verification.valid ? (
-            <div
-              className="new-post-result-warning"
-              role={hasBlockingKeywordIssues ? 'alert' : 'status'}
-            >
-              <CircleAlert aria-hidden="true" />
-              <div>
-                <h3>
-                  {hasBlockingKeywordIssues
-                    ? '설정한 키워드 횟수를 충족하지 못했습니다'
-                    : '일부 권장 기준을 벗어났습니다'}
-                </h3>
-                <p>
-                  {hasBlockingKeywordIssues
-                    ? '키워드 횟수는 필수 조건입니다. 입력값을 유지한 채 다시 생성해 주세요. 이미지 생성과 네이버 입력 준비는 시작하지 않았습니다.'
-                    : 'AI 생성 결과는 목표 범위를 간혹 벗어날 수 있습니다. 아래 항목을 확인하고 필요하면 네이버에서 수정해 주세요.'}
-                </p>
-                <ul>
-                  {generationResult.verification.issues.map((issue) => (
-                    <li key={issue}>{issue}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          ) : null}
-
-          <dl className="new-post-result-metrics">
-            <div>
-              <dt>제목</dt>
-              <dd>{generationResult.verification.titleLength}/30자</dd>
-            </div>
-            <div>
-              <dt>본문</dt>
-              <dd>
-                {generationResult.verification.bodyLength.toLocaleString('ko-KR')}자
-                {' · '}
-                목표 {generationResult.verification.minimumBodyLength.toLocaleString('ko-KR')}–{generationResult.verification.maximumBodyLength.toLocaleString('ko-KR')}자
-              </dd>
-            </div>
-          </dl>
-
-          <article className="new-post-result-article">
-            <h3>{generationResult.draft.title}</h3>
-            <div className="new-post-result-body">{generationResult.draft.body}</div>
-          </article>
-
-          {useGeneratedImages && !hasBlockingKeywordIssues ? (
-            <section className="new-post-image-result" aria-labelledby="new-post-image-result-heading">
-              <header>
-                <div>
-                  <h3 id="new-post-image-result-heading">생성 이미지</h3>
-                  <p>네이버에 입력하기 전에 사실성, 사용 권한과 업종별 표시 의무를 직접 확인해 주세요.</p>
-                </div>
-                {imageGenerationStatus === 'complete' ? (
-                  <span>{generatedImages.length}장 완료</span>
-                ) : null}
-              </header>
-
-              {imageGenerationStatus === 'generating' ? (
-                <div className="new-post-image-result-status" role="status" aria-live="polite">
-                  <LoaderCircle className="is-spinning" aria-hidden="true" />
-                  <p>선택한 비율과 품질로 이미지를 만들고 있습니다.</p>
-                </div>
-              ) : null}
-
-              {imageGenerationError ? (
-                <div className="new-post-image-result-error" role="alert">
-                  <CircleAlert aria-hidden="true" />
-                  <div>
-                    <strong>이미지를 생성하지 못했습니다</strong>
-                    <p>{imageGenerationError}</p>
-                    <button
-                      className="button secondary"
-                      type="button"
-                      disabled={isGenerating}
-                      onClick={() => void generateImagesForDraft(generationResult.draft)}
-                    >
-                      <ImageIcon aria-hidden="true" />
-                      이미지만 다시 생성
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              {imageGenerationStatus === 'idle' ? (
-                <div className="new-post-image-result-empty">
-                  <p>이미지 설정이 변경됐습니다. 현재 글은 다시 만들지 않고 이미지만 생성할 수 있습니다.</p>
-                  <button
-                    className="button secondary"
-                    type="button"
-                    onClick={() => void generateImagesForDraft(generationResult.draft)}
-                  >
-                    <ImageIcon aria-hidden="true" />
-                    이미지만 생성
-                  </button>
-                </div>
-              ) : null}
-
-              {generatedImages.length > 0 ? (
-                <div className={`new-post-image-preview-grid is-${imageAspectRatio}`}>
-                  {generatedImages.map((image, index) => (
-                    <figure key={`${index}-${image.dataUrl.slice(-16)}`}>
-                      <img
-                        src={image.dataUrl}
-                        alt={`AI 생성 이미지 ${index + 1} 미리보기`}
-                        loading="lazy"
-                      />
-                      <figcaption>이미지 {index + 1}</figcaption>
-                    </figure>
-                  ))}
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
-          <div className="new-post-result-review-note">
-            <CircleAlert aria-hidden="true" />
-            <p>자동 검사는 글자 수·키워드·CTA 형식만 확인합니다. 가격, 경력, 통계, 광고 표현과 업종별 규정은 발행 전에 직접 확인해야 합니다.</p>
-          </div>
-
-          {!hasBlockingKeywordIssues ? (
-            <div className="new-post-result-transfer">
-              <div>
-                <strong>네이버 입력 준비</strong>
-                <span>생성된 제목, 본문과 이미지를 네이버 연결 화면으로 옮깁니다. 이 버튼만으로 Chrome 조작이나 임시저장은 실행되지 않습니다.</span>
-              </div>
-              <button
-                className="button primary"
-                type="button"
-                disabled={isGenerating}
-                onClick={() => onPrepareNaverDraft({
-                  ...generationResult.draft,
-                  images: generatedImages,
-                  modelId,
-                  modelName: selectedModel?.displayName ?? modelId,
-                  reasoningEffort,
-                  reasoningLabel: reasoningEffort
-                    ? reasoningEffortLabels[reasoningEffort]
-                    : '',
-                  settings: {
-                    articleType,
-                    targetLength,
-                    useGeneratedImages,
-                    imageCount,
-                    imageAspectRatio,
-                    imageQualityMode,
-                    imageStyle: imageStyle.trim(),
-                  },
-                })}
-              >
-                <FilePenLine aria-hidden="true" />
-                네이버 입력 준비
-              </button>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-    </>
+    </div>
   );
 }

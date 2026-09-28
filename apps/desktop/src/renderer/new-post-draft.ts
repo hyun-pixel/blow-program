@@ -24,9 +24,7 @@ export interface CoreDraftErrors {
   readonly keywords?: readonly KeywordDraftErrors[] | undefined;
 }
 
-export function parseProductOptions(value: string): readonly string[] {
-  return [...new Set(value.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean))];
-}
+export { parseProductOptions } from '../shared/product-services.js';
 
 export function validateCoreDraft(draft: CoreDraft): CoreDraftErrors {
   const normalizedKeywords = draft.keywords.map((keyword) =>

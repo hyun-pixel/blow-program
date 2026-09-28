@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "Independent per-post settings, edit and persistent reload",
+    "Two posts save sequentially without per-post confirmations and lock controls",
+    "Saved items never run again after restart",
+    "Single-post action runs only that post and keeps other jobs pending",
+    "Declining initial cost confirmation spends nothing and retains settings",
+    "Retry after cancellation uses the same job even when browser confirmations are blocked",
+    "Empty topics and keywords still prevent execution",
+    "Stop during generation leaves remaining jobs pending and does not input text",
+    "Uncertain save stops the batch without retry or false success",
+    "Manual pack names are required before starting",
+    "Small viewport, reduced motion and enlarged text do not overflow"
+  ],
+  "errors": []
+}
