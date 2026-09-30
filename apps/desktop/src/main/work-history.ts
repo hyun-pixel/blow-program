@@ -15,6 +15,8 @@ export interface WorkHistorySettings {
 }
 
 export interface WorkHistoryEntry {
+  readonly jobId?: string;
+  readonly warnings?: readonly string[];
   readonly id: string;
   readonly title: string;
   readonly body: string;
@@ -31,6 +33,8 @@ export interface WorkHistoryEntry {
 }
 
 export interface WorkHistoryInput {
+  readonly jobId?: string;
+  readonly warnings?: readonly string[];
   readonly title: string;
   readonly body: string;
   readonly modelId: string;
@@ -120,8 +124,16 @@ export function normalizeWorkHistoryInput(input: unknown): WorkHistoryInput {
   }
 
   const candidate = input as Record<string, unknown>;
+  const jobId = candidate.jobId;
+  if (jobId !== undefined && (typeof jobId !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(jobId))) throw new Error('작업 내역의 작업 번호를 확인해 주세요.');
+  const warnings = candidate.warnings;
+  if (warnings !== undefined && (!Array.isArray(warnings) || warnings.length > 32 || warnings.some((warning) => typeof warning !== 'string' || warning.length > 1_000))) {
+    throw new Error('작업 내역의 작성 결과 안내를 확인해 주세요.');
+  }
 
   return {
+    ...(typeof jobId === 'string' ? { jobId } : {}),
+    ...(Array.isArray(warnings) ? { warnings: [...warnings] as string[] } : {}),
     title: readText(candidate, 'title', 200),
     body: readText(candidate, 'body', 30_000),
     modelId: readText(candidate, 'modelId', 200),
@@ -223,14 +235,17 @@ export async function addWorkHistoryEntry(
   input: unknown,
   now = new Date(),
 ): Promise<WorkHistoryEntry> {
+  const normalized = normalizeWorkHistoryInput(input);
+  const entries = keepRecentEntries(await readStoredEntries(filePath), now);
+  const existing = normalized.jobId ? entries.find(entry => entry.jobId === normalized.jobId) : undefined;
+  if (existing) return existing;
   const entry: WorkHistoryEntry = {
     id: randomUUID(),
-    ...normalizeWorkHistoryInput(input),
+    ...normalized,
     status: 'draft_saved',
     finalStage: 'DRAFT_SAVE_COMPLETED',
     createdAt: now.toISOString(),
   };
-  const entries = keepRecentEntries(await readStoredEntries(filePath), now);
   await writeEntries(filePath, [entry, ...entries]);
   return entry;
 }

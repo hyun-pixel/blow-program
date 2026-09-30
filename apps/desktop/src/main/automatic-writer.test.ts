@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { NaverConnectionAdapter } from '@blow/naver-adapter';
+import { NaverConnectionAdapter, NaverConnectionError } from '@blow/naver-adapter';
 import type { BrowserContext } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { NaverConnectionSession } from './naver-connection.js';
@@ -9,8 +9,14 @@ afterEach(() => vi.restoreAllMocks());
 describe('automatic writer prepares a fresh tab without touching existing drafts', () => {
   async function fixture() {
     const originalPage = { close: vi.fn() };
-    const newPage = { close: vi.fn() };
+    const newPage = {
+      close: vi.fn(),
+      isClosed: vi.fn(() => false),
+      url: vi.fn(() => 'https://section.blog.naver.com/BlogHome.naver'),
+      context: vi.fn(),
+    };
     const context = { pages: () => [originalPage], newPage: vi.fn(async () => newPage), close: vi.fn() };
+    newPage.context.mockReturnValue(context);
     vi.spyOn(chromium, 'launchPersistentContext').mockResolvedValue(context as unknown as BrowserContext);
     const base = { message: '', registeredBlogId: 'example', actualBlogId: 'example', currentUrl: 'https://blog.naver.com/example' };
     vi.spyOn(NaverConnectionAdapter.prototype, 'openHome').mockResolvedValue({ ...base, stage: 'HOME_READY' });
@@ -41,5 +47,55 @@ describe('automatic writer prepares a fresh tab without touching existing drafts
     expect(f.open).not.toHaveBeenCalled();
     expect(f.newPage.close).toHaveBeenCalledTimes(1);
     expect(f.originalPage.close).not.toHaveBeenCalled();
+  });
+  it('recovers from a transient home navigation failure before opening the writer', async () => {
+    const f = await fixture();
+    f.verify.mockRejectedValueOnce(new Error(
+      'Protocol error (Runtime.callFunctionOn): Cannot find context with specified id',
+    ));
+    expect((await f.session.prepareAutomaticWriter('example')).stage).toBe('WRITER_READY');
+    expect(f.verify).toHaveBeenCalledTimes(2);
+    expect(f.open).toHaveBeenCalledOnce();
+    expect(f.context.newPage).toHaveBeenCalledOnce();
+    expect(f.originalPage.close).not.toHaveBeenCalled();
+  });
+  it('does not switch to an existing draft if the new tab is closed', async () => {
+    const f = await fixture();
+    f.newPage.isClosed.mockReturnValue(true);
+    f.verify.mockRejectedValue(new Error('Target page has been closed'));
+    await expect(f.session.prepareAutomaticWriter('example')).rejects.toMatchObject({
+      failure: { code: 'BROWSER_CLOSED' },
+    });
+    expect(f.newPage.context).not.toHaveBeenCalled();
+    expect(f.verify).toHaveBeenCalledOnce();
+    expect(f.open).not.toHaveBeenCalled();
+  });
+  it('never retries a safety rejection', async () => {
+    const f = await fixture();
+    f.verify.mockRejectedValue(new NaverConnectionError('WRITER_LINK_AMBIGUOUS', 'Ambiguous writer'));
+    await expect(f.session.prepareAutomaticWriter('example')).rejects.toMatchObject({
+      failure: { code: 'WRITER_LINK_AMBIGUOUS' },
+    });
+    expect(f.verify).toHaveBeenCalledOnce();
+    expect(f.open).not.toHaveBeenCalled();
+  });
+  it('stops after five failed checks without opening a writer', async () => {
+    const f = await fixture();
+    f.verify.mockRejectedValue(new Error('Execution context was destroyed'));
+    await expect(f.session.prepareAutomaticWriter('example')).rejects.toMatchObject({
+      failure: { code: 'NAVER_CONNECTION_FAILED' },
+    });
+    expect(f.verify).toHaveBeenCalledTimes(5);
+    expect(f.open).not.toHaveBeenCalled();
+  }, 15_000);
+  it('identifies a writer-opening failure without exposing raw browser details', async () => {
+    const f = await fixture();
+    f.open.mockRejectedValue(new Error('private-account-url-and-token'));
+    await expect(f.session.prepareAutomaticWriter('example')).rejects.toMatchObject({
+      failure: { code: 'NAVER_CONNECTION_FAILED', message: expect.stringContaining('자동 작성 준비: 글쓰기 화면 열기') },
+    });
+    try { await f.session.prepareAutomaticWriter('example'); } catch (error) {
+      expect((error as Error).message).not.toContain('private-account-url-and-token');
+    }
   });
 });

@@ -55,11 +55,26 @@ export function resolveDecorationTargets(
   random: () => number = Math.random,
 ): readonly DecorationTarget[] {
   if (!value.enabled || !Number.isInteger(value.count) || value.count < 1 || value.count > MAX_DECORATION_COUNT) return [];
+  const candidates = getNaturalBoundaries(paragraphs);
+  const selected: number[] = [];
+  while (selected.length < value.count && candidates.length) {
+    const priority = Math.max(...candidates.map((item) => item.priority));
+    const preferred = candidates.filter((item) => item.priority === priority);
+    const spaced = preferred.filter((item) => selected.every((used) => Math.abs(used - item.paragraphNumber) > 1));
+    const pool = spaced.length ? spaced : preferred;
+    const chosen = pool[Math.floor(random() * pool.length)]!;
+    selected.push(chosen.paragraphNumber);
+    candidates.splice(candidates.indexOf(chosen), 1);
+  }
+  return selected.sort((a, b) => a - b).map((paragraphNumber) => ({ paragraphNumber, position: 'after' }));
+}
+
+export function getNaturalBoundaries(paragraphs: readonly string[]): { paragraphNumber: number; priority: number }[] {
   const transition = /^(?:다음으로|이어서|한편|반면|이제|이번에는|그렇다면|다만|마지막으로|정리하면|요약하면|결론적으로)(?:[\s,.:]|$)/u;
   const conclusion = /^(?:정리하면|요약하면|결론적으로|마지막으로|이처럼|이상으로)(?:[\s,.:]|$)/u;
   const listItem = /^(?:[-*•]\s+|\d+[.)]\s+)/u;
   const sentenceEnd = /[.!?。！？][”’"')\]]?$/u;
-  const candidates = paragraphs.flatMap((paragraph, index) => {
+  return paragraphs.flatMap((paragraph, index) => {
     const text = paragraph.trim();
     const next = paragraphs[index + 1]?.trim() ?? '';
     // Keep headings with their explanation, introductions with their list, and lists together.
@@ -68,18 +83,6 @@ export function resolveDecorationTargets(
       ? 2 : sentenceEnd.test(text) || !next ? 1 : 0;
     return [{ paragraphNumber: index + 1, priority }];
   });
-  const selected: number[] = [];
-  while (selected.length < value.count && candidates.length) {
-    const priority = Math.max(...candidates.map((item) => item.priority));
-    const preferred = candidates.filter((item) => item.priority === priority);
-    // Prefer some breathing room when equally suitable boundaries are available.
-    const spaced = preferred.filter((item) => selected.every((used) => Math.abs(used - item.paragraphNumber) > 1));
-    const pool = spaced.length ? spaced : preferred;
-    const chosen = pool[Math.floor(random() * pool.length)]!;
-    selected.push(chosen.paragraphNumber);
-    candidates.splice(candidates.indexOf(chosen), 1);
-  }
-  return selected.sort((a, b) => a - b).map((paragraphNumber) => ({ paragraphNumber, position: 'after' }));
 }
 
 export function isDecorationStyleAvailable(style: string, styles: readonly { id: string }[]): boolean {

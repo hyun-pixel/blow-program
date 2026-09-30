@@ -19,6 +19,7 @@ import {
 interface StickerPageOptions {
   readonly abortAfterCaret?: AbortController;
   readonly abortAfterCategoryClick?: AbortController;
+  readonly abortAfterItemClick?: AbortController;
   readonly paragraphs?: readonly string[];
   readonly controlCount?: number;
   readonly itemCount?: number;
@@ -26,6 +27,7 @@ interface StickerPageOptions {
   readonly naverLikeMarkup?: boolean;
   readonly insertSticker?: boolean;
   readonly verifyPosition?: boolean;
+  readonly stickersPerClick?: number;
 }
 
 function createCollection(locators: readonly Locator[]) {
@@ -41,6 +43,7 @@ function createStickerPage(options: StickerPageOptions = {}): {
   readonly categoryClicks: readonly ReturnType<typeof vi.fn>[];
   readonly itemClick: ReturnType<typeof vi.fn>;
   readonly clickedItemIndexes: readonly number[];
+  readonly snapshotDispose: ReturnType<typeof vi.fn>;
 } {
   const paragraphTexts = options.paragraphs ?? [
     '첫 번째 문단입니다.',
@@ -58,6 +61,7 @@ function createStickerPage(options: StickerPageOptions = {}): {
   const stickerGaps: number[] = [];
   let pendingParagraphIndex: number | null = null;
   let pendingPosition: NaverStickerPosition | null = null;
+  const snapshotDispose = vi.fn().mockResolvedValue(undefined);
 
   const paragraphs = paragraphTexts.map((text, paragraphIndex) => ({
     boundingBox: vi.fn().mockResolvedValue({
@@ -69,8 +73,17 @@ function createStickerPage(options: StickerPageOptions = {}): {
     click: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn(async (
       _callback: unknown,
-      argument: string,
+      argument: string | { previous: { beforeCount: number } },
     ) => {
+      if (typeof argument === 'object') {
+        return {
+          beforeCount: argument.previous.beforeCount,
+          count: stickerCount,
+          addedCount: stickerCount - argument.previous.beforeCount,
+          retainedCount: argument.previous.beforeCount,
+          ready: true,
+        };
+      }
       if (argument === 'before' || argument === 'after') {
         pendingParagraphIndex = paragraphIndex;
         pendingPosition = argument;
@@ -83,6 +96,7 @@ function createStickerPage(options: StickerPageOptions = {}): {
         after: stickerGaps.filter((gap) => gap > paragraphIndex).length,
       };
     }),
+    evaluateHandle: vi.fn(async () => ({ beforeCount: stickerCount, dispose: snapshotDispose })),
     innerText: vi.fn().mockResolvedValue(text),
     isVisible: vi.fn().mockResolvedValue(true),
   } as unknown as Locator));
@@ -100,6 +114,7 @@ function createStickerPage(options: StickerPageOptions = {}): {
   const clickedItemIndexes: number[] = [];
   const itemClick = vi.fn(async (itemIndex = 0) => {
     clickedItemIndexes.push(itemIndex);
+    options.abortAfterItemClick?.abort();
     if (
       !shouldInsert ||
       pendingParagraphIndex === null ||
@@ -108,7 +123,7 @@ function createStickerPage(options: StickerPageOptions = {}): {
       return;
     }
 
-    stickerCount += 1;
+    stickerCount += options.stickersPerClick ?? 1;
     const insertedPosition = shouldVerifyPosition
       ? pendingPosition
       : pendingPosition === 'before'
@@ -223,6 +238,7 @@ function createStickerPage(options: StickerPageOptions = {}): {
     categoryClicks,
     itemClick,
     clickedItemIndexes,
+    snapshotDispose,
   };
 }
 
@@ -598,4 +614,39 @@ it('verifies repeated sticker insertions against the same original paragraphs', 
     expect(result.paragraphNumber).toBe(paragraphNumber);
     expect(result.stickerCount).toBe(paragraphNumber);
   }
+});
+
+it.each([true, false])('releases the DOM snapshot after insertion success=%s', async (insertSticker) => {
+  const { page, snapshotDispose, itemClick } = createStickerPage({ insertSticker });
+  const result = new NaverStickerAdapter(page).insertDefaultSticker(
+    ['첫 번째 문단입니다.', '두 번째 문단입니다.', '세 번째 문단입니다.'], 1, 'after',
+  );
+  if (insertSticker) await expect(result).resolves.toMatchObject({ stickerCount: 1 });
+  else await expect(result).rejects.toMatchObject({
+    code: 'STICKER_INSERT_UNCONFIRMED',
+    message: expect.stringContaining('삽입 전 0개, 현재 감지 0개, 기대 1개'),
+  });
+  expect(snapshotDispose).toHaveBeenCalledOnce();
+  expect(itemClick).toHaveBeenCalledOnce();
+});
+
+it('rejects excess stickers without clicking again', async () => {
+  const { page, itemClick, snapshotDispose } = createStickerPage({ stickersPerClick: 2 });
+  await expect(new NaverStickerAdapter(page).insertDefaultSticker(
+    ['첫 번째 문단입니다.', '두 번째 문단입니다.', '세 번째 문단입니다.'], 1, 'after',
+  )).rejects.toMatchObject({ code: 'STICKER_INSERT_UNCONFIRMED' });
+  expect(itemClick).toHaveBeenCalledOnce();
+  expect(snapshotDispose).toHaveBeenCalledOnce();
+});
+
+it('aborts after a sticker click without retrying or retaining its snapshot', async () => {
+  const controller = new AbortController();
+  const { page, itemClick, snapshotDispose } = createStickerPage({ abortAfterItemClick: controller });
+  const adapter = new NaverStickerAdapter(page);
+  const paragraphs = ['첫 번째 문단입니다.', '두 번째 문단입니다.', '세 번째 문단입니다.'];
+  const categories = await adapter.listStickerCategories(paragraphs, 1, 'after');
+  await expect(adapter.insertRandomSticker(paragraphs, 1, 'after', categories.categories[0]!.id, controller.signal))
+    .rejects.toMatchObject({ code: 'STICKER_OPERATION_INTERRUPTED' });
+  expect(itemClick).toHaveBeenCalledOnce();
+  expect(snapshotDispose).toHaveBeenCalledOnce();
 });

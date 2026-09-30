@@ -1,5 +1,6 @@
 import { getConnectedBlogId } from './naver-workflow.js';
 import { WritingSteps } from './WritingSteps.js';
+import { ConfirmationDialog } from './ConfirmationDialog.js';
 import { defaultPostDecorations, decorationPlacementLabel, resolveDecorationTargets, isDecorationStyleAvailable, type DecorationTarget, type PostDecorations } from './post-decoration.js';
 import { DecorationPlacementFields } from './DecorationPlacementFields.js';
 import {
@@ -271,6 +272,7 @@ export function ConnectionScreen({
   const showDiagnostics = import.meta.env.DEV;
   const loadedDraftRef = useRef(initialDraft);
   const [needsNewWriter, setNeedsNewWriter] = useState(false);
+  const [confirmNewWriter, setConfirmNewWriter] = useState(false);
   const decorationPlan = initialDraft?.decorations;
   const [blogUrl, setBlogUrl] = useState('');
   const blogUrlInputRef = useRef<HTMLInputElement>(null);
@@ -605,8 +607,9 @@ export function ConnectionScreen({
     return null;
   };
 
-  const openVerifiedWriter = async (): Promise<void> => {
-    if (needsNewWriter && !window.confirm('새 글쓰기 화면을 열면 현재 네이버 편집기를 벗어납니다. 기존 글을 먼저 임시저장했는지 확인해 주세요. 새 글쓰기 화면을 열까요?')) return;
+  const openVerifiedWriter = async (confirmed = false): Promise<void> => {
+    if (needsNewWriter && !confirmed) { setConfirmNewWriter(true); return; }
+    setConfirmNewWriter(false);
     // verify() navigates to the blog home: never run it over an in-progress editor automatically.
     const verified = await runConnectionCommand('verify', () => window.blowNaver.verify());
     if (getConnectedBlogId(verified, true, false) && verified?.stage === 'WRITER_LINK_READY') {
@@ -1617,6 +1620,10 @@ export function ConnectionScreen({
 
   return (
     <div className="naver-compose-page">
+      <ConfirmationDialog open={confirmNewWriter} title="새 글쓰기 화면을 열까요?" confirmLabel="새 글쓰기 화면 열기"
+        onCancel={() => setConfirmNewWriter(false)} onConfirm={() => void openVerifiedWriter(true)}>
+        <p>현재 네이버 편집기를 벗어납니다. 기존 글을 먼저 임시저장했는지 확인해 주세요.</p>
+      </ConfirmationDialog>
       <header className="page-head">
         <div>
           {isSetup ? <h2 id="brand-naver-heading" tabIndex={-1}>네이버 연결</h2> : <h1>네이버 임시저장</h1>}

@@ -246,10 +246,10 @@ export function NewPostScreen({
     ?? selectableModels[0];
   const hasErrors = hasCoreDraftErrors(errors);
   const showKeywordWarning = hasExcessiveKeywords(keywords);
-  const isGenerating = queue.busy;
+  const isGenerating = queue.busy || Boolean(queue.recordingId);
   useEffect(() => {
-    onBusyChange(queue.busy || isTopicRecommending);
-  }, [queue.busy, isTopicRecommending, onBusyChange]);
+    onBusyChange(queue.busy || Boolean(queue.recordingId) || isTopicRecommending);
+  }, [queue.busy, queue.recordingId, isTopicRecommending, onBusyChange]);
 
   const clearError = (field: keyof CoreDraftErrors): void => {
     setErrors((current) => ({ ...current, [field]: undefined }));
@@ -328,7 +328,7 @@ export function NewPostScreen({
 
   const editJob = (job: WritingJob): void => {
     const { request, images, decorations } = job.config;
-    setEditingId(job.id);
+    setEditingId(job.status === 'queued' ? job.id : undefined);
     setTopic(request.topic);
     setArticleType(request.articleType);
     setTargetLength(request.targetLength);
@@ -345,7 +345,7 @@ export function NewPostScreen({
     setImageStyle(images.style);
     setDecorations(structuredClone(decorations));
     setErrors({});
-    setNotice('목록에 담긴 글의 설정을 수정하고 있습니다.');
+    setNotice(job.status === 'queued' ? '목록에 담긴 글의 설정을 수정하고 있습니다.' : '실패한 글의 설정을 불러왔습니다. 필요한 부분을 수정해 새 작업으로 등록하세요. 기존 기록은 유지됩니다.');
     document.getElementById('new-post-topic')?.focus();
   };
 
@@ -413,7 +413,8 @@ export function NewPostScreen({
       ) : null}
 
       <WritingQueuePanel jobs={queue.jobs} busy={queue.busy} stopping={queue.stopping}
-        disabled={!queue.ready || isTopicRecommending || Boolean(editingId)} error={queue.error}
+        disabled={!queue.ready || isTopicRecommending || Boolean(editingId) || Boolean(queue.recordingId)} error={queue.error}
+        recordingId={queue.recordingId} onRetryHistory={(id) => void queue.retryHistory(id)}
         confirmation={queue.confirmation} onCancelStart={queue.cancelStart}
         onConfirmStart={() => void queue.confirmStart(() => {
           if (editingId) {
@@ -425,7 +426,9 @@ export function NewPostScreen({
           setNotice(null);
           document.getElementById('writing-queue')?.scrollIntoView({ block: 'start' });
         })}
-        onStart={() => void queue.start()} onStop={queue.stop} onEdit={editJob} onRemove={queue.remove}
+        onStart={() => void queue.start()} onStop={queue.stop} onEdit={editJob} onRetry={queue.retry} onRemove={(id) => {
+          if (queue.remove(id) && editingId === id) setEditingId(undefined);
+        }}
         onReview={onReviewSaved} />
 
       {notice ? (

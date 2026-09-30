@@ -212,10 +212,9 @@ describe('네이버 편집기 제목·본문 입력', () => {
     });
 
     expect(title.locator.fill).toHaveBeenCalledWith('한글 제목 🙂');
-    expect(body.locator.fill).toHaveBeenCalledWith(
-      '첫 번째 본문입니다.\n\n한글 본문과 English 1234를 입력합니다.',
-    );
-    expect(page.keyboard.insertText).not.toHaveBeenCalled();
+    expect(body.locator.fill).not.toHaveBeenCalled();
+    expect(body.read()).toBe('첫 번째 본문입니다.\n\n한글 본문과 English 1234를 입력합니다.');
+    expect(page.keyboard.press).toHaveBeenCalledWith('Enter');
   });
 
   it('편집 속성이 없는 네이버 섹션은 클릭한 뒤 키 입력으로 채운다', async () => {

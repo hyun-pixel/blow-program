@@ -367,6 +367,7 @@ declare global {
       attachImages(
         imageIds: readonly string[],
         layout: NaverImageLayout,
+        paragraphNumbers?: readonly number[],
       ): Promise<NaverErrorResponse | NaverImageSuccessResponse>;
       monitorUserInteraction(): Promise<
         NaverErrorResponse | NaverUserInteractionSuccessResponse

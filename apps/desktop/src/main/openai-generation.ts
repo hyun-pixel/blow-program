@@ -1,5 +1,5 @@
 import { formatProductCatalog } from '../shared/product-services.js';
-import { writingTargetLengths } from '../shared/writing-options.js';
+import { getBodyLengthGuide, getBodyLengthReport, writingTargetLengths } from '../shared/writing-options.js';
 import type { BrandProfile } from './brand-profile.js';
 
 const reasoningEfforts = new Set([
@@ -47,6 +47,7 @@ export interface BlogDraftVerification {
   readonly maximumBodyLength: number;
   readonly issues: readonly string[];
   readonly blockingIssues: readonly string[];
+  readonly warnings?: readonly string[];
 }
 
 export type OpenAiGenerationResult =
@@ -145,27 +146,6 @@ function countExactOccurrences(text: string, search: string): number {
   return search ? text.split(search).length - 1 : 0;
 }
 
-function countWithoutWhitespace(text: string): number {
-  return [...text.replace(/\s/gu, '')].length;
-}
-
-function getBodyLengthGuide(targetLength: number): {
-  readonly minimumBodyLength: number;
-  readonly preferredBodyLength: number;
-  readonly generationMaximumBodyLength: number;
-  readonly maximumBodyLength: number;
-} {
-  const minimumBodyLength = Math.ceil(targetLength * 0.9);
-  const maximumBodyLength = Math.floor(targetLength * 1.1);
-
-  return {
-    minimumBodyLength,
-    preferredBodyLength: targetLength,
-    generationMaximumBodyLength: Math.floor(targetLength * 1.07),
-    maximumBodyLength,
-  };
-}
-
 export function verifyGeneratedBlogDraft(
   draft: GeneratedBlogDraft,
   input: Pick<
@@ -174,41 +154,30 @@ export function verifyGeneratedBlogDraft(
   >,
 ): BlogDraftVerification {
   const titleLength = [...draft.title].length;
-  const bodyLength = countWithoutWhitespace(draft.body);
-  const { minimumBodyLength, maximumBodyLength } = getBodyLengthGuide(
-    input.targetLength,
-  );
+  const { bodyLength, minimumBodyLength, maximumBodyLength, warning } = getBodyLengthReport(draft.body, input.targetLength);
   const primaryKeyword = input.keywords[0]?.value ?? '';
   const issues: string[] = [];
   const blockingIssues: string[] = [];
+  const warnings: string[] = warning ? [warning] : [];
 
   if (titleLength > 30) {
     issues.push(`제목이 ${titleLength}자로, 최대 30자를 넘었습니다.`);
   }
 
-  if (countExactOccurrences(draft.title, primaryKeyword) !== 1) {
-    const issue = '제목에 기본 키워드가 정확히 한 번 들어가야 합니다.';
-    issues.push(issue);
-    blockingIssues.push(issue);
+  const titleKeywordCount = countExactOccurrences(draft.title, primaryKeyword);
+  if (titleKeywordCount !== 1) {
+    warnings.push(`제목의 기본 키워드 ‘${primaryKeyword}’: 설정 1회 / 실제 ${titleKeywordCount}회.`);
   }
 
   if (/\p{Extended_Pictographic}|[★☆♥♡◆◇■□●○※♪♬✓✔]/u.test(draft.title)) {
     issues.push('제목에 이모지 또는 장식용 특수문자가 들어갔습니다.');
   }
 
-  if (bodyLength < minimumBodyLength || bodyLength > maximumBodyLength) {
-    issues.push(
-      `본문이 공백 제외 ${bodyLength.toLocaleString('ko-KR')}자로, 목표 범위 ${minimumBodyLength.toLocaleString('ko-KR')}–${maximumBodyLength.toLocaleString('ko-KR')}자를 벗어났습니다.`,
-    );
-  }
-
   for (const keyword of input.keywords) {
     const actual = countExactOccurrences(draft.body, keyword.value);
 
     if (actual !== keyword.repetitions) {
-      const issue = `본문의 ‘${keyword.value}’이(가) ${actual}회 사용되었습니다. 설정값은 ${keyword.repetitions}회입니다.`;
-      issues.push(issue);
-      blockingIssues.push(issue);
+      warnings.push(`본문 키워드 ‘${keyword.value}’: 설정 ${keyword.repetitions}회 / 실제 ${actual}회.`);
     }
   }
 
@@ -230,6 +199,7 @@ export function verifyGeneratedBlogDraft(
     maximumBodyLength,
     issues,
     blockingIssues,
+    warnings,
   };
 }
 

@@ -614,8 +614,9 @@ const blowNaverApi = {
   attachImages: (
     imageIds: readonly string[],
     layout: NaverImageLayout,
+    paragraphNumbers?: readonly number[],
   ): Promise<NaverImageResponse> =>
-    ipcRenderer.invoke(ipcChannels.naverAttachImages, { imageIds, layout }),
+    ipcRenderer.invoke(ipcChannels.naverAttachImages, { imageIds, layout, paragraphNumbers }),
   monitorUserInteraction: (): Promise<NaverUserInteractionResponse> =>
     ipcRenderer.invoke(ipcChannels.naverMonitorUserInteraction),
   testNetworkInterruption: (): Promise<NaverNetworkInterruptionResponse> =>

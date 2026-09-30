@@ -33,6 +33,7 @@ import {
   NaverConnectionRunnerError,
   NaverConnectionSession,
 } from './naver-connection.js';
+import { prepareAutomationFocus } from './automation-focus.js';
 import {
   readOpenAiCredential,
   listOpenAiModelIds,
@@ -503,6 +504,7 @@ function parseSelectedImageIds(input: unknown): readonly string[] | null {
 function parseImageAttachmentRequest(input: unknown): {
   readonly imageIds: readonly string[];
   readonly layout: NaverImageLayout;
+  readonly paragraphNumbers?: readonly number[];
 } | null {
   if (!input || typeof input !== 'object') {
     return null;
@@ -511,6 +513,7 @@ function parseImageAttachmentRequest(input: unknown): {
   const candidate = input as {
     readonly imageIds?: unknown;
     readonly layout?: unknown;
+    readonly paragraphNumbers?: unknown;
   };
   const imageIds = parseSelectedImageIds(candidate.imageIds);
   const layout = candidate.layout;
@@ -522,7 +525,9 @@ function parseImageAttachmentRequest(input: unknown): {
     return null;
   }
 
-  return { imageIds, layout };
+  const paragraphNumbers = candidate.paragraphNumbers;
+  if (paragraphNumbers !== undefined && (layout !== 'individual' || !Array.isArray(paragraphNumbers) || paragraphNumbers.length !== imageIds.length || paragraphNumbers.some(number => !Number.isInteger(number) || number < 1 || number > 100))) return null;
+  return { imageIds, layout, ...(paragraphNumbers === undefined ? {} : { paragraphNumbers: paragraphNumbers as number[] }) };
 }
 
 async function closeMockBrowser(): Promise<void> {
@@ -822,8 +827,8 @@ function registerNaverIpc(): void {
     activeRun = true;
     try {
       const status = await session.prepareAutomaticWriter(blogId);
-      // Our own new Chrome tab can take focus. Restore BLOW before the guarded input operations.
-      if (!appWindow.isDestroyed()) appWindow.focus();
+      // Confirm focus before reporting ready, so generation does not start after a refused focus change.
+      if (!await prepareAutomationFocus(appWindow)) return { ok: false, error: { code: 'USER_INTERACTION_DETECTED', message: 'BLOW 창을 맨 앞으로 두고 다시 시작해 주세요.' } };
       return { ok: true, status };
     } catch (error) {
       return { ok: false, error: error instanceof NaverConnectionRunnerError
@@ -921,8 +926,7 @@ function registerNaverIpc(): void {
 
       const appWindow = BrowserWindow.fromWebContents(event.sender);
       const inputAbortController = new AbortController();
-      let userLeftApp =
-        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      let userLeftApp = !await prepareAutomationFocus(appWindow);
       const recordAppBlur = (): void => {
         userLeftApp = true;
         inputAbortController.abort();
@@ -1043,8 +1047,7 @@ function registerNaverIpc(): void {
 
       const appWindow = BrowserWindow.fromWebContents(event.sender);
       const dividerAbortController = new AbortController();
-      let userLeftApp =
-        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      let userLeftApp = !await prepareAutomationFocus(appWindow);
       const recordAppBlur = (): void => {
         userLeftApp = true;
         dividerAbortController.abort();
@@ -1166,8 +1169,7 @@ function registerNaverIpc(): void {
 
       const appWindow = BrowserWindow.fromWebContents(event.sender);
       const dividerAbortController = new AbortController();
-      let userLeftApp =
-        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      let userLeftApp = !await prepareAutomationFocus(appWindow);
       const recordAppBlur = (): void => {
         userLeftApp = true;
         dividerAbortController.abort();
@@ -1290,8 +1292,7 @@ function registerNaverIpc(): void {
 
       const appWindow = BrowserWindow.fromWebContents(event.sender);
       const stickerAbortController = new AbortController();
-      let userLeftApp =
-        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      let userLeftApp = !await prepareAutomationFocus(appWindow);
       const recordAppBlur = (): void => {
         userLeftApp = true;
         stickerAbortController.abort();
@@ -1413,8 +1414,7 @@ function registerNaverIpc(): void {
 
       const appWindow = BrowserWindow.fromWebContents(event.sender);
       const stickerAbortController = new AbortController();
-      let userLeftApp =
-        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      let userLeftApp = !await prepareAutomationFocus(appWindow);
       const recordAppBlur = (): void => {
         userLeftApp = true;
         stickerAbortController.abort();
@@ -1537,8 +1537,7 @@ function registerNaverIpc(): void {
 
       const appWindow = BrowserWindow.fromWebContents(event.sender);
       const quoteAbortController = new AbortController();
-      let userLeftApp =
-        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      let userLeftApp = !await prepareAutomationFocus(appWindow);
       const recordAppBlur = (): void => {
         userLeftApp = true;
         quoteAbortController.abort();
@@ -1660,8 +1659,7 @@ function registerNaverIpc(): void {
 
       const appWindow = BrowserWindow.fromWebContents(event.sender);
       const quoteAbortController = new AbortController();
-      let userLeftApp =
-        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      let userLeftApp = !await prepareAutomationFocus(appWindow);
       const recordAppBlur = (): void => {
         userLeftApp = true;
         quoteAbortController.abort();
@@ -1771,8 +1769,7 @@ function registerNaverIpc(): void {
 
     const appWindow = BrowserWindow.fromWebContents(event.sender);
     const draftSaveAbortController = new AbortController();
-    let userLeftApp =
-      !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+    let userLeftApp = !await prepareAutomationFocus(appWindow);
     const recordAppBlur = (): void => {
       userLeftApp = true;
       draftSaveAbortController.abort();
@@ -2041,8 +2038,7 @@ function registerNaverIpc(): void {
 
       const appWindow = BrowserWindow.fromWebContents(event.sender);
       const imageAbortController = new AbortController();
-      let userLeftApp =
-        !appWindow || appWindow.isDestroyed() || !appWindow.isFocused();
+      let userLeftApp = !await prepareAutomationFocus(appWindow);
       const recordAppBlur = (): void => {
         userLeftApp = true;
         imageAbortController.abort();
@@ -2081,6 +2077,7 @@ function registerNaverIpc(): void {
           selectedImages.map((image) => image!.path),
           request.layout,
           imageAbortController.signal,
+          request.paragraphNumbers,
         );
 
         if (userLeftApp) {

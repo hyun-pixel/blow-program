@@ -1,5 +1,7 @@
 import { extname } from 'node:path';
 import type { Locator, Page } from 'playwright-core';
+import { requireMatchingBodyParagraphs } from './naver-editor.js';
+import { placeCaretAtParagraphEdge } from './naver-editor-selection.js';
 
 const IMAGE_UPLOAD_TIMEOUT_MS = 30_000;
 const IMAGE_LAYOUT_TIMEOUT_MS = 15_000;
@@ -72,7 +74,8 @@ export type NaverImageFailureCode =
   | 'IMAGE_COUNT_MISMATCH'
   | 'IMAGE_LAYOUT_CONTROL_NOT_FOUND'
   | 'IMAGE_LAYOUT_CONTROL_AMBIGUOUS'
-  | 'IMAGE_LAYOUT_MISMATCH';
+  | 'IMAGE_LAYOUT_MISMATCH'
+  | 'IMAGE_POSITION_MISMATCH';
 
 export interface NaverSelectedImageFile {
   readonly id: string;
@@ -428,6 +431,39 @@ async function waitForGroupedLayout(
 
 export class NaverImageAdapter {
   constructor(private readonly page: Page) {}
+
+  async attachAtParagraphs(inputPaths: readonly string[], expectedParagraphs: readonly string[], paragraphNumbers: readonly number[], signal?: AbortSignal): Promise<NaverImageAttachmentResult> {
+    const paths = validateImagePaths(inputPaths);
+    if (paths.length !== paragraphNumbers.length || paragraphNumbers.some(number => !Number.isInteger(number) || number < 1 || number >= expectedParagraphs.length)) {
+      throw new NaverImageError('INVALID_IMAGE_SELECTION', '이미지마다 본문 중간의 문단 위치를 지정해 주세요.');
+    }
+    // Upload equal-boundary images together to preserve their order; never fall back to the final caret.
+    for (const number of [...new Set(paragraphNumbers)].sort((a, b) => a - b)) {
+      throwIfImageInterrupted(signal);
+      const anchors = await requireMatchingBodyParagraphs(this.page, expectedParagraphs);
+      const anchor = anchors[number - 1]!;
+      const measure = async (): Promise<number> => {
+        const current = await requireMatchingBodyParagraphs(this.page, expectedParagraphs);
+        const anchor = current[number - 1]!;
+        const next = current[number]!;
+        const beforeNext = await next.evaluate((element, selector) => [...element.ownerDocument.querySelectorAll(selector)]
+          .filter(image => Boolean(image.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)).length, imageComponentSelectors.join(', '));
+        const beforeAnchor = await anchor.evaluate((element, selector) => [...element.ownerDocument.querySelectorAll(selector)]
+          .filter(image => Boolean(image.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)).length, imageComponentSelectors.join(', '));
+        return beforeNext - beforeAnchor;
+      };
+      const before = await measure();
+      await placeCaretAtParagraphEdge(this.page, anchor, 'after');
+      throwIfImageInterrupted(signal);
+      const group = paths.filter((_, index) => paragraphNumbers[index] === number);
+      await this.attachIndividualImages(group, signal);
+      await requireMatchingBodyParagraphs(this.page, expectedParagraphs);
+      if (await measure() - before !== group.length) {
+        throw new NaverImageError('IMAGE_POSITION_MISMATCH', '이미지는 첨부됐지만 지정한 본문 중간 위치와 다릅니다. 중복 첨부나 임시저장 없이 멈췄습니다.');
+      }
+    }
+    return { stage: 'IMAGES_VERIFIED', message: '이미지를 본문 중간에 나누어 배치하고 위치와 개수를 확인했습니다.', currentUrl: this.page.url(), requestedCount: paths.length, insertedCount: paths.length, layout: 'individual' };
+  }
 
   async attachImages(
     inputPaths: readonly string[],

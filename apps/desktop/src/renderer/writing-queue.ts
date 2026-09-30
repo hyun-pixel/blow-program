@@ -1,5 +1,6 @@
 import { normalizeBlogGenerationRequest, type BlogGenerationRequest, type GeneratedBlogDraft } from '../main/openai-generation.js';
 import type { ImageAspectRatio, ImageQualityMode } from '../main/openai-image-generation.js';
+import type { WorkHistoryInput } from '../main/work-history.js';
 import { dividerChoices, quoteChoices, type PostDecorations } from './post-decoration.js';
 
 export const MAX_WRITING_JOBS = 20;
@@ -17,6 +18,30 @@ export interface WritingJob {
   readonly status: 'queued' | 'running' | 'saved' | 'failed' | 'interrupted';
   readonly message: string;
   readonly draft?: GeneratedBlogDraft;
+  readonly warnings?: readonly string[];
+  readonly savedUrl?: string;
+  readonly historyPending?: boolean;
+}
+
+export interface WritingConfirmation {
+  readonly jobs: readonly WritingJob[];
+  readonly retry?: WritingJob;
+}
+
+export function createRetryJob(job: WritingJob, userId: string): WritingJob {
+  if (job.status !== 'failed' && job.status !== 'interrupted') throw new Error('실패하거나 중단된 글만 재생성할 수 있습니다.');
+  validateWritingConfig(job.config, userId);
+  return { id: crypto.randomUUID(), config: structuredClone(job.config), status: 'queued', message: '같은 설정으로 재생성 · 실행 대기' };
+}
+
+export function getSavedHistoryInput(job: WritingJob): WorkHistoryInput {
+  if (job.status !== 'saved' || !job.draft || !job.savedUrl) throw new Error('네이버 저장이 확인된 글만 작업 내역에 기록할 수 있습니다.');
+  const { request, images } = job.config;
+  return { ...job.draft, jobId: job.id, modelId: request.modelId, modelName: job.config.modelName,
+    reasoningEffort: request.reasoningEffort, reasoningLabel: job.config.reasoningLabel,
+    imageCount: images.enabled ? images.count : 0, naverUrl: job.savedUrl, ...(job.warnings ? { warnings: job.warnings } : {}),
+    settings: { articleType: request.articleType, targetLength: request.targetLength, useGeneratedImages: images.enabled,
+      imageCount: images.count, imageAspectRatio: images.aspectRatio, imageQualityMode: images.qualityMode, imageStyle: images.style } };
 }
 
 export function validateWritingConfig(config: WritingConfig, userId: string): void {
@@ -51,6 +76,9 @@ export function readWritingQueue(storage: Pick<Storage, 'getItem'>, userId: stri
         || !['queued', 'running', 'saved', 'failed', 'interrupted'].includes(job.status)) throw new Error();
       validateWritingConfig(job.config, userId);
       if (job.draft && (typeof job.draft.title !== 'string' || typeof job.draft.body !== 'string')) throw new Error();
+      if (job.historyPending !== undefined && typeof job.historyPending !== 'boolean') throw new Error();
+      if (job.savedUrl !== undefined && (typeof job.savedUrl !== 'string' || job.savedUrl.length > 4000)) throw new Error();
+      if (job.warnings !== undefined && (!Array.isArray(job.warnings) || job.warnings.length > 32 || job.warnings.some((warning) => typeof warning !== 'string' || warning.length > 1_000))) throw new Error();
       return job.status === 'running' ? { ...job, status: 'interrupted', message: '프로그램이 종료되어 결과를 확인할 수 없습니다. 네이버 임시저장 목록을 먼저 확인하세요. 자동으로 재실행하지 않습니다.' } : job;
     });
   } catch {

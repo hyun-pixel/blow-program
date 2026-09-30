@@ -1,10 +1,11 @@
 import type {
+  ElementHandle,
   Locator,
   Page,
   Response,
 } from 'playwright-core';
 
-const SAVE_OBSERVE_TIMEOUT_MS = 1_500;
+const SAVE_OBSERVE_TIMEOUT_MS = 10_000;
 const SAVE_VERIFY_INTERVAL_MS = 100;
 const saveControlSelector = 'button, [role="button"], a';
 const saveStatusSelector = [
@@ -77,6 +78,9 @@ interface SaveControlCandidate {
 interface SaveControlSnapshot {
   readonly label: string;
   readonly identity: string;
+  readonly aliases?: readonly string[];
+  readonly nearSaveControl?: boolean;
+  readonly visible: boolean;
   readonly disabled: boolean;
   readonly ariaDisabled: boolean;
   readonly ariaBusy: boolean;
@@ -88,16 +92,28 @@ function normalizeText(value: string): string {
 }
 
 function compactText(value: string): string {
-  return normalizeText(value).replace(/\s+/g, '');
+  return value.normalize('NFC').replace(/[\s\u200B-\u200D\uFEFF]/g, '');
 }
 
-async function readControlSnapshot(
-  control: Locator,
-): Promise<SaveControlSnapshot> {
-  return control.evaluate((element) => {
+// One browser round trip, with no per-element auto-wait during DOM replacement.
+function captureSaveControls(input: Element | Element[]): SaveControlSnapshot[] {
+  return (Array.isArray(input) ? input : [input]).map((element) => {
     const ariaLabel = element.getAttribute('aria-label') ?? '';
     const title = element.getAttribute('title') ?? '';
     const text = element.textContent ?? '';
+    const aliases = [ariaLabel, title, text, (element as HTMLElement).innerText ?? ''].filter(Boolean);
+    let nearSaveControl = false;
+    if (aliases.some(label => /^\d+$/.test(label.replace(/\s+/g, '')))) {
+      let container = element.parentElement;
+      for (let depth = 0; container && depth < 2; depth++, container = container.parentElement) {
+        nearSaveControl ||= Array.from(container.querySelectorAll('button, a, [role="button"]'))
+          .some(candidate => candidate !== element &&
+            (candidate.getAttribute('aria-label') || candidate.getAttribute('title') || candidate.textContent || '')
+              .replace(/\s+/g, '') === '저장');
+      }
+    }
+    const bounds = element.getBoundingClientRect();
+    const style = element.ownerDocument.defaultView?.getComputedStyle(element);
     const identity = [
       element.id,
       element.className,
@@ -108,6 +124,10 @@ async function readControlSnapshot(
     return {
       label: (ariaLabel || title || text).replace(/\s+/g, ' ').trim(),
       identity,
+      aliases,
+      nearSaveControl,
+      visible: element.isConnected && bounds.width > 0 && bounds.height > 0 &&
+        style?.visibility !== 'hidden' && style?.visibility !== 'collapse',
       disabled:
         'disabled' in element &&
         Boolean((element as HTMLButtonElement).disabled),
@@ -121,10 +141,17 @@ async function readControlSnapshot(
   });
 }
 
+async function readControlSnapshot(control: ElementHandle<HTMLElement | SVGElement>): Promise<SaveControlSnapshot> {
+  const snapshot = (await control.evaluate(captureSaveControls))[0];
+  if (!snapshot?.visible) throw new Error('Save control is no longer visible');
+  return snapshot;
+}
+
 function getSaveControlScore(snapshot: SaveControlSnapshot): number {
   const label = compactText(snapshot.label);
   const opensDraftList =
     label.startsWith('임시저장') ||
+    readNaverDraftCount(snapshot) !== null ||
     (
       /(temporary|temp|draft)/i.test(snapshot.identity) &&
       /(list|layer|popup|count|load)/i.test(snapshot.identity)
@@ -149,18 +176,17 @@ async function findSaveControls(page: Page): Promise<readonly Locator[]> {
 
   for (const frame of page.frames()) {
     const controls = frame.locator(saveControlSelector);
-    const count = await controls.count();
+    const snapshots = await controls.evaluateAll(captureSaveControls).catch(error => {
+      if (frame.isDetached()) return [];
+      throw error;
+    });
 
-    for (let index = 0; index < count; index += 1) {
+    for (const [index, snapshot] of snapshots.entries()) {
       const control = controls.nth(index);
-      const visible = await control.isVisible().catch(() => false);
-
-      if (!visible) {
+      if (!snapshot.visible) {
         continue;
       }
-
-      const snapshot = await readControlSnapshot(control).catch(() => null);
-      const score = snapshot ? getSaveControlScore(snapshot) : 0;
+      const score = getSaveControlScore(snapshot);
 
       if (score > 0) {
         candidates.push({ locator: control, score });
@@ -178,7 +204,7 @@ async function findSaveControls(page: Page): Promise<readonly Locator[]> {
     .map((candidate) => candidate.locator);
 }
 
-async function requireUniqueSaveControl(page: Page): Promise<Locator> {
+async function requireUniqueSaveControl(page: Page): Promise<ElementHandle<HTMLElement | SVGElement>> {
   const controls = await findSaveControls(page);
 
   if (controls.length === 0) {
@@ -195,7 +221,9 @@ async function requireUniqueSaveControl(page: Page): Promise<Locator> {
     );
   }
 
-  return controls[0]!;
+  const handle = await controls[0]!.elementHandle({ timeout: 1_000 });
+  if (!handle) throw new NaverDraftSaveError('DRAFT_SAVE_CONTROL_NOT_FOUND', '저장 버튼이 사라져 실행하지 않았습니다. Chrome 화면을 확인해 주세요.');
+  return handle;
 }
 
 async function readVisibleStatusTexts(page: Page): Promise<readonly string[]> {
@@ -203,23 +231,17 @@ async function readVisibleStatusTexts(page: Page): Promise<readonly string[]> {
 
   for (const frame of page.frames()) {
     const statuses = frame.locator(saveStatusSelector);
-    const count = await statuses.count();
-
-    for (let index = 0; index < count; index += 1) {
-      const status = statuses.nth(index);
-
-      if (!(await status.isVisible().catch(() => false))) {
-        continue;
-      }
-
-      const text = normalizeText(
-        await status.innerText().catch(() => ''),
-      );
-
-      if (text) {
-        texts.add(text);
-      }
-    }
+    const snapshots = await statuses.evaluateAll(elements => elements.flatMap(element => {
+      const bounds = element.getBoundingClientRect();
+      const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+      if (!element.isConnected || bounds.width <= 0 || bounds.height <= 0 ||
+          style?.visibility === 'hidden' || style?.visibility === 'collapse') return [];
+      return [(element.textContent ?? '').replace(/\s+/g, ' ').trim()];
+    })).catch(error => {
+      if (frame.isDetached()) return [];
+      throw error;
+    });
+    for (const text of snapshots) if (text) texts.add(text);
   }
 
   return [...texts];
@@ -227,7 +249,9 @@ async function readVisibleStatusTexts(page: Page): Promise<readonly string[]> {
 
 function isCompletionMessage(value: string): boolean {
   const text = compactText(value);
+  if (/(실패|오류|불가|취소|저장중)/.test(text)) return false;
   return (
+    /^(?:글이)?(?:임시)?저장(?:이)?(?:완료되었습니다|되었습니다|됐습니다|완료|됨)[.!]?$/.test(text) ||
     /임시저장.*(완료|성공|저장됨|저장됐|저장되었)/.test(text) ||
     /(완료|성공|저장됨|저장됐|저장되었).*임시저장/.test(text)
   );
@@ -237,30 +261,25 @@ function hasSavedMetadata(value: string): boolean {
   const text = normalizeText(value);
   return (
     /임시\s*저장/.test(text) &&
+    !/(실패|오류|불가|취소|저장중)/.test(compactText(text)) &&
     !isCompletionMessage(text) &&
     /(\d{1,2}:\d{2}|오전|오후|방금|저장됨)/.test(text)
   );
 }
 
-function readDraftCountFromSnapshot(
-  snapshot: SaveControlSnapshot,
+export function readNaverDraftCount(
+  snapshot: { readonly label: string; readonly identity: string; readonly aliases?: readonly string[]; readonly nearSaveControl?: boolean },
 ): number | null {
-  const label = compactText(snapshot.label);
-  const labeledCount = label.match(/^임시저장(?:글)?(\d+)(?:개)?$/);
-
-  if (labeledCount) {
-    return Number(labeledCount[1]);
+  const counts = new Set<number>();
+  for (const label of [snapshot.label, ...snapshot.aliases ?? []].map(compactText)) {
+    const labeledCount = label.match(/^(?:임시)?저장(?:글)?(?:\((\d+)\)|(\d+))(?:개)?$/) ??
+      label.match(/^(?:(?:임시)?저장(?:글)?)?(?:\((\d+)\)|(\d+))(?:개)?임시저장목록$/);
+    const numericList = /^\d+$/.test(label) && (snapshot.nearSaveControl === true ||
+      /(temporary|temp|draft)/i.test(snapshot.identity) && /(list|count)/i.test(snapshot.identity));
+    const value = labeledCount ? Number(labeledCount[1] ?? labeledCount[2]) : numericList ? Number(label) : NaN;
+    if (Number.isSafeInteger(value) && value >= 0) counts.add(value);
   }
-
-  if (
-    /^\d+$/.test(label) &&
-    /(temporary|temp|draft)/i.test(snapshot.identity) &&
-    /(list|count)/i.test(snapshot.identity)
-  ) {
-    return Number(label);
-  }
-
-  return null;
+  return counts.size === 1 ? [...counts][0]! : null;
 }
 
 async function readVisibleDraftCount(page: Page): Promise<number | null> {
@@ -268,19 +287,12 @@ async function readVisibleDraftCount(page: Page): Promise<number | null> {
 
   for (const frame of page.frames()) {
     const controls = frame.locator(saveControlSelector);
-    const count = await controls.count();
-
-    for (let index = 0; index < count; index += 1) {
-      const control = controls.nth(index);
-
-      if (!(await control.isVisible().catch(() => false))) {
-        continue;
-      }
-
-      const snapshot = await readControlSnapshot(control).catch(() => null);
-      const draftCount = snapshot
-        ? readDraftCountFromSnapshot(snapshot)
-        : null;
+    const snapshots = await controls.evaluateAll(captureSaveControls).catch(error => {
+      if (frame.isDetached()) return [];
+      throw error;
+    });
+    for (const snapshot of snapshots) {
+      const draftCount = snapshot.visible ? readNaverDraftCount(snapshot) : null;
 
       if (draftCount !== null) {
         counts.add(draftCount);
@@ -291,26 +303,14 @@ async function readVisibleDraftCount(page: Page): Promise<number | null> {
   return counts.size === 1 ? [...counts][0]! : null;
 }
 
-function isBusyControl(snapshot: SaveControlSnapshot): boolean {
-  return (
-    snapshot.disabled ||
-    snapshot.ariaDisabled ||
-    snapshot.ariaBusy ||
-    /(저장중|처리중)/.test(compactText(snapshot.label)) ||
-    /(saving|loading|busy)/i.test(snapshot.state)
-  );
-}
-
 function isCompletedControlState(
   before: SaveControlSnapshot,
   current: SaveControlSnapshot,
 ): boolean {
   const currentLabel = compactText(current.label);
-  const completedLabel = /(저장완료|저장됨|저장됐|저장되었습니다)/.test(
-    currentLabel,
-  );
+  const completedLabel = currentLabel !== compactText(before.label) && isCompletionMessage(currentLabel);
   const stateChanged = current.state !== before.state;
-  const completedState = /(saved|complete|success)/i.test(current.state);
+  const completedState = current.state.trim().split(/\s+/).some(state => /^(saved|complete|completed|success)$/i.test(state));
 
   return completedLabel || (stateChanged && completedState);
 }
@@ -371,7 +371,6 @@ function hasDirectCompletionSignal(
   signalIds: ReadonlySet<NaverDraftSaveSignalId>,
 ): boolean {
   const directSignalIds: readonly NaverDraftSaveSignalId[] = [
-    'SAVE_RESPONSE_RECEIVED',
     'COMPLETION_MESSAGE_SHOWN',
     'SAVED_COUNT_CHANGED',
     'SAVED_STATUS_CHANGED',
@@ -386,115 +385,112 @@ export class NaverDraftSaveAdapter {
   async saveAndVerify(signal?: AbortSignal): Promise<NaverDraftSaveResult> {
     throwIfDraftSaveInterrupted(signal);
     const control = await requireUniqueSaveControl(this.page);
-    throwIfDraftSaveInterrupted(signal);
-    const [beforeControl, beforeStatusTexts, beforeCount] = await Promise.all([
-      readControlSnapshot(control),
-      readVisibleStatusTexts(this.page),
-      readVisibleDraftCount(this.page),
-    ]);
-    throwIfDraftSaveInterrupted(signal);
-    const beforeStatusSet = new Set(beforeStatusTexts);
-    const signalIds = new Set<NaverDraftSaveSignalId>();
-    let seenBusy = false;
-    const onResponse = (response: Response): void => {
-      if (isNaverEditorSaveResponse(response)) {
-        signalIds.add('SAVE_RESPONSE_RECEIVED');
-      }
-    };
-
-    this.page.on('response', onResponse);
-
     try {
       throwIfDraftSaveInterrupted(signal);
-      await control.click({ noWaitAfter: true });
-    } catch (error) {
-      this.page.off('response', onResponse);
+      const [beforeControl, beforeStatusTexts, beforeCount] = await Promise.all([
+        readControlSnapshot(control),
+        readVisibleStatusTexts(this.page),
+        readVisibleDraftCount(this.page),
+      ]);
+      throwIfDraftSaveInterrupted(signal);
+      if (getSaveControlScore(beforeControl) === 0) {
+        throw new NaverDraftSaveError('DRAFT_SAVE_CONTROL_NOT_FOUND', '화면이 갱신되어 저장 버튼을 다시 확인할 수 없습니다. 다른 버튼은 누르지 않았습니다.');
+      }
+      const beforeStatusSet = new Set(beforeStatusTexts);
+      let lastDraftCount = beforeCount;
+      const signalIds = new Set<NaverDraftSaveSignalId>();
+      const onResponse = (response: Response): void => {
+        if (isNaverEditorSaveResponse(response)) {
+          signalIds.add('SAVE_RESPONSE_RECEIVED');
+        }
+      };
 
-      if (error instanceof NaverDraftSaveError) {
-        throw error;
+      this.page.on('response', onResponse);
+
+      try {
+        throwIfDraftSaveInterrupted(signal);
+        await control.click({ noWaitAfter: true, timeout: 5_000 });
+      } catch (error) {
+        this.page.off('response', onResponse);
+
+        if (error instanceof NaverDraftSaveError) {
+          throw error;
+        }
+
+        throw new NaverDraftSaveError(
+          'DRAFT_SAVE_CLICK_FAILED',
+          '저장 버튼 조작이 완료됐는지 확실하지 않아 자동으로 다시 누르지 않았습니다. Chrome에서 저장 여부를 확인해 주세요.',
+          { cause: error },
+        );
       }
 
-      throw new NaverDraftSaveError(
-        'DRAFT_SAVE_CLICK_FAILED',
-        '저장 버튼 조작이 완료됐는지 확실하지 않아 자동으로 다시 누르지 않았습니다. Chrome에서 저장 여부를 확인해 주세요.',
-        { cause: error },
-      );
-    }
+      signalIds.add('SAVE_CONTROL_CLICKED');
 
-    signalIds.add('SAVE_CONTROL_CLICKED');
+      try {
+        const deadline = performance.now() + SAVE_OBSERVE_TIMEOUT_MS;
+        while (true) {
+          const [
+            currentControl,
+            currentStatusTexts,
+            currentDraftCount,
+          ] = await Promise.all([
+            readControlSnapshot(control).catch(() => null),
+            readVisibleStatusTexts(this.page).catch(() => []),
+            readVisibleDraftCount(this.page).catch(() => null),
+          ]);
+          lastDraftCount = currentDraftCount;
 
-    try {
-      for (
-        let elapsedMs = 0;
-        elapsedMs <= SAVE_OBSERVE_TIMEOUT_MS;
-        elapsedMs += SAVE_VERIFY_INTERVAL_MS
-      ) {
-        if (elapsedMs > 0) {
-          await this.page.waitForTimeout(SAVE_VERIFY_INTERVAL_MS);
-        }
-
-        const [
-          currentControl,
-          currentStatusTexts,
-          currentDraftCount,
-        ] = await Promise.all([
-          readControlSnapshot(control).catch(() => null),
-          readVisibleStatusTexts(this.page).catch(() => []),
-          readVisibleDraftCount(this.page).catch(() => null),
-        ]);
-
-        if (currentControl) {
-          const busy = isBusyControl(currentControl);
-
-          if (busy) {
-            seenBusy = true;
-          } else if (seenBusy) {
-            signalIds.add('CONTROL_STATE_COMPLETED');
+          if (currentControl) {
+            if (isCompletedControlState(beforeControl, currentControl)) {
+              signalIds.add('CONTROL_STATE_COMPLETED');
+            }
           }
 
-          if (isCompletedControlState(beforeControl, currentControl)) {
-            signalIds.add('CONTROL_STATE_COMPLETED');
+          if (
+            beforeCount !== null &&
+            currentDraftCount !== null &&
+            currentDraftCount > beforeCount
+          ) {
+            signalIds.add('SAVED_COUNT_CHANGED');
           }
 
-        }
+          for (const text of currentStatusTexts) {
+            if (!beforeStatusSet.has(text) && isCompletionMessage(text)) {
+              signalIds.add('COMPLETION_MESSAGE_SHOWN');
+            }
 
-        if (
-          beforeCount !== null &&
-          currentDraftCount !== null &&
-          currentDraftCount !== beforeCount
-        ) {
-          signalIds.add('SAVED_COUNT_CHANGED');
-        }
-
-        for (const text of currentStatusTexts) {
-          if (!beforeStatusSet.has(text) && isCompletionMessage(text)) {
-            signalIds.add('COMPLETION_MESSAGE_SHOWN');
+            if (!beforeStatusSet.has(text) && hasSavedMetadata(text)) {
+              signalIds.add('SAVED_STATUS_CHANGED');
+            }
           }
 
-          if (!beforeStatusSet.has(text) && hasSavedMetadata(text)) {
-            signalIds.add('SAVED_STATUS_CHANGED');
+          if (hasDirectCompletionSignal(signalIds) || signalIds.has('CONTROL_STATE_COMPLETED')) {
+            break;
           }
+          if (performance.now() >= deadline) break;
+          await this.page.waitForTimeout(Math.max(0, Math.min(SAVE_VERIFY_INTERVAL_MS, deadline - performance.now())));
         }
-
-        if (hasDirectCompletionSignal(signalIds) || signalIds.size >= 2) {
-          break;
-        }
+      } catch {
+        // Keep genuine completion evidence, but a click alone is never proof of saving.
+      } finally {
+        this.page.off('response', onResponse);
       }
-    } catch {
-      // 보조 신호 수집 실패는 이미 완료된 버튼 조작을 무효화하지 않는다.
+      if (!hasDirectCompletionSignal(signalIds) && !signalIds.has('CONTROL_STATE_COMPLETED')) {
+        throw new NaverDraftSaveError('DRAFT_SAVE_UNCONFIRMED',
+          `저장 완료 신호를 확인하지 못했습니다. 임시저장 건수: 이전 ${beforeCount ?? '확인 불가'}, 마지막 ${lastDraftCount ?? '확인 불가'}. ` +
+          '저장 버튼은 한 번만 눌렀습니다. 이미 저장됐을 수 있으므로 재생성하지 말고 Chrome의 임시저장 목록을 확인해 주세요.');
+      }
+      const signals = toSignals(signalIds);
+
+      return {
+        stage: 'DRAFT_SAVE_COMPLETED',
+        message: '네이버 저장 버튼을 한 번 누른 뒤 임시저장 완료 신호를 확인했습니다.',
+        currentUrl: this.page.url(),
+        signalCount: signals.length,
+        signals,
+      };
     } finally {
-      this.page.off('response', onResponse);
+      await control.dispose().catch(() => undefined);
     }
-
-
-    const signals = toSignals(signalIds);
-
-    return {
-      stage: 'DRAFT_SAVE_COMPLETED',
-      message: '네이버 저장 버튼을 한 번 조작해 임시저장을 실행했습니다.',
-      currentUrl: this.page.url(),
-      signalCount: signals.length,
-      signals,
-    };
   }
 }

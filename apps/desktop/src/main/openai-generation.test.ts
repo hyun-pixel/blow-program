@@ -80,19 +80,18 @@ describe('OpenAI blog generation', () => {
       { ...generationRequest, cta: '상담을 신청해 주세요.' },
     );
     expect(invalidDraft.issues).toEqual(expect.arrayContaining([
-      expect.stringContaining('기본 키워드'),
       expect.stringContaining('CTA'),
     ]));
-    expect(invalidDraft.blockingIssues).toEqual(expect.arrayContaining([
-      expect.stringContaining('기본 키워드'),
-    ]));
+    expect(invalidDraft.valid).toBe(false);
+    expect(invalidDraft.warnings).toContain('제목의 기본 키워드 ‘실손보험’: 설정 1회 / 실제 0회.');
 
     const longDraft = verifyGeneratedBlogDraft(
       { title: '실손보험 가입 전 확인사항', body: `${body}${'나'.repeat(423)}` },
       generationRequest,
     );
-    expect(longDraft.valid).toBe(false);
-    expect(longDraft.issues).toEqual(expect.arrayContaining([
+    expect(longDraft.valid).toBe(true);
+    expect(longDraft.issues).toEqual([]);
+    expect(longDraft.warnings).toEqual(expect.arrayContaining([
       expect.stringContaining('목표 범위 900–1,100자'),
     ]));
     expect(longDraft.blockingIssues).toEqual([]);
@@ -101,9 +100,52 @@ describe('OpenAI blog generation', () => {
       { title: '실손보험 가입 전 확인사항', body: '가'.repeat(1_000) },
       generationRequest,
     );
-    expect(keywordMismatch.blockingIssues).toEqual(expect.arrayContaining([
-      expect.stringContaining('설정값은 3회'),
-    ]));
+    expect(keywordMismatch.valid).toBe(true);
+    expect(keywordMismatch.blockingIssues).toEqual([]);
+    expect(keywordMismatch.warnings).toContain('본문 키워드 ‘실손보험’: 설정 3회 / 실제 0회.');
+  });
+
+  it.each([1546, 1619, 1620, 1800, 1980, 1981, 2300])('reports %i characters without blocking length-only deviations', (length) => {
+    const draft = { title: '실손보험 가입 전 확인사항', body: `${makeValidBody()} \n\t${'나'.repeat(length - 1000)}` };
+    const report = verifyGeneratedBlogDraft(draft, { ...generationRequest, targetLength: 1800 });
+    expect(report.bodyLength).toBe(length);
+    expect(report.valid).toBe(true);
+    expect(report.issues).toEqual([]);
+    expect(report.warnings).toHaveLength(length < 1620 || length > 1980 ? 1 : 0);
+  });
+
+  it('reports keyword and length deviations together without blocking', () => {
+    const report = verifyGeneratedBlogDraft({ title: '실손보험 안내', body: '가'.repeat(1546) }, { ...generationRequest, targetLength: 1800 });
+    expect(report.valid).toBe(true);
+    expect(report.blockingIssues).toEqual([]);
+    expect(report.warnings).toContain('본문 키워드 ‘실손보험’: 설정 3회 / 실제 0회.');
+    expect(report.warnings?.join(' ')).toContain('1,546');
+    expect(report.issues).toEqual([]);
+  });
+
+  it.each([0, 2, 3, 5])('reports actual body count %i separately from the title without rewriting', (count) => {
+    const keywordText = '실손보험'.repeat(count);
+    const draft = { title: '실손보험 안내', body: keywordText + '가'.repeat(1000 - keywordText.length) };
+    const snapshot = { ...draft };
+    const report = verifyGeneratedBlogDraft(draft, generationRequest);
+    expect(report.valid).toBe(true);
+    expect(report.issues).toEqual([]);
+    expect(report.warnings).toEqual(count === 3 ? [] : [`본문 키워드 ‘실손보험’: 설정 3회 / 실제 ${count}회.`]);
+    expect(draft).toEqual(snapshot);
+  });
+
+  it.each([0, 2])('reports title keyword count %i without blocking', (count) => {
+    const report = verifyGeneratedBlogDraft({ title: '실손보험'.repeat(count) + '안내', body: makeValidBody() }, generationRequest);
+    expect(report.valid).toBe(true);
+    expect(report.warnings).toEqual([`제목의 기본 키워드 ‘실손보험’: 설정 1회 / 실제 ${count}회.`]);
+  });
+
+  it('still blocks other validation errors when keyword warnings exist', () => {
+    const report = verifyGeneratedBlogDraft({ title: '가'.repeat(31), body: '본문' }, { ...generationRequest, cta: '문의해 주세요.' });
+    expect(report.valid).toBe(false);
+    expect(report.issues.join(' ')).toContain('최대 30자');
+    expect(report.issues.join(' ')).toContain('CTA');
+    expect(report.warnings?.join(' ')).toContain('실제 0회');
   });
 
   it('uses the Responses API without server-side response storage', async () => {

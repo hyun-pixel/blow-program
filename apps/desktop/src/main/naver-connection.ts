@@ -105,6 +105,7 @@ export type NaverRunnerFailureCode =
   | 'IMAGE_LAYOUT_CONTROL_NOT_FOUND'
   | 'IMAGE_LAYOUT_CONTROL_AMBIGUOUS'
   | 'IMAGE_LAYOUT_MISMATCH'
+  | 'IMAGE_POSITION_MISMATCH'
   | 'INVALID_QUOTE_REQUEST'
   | 'QUOTE_OPERATION_INTERRUPTED'
   | 'QUOTE_ANCHOR_NOT_FOUND'
@@ -293,21 +294,37 @@ export class NaverConnectionSession {
     }
     // A new tab for every job preserves any prior draft, including uncertain/partial saves.
     // Never navigate away from or clear an existing user's editor.
+    let step = '새 탭 열기';
     try {
       const page = await this.context.newPage();
       const adapter = new NaverConnectionAdapter(page);
-      const status = await adapter.verifyRegisteredBlog(this.profile);
+      step = '블로그 연결 확인';
+      // Home redirects can replace the page's execution context. Use the same
+      // bounded verification retries as login, but never adopt an existing draft tab.
+      const status = await adapter.waitForLoginAndVerify(this.profile, {
+        timeoutMs: 30_000,
+        pollIntervalMs: 500,
+        settleDelayMs: 200,
+        waitForLogin: false,
+        allowPageReplacement: false,
+      });
       if (status.stage !== 'WRITER_LINK_READY' || !status.writerHref) {
         await page.close();
         return status;
       }
+      step = '글쓰기 화면 열기';
       const writer = await adapter.openWriter(this.profile, status.writerHref);
       this.adapter = adapter;
       this.writerHref = status.writerHref;
       this.enteredContent = null;
       return writer;
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), { cause: error });
+      const failure = classifyFailure(error);
+      // Display only our fixed step label, never raw browser errors or account URLs.
+      throw new NaverConnectionRunnerError({
+        ...failure,
+        message: `${failure.message} (자동 작성 준비: ${step})`,
+      }, { cause: error });
     }
   }
 
@@ -595,6 +612,7 @@ export class NaverConnectionSession {
     imagePaths: readonly string[],
     layout: NaverImageLayout,
     signal?: AbortSignal,
+    paragraphNumbers?: readonly number[],
   ): Promise<NaverImageAttachmentResult> {
     if (!this.enteredContent) {
       throw new NaverConnectionRunnerError({
@@ -609,6 +627,7 @@ export class NaverConnectionSession {
         imagePaths,
         layout,
         signal,
+        paragraphNumbers ? { paragraphs: this.enteredContent.paragraphs, paragraphNumbers } : undefined,
       );
     } catch (error) {
       throw new NaverConnectionRunnerError(classifyFailure(error), {

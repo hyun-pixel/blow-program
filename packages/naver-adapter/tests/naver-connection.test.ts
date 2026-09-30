@@ -577,6 +577,64 @@ describe('로그인 직후 이동 충돌 복구', () => {
     expect(status.stage).toBe('WRITER_LINK_READY');
   });
 });
+describe('글쓰기 버튼 탐색 중 사라진 보조 프레임', () => {
+  function fixture(failAt: 'count' | 'href', detached = true, includeWriter = true) {
+    const href = 'https://blog.naver.com/GoBlogWrite.naver';
+    const profile = parseNaverBlogUrl('https://blog.naver.com/example');
+    const failure = new Error('locator.count: Frame was detached');
+    const link = () => ({
+      click: vi.fn().mockResolvedValue(undefined),
+      isVisible: vi.fn().mockResolvedValue(true),
+      getAttribute: vi.fn().mockResolvedValue(href),
+      innerText: vi.fn().mockResolvedValue('글쓰기'),
+    });
+    const writer = link();
+    const staleWriter = link();
+    const brokenLink = link();
+    brokenLink.getAttribute.mockRejectedValue(failure);
+    const stableFrame = {
+      locator: () => ({ count: async () => 1, nth: () => writer }),
+      isDetached: () => false,
+    };
+    const unstableFrame = {
+      locator: () => ({
+        count: async () => { if (failAt === 'count') throw failure; return 2; },
+        nth: (index: number) => index === 0 ? staleWriter : brokenLink,
+      }),
+      isDetached: () => detached,
+    };
+    const popup = {
+      url: () => 'https://blog.naver.com/example/postwrite',
+      waitForURL: vi.fn().mockResolvedValue(undefined),
+    };
+    const page = {
+      frames: () => [unstableFrame, ...(includeWriter ? [stableFrame] : [])],
+      waitForEvent: vi.fn().mockResolvedValue(popup),
+    } as unknown as Page;
+    return { run: () => new NaverConnectionAdapter(page).openWriter(profile, href), writer, staleWriter, failure };
+  }
+
+  it.each(['count', 'href'] as const)('%s 확인 도중 사라진 프레임 대신 정상 글쓰기 버튼을 사용한다', async (failAt) => {
+    const f = fixture(failAt);
+    await expect(f.run()).resolves.toMatchObject({ stage: 'WRITER_READY' });
+    expect(f.writer.click).toHaveBeenCalledOnce();
+    expect(f.staleWriter.click).not.toHaveBeenCalled();
+  });
+
+  it.each(['count', 'href'] as const)('살아 있는 프레임의 %s 오류는 숨기거나 클릭하지 않는다', async (failAt) => {
+    const f = fixture(failAt, false);
+    await expect(f.run()).rejects.toBe(f.failure);
+    expect(f.writer.click).not.toHaveBeenCalled();
+    expect(f.staleWriter.click).not.toHaveBeenCalled();
+  });
+
+  it('정상 글쓰기 버튼이 없으면 여전히 중단한다', async () => {
+    const f = fixture('href', true, false);
+    await expect(f.run()).rejects.toMatchObject({ code: 'WRITER_LINK_NOT_FOUND' });
+    expect(f.staleWriter.click).not.toHaveBeenCalled();
+  });
+});
+
 describe('글쓰기 새 탭 클릭 완료 신호', () => {
   it('클릭 완료 신호가 끊겨도 열린 새 탭을 검증한다', async () => {
     const popupPage = {

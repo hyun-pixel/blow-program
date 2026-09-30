@@ -5,6 +5,7 @@ import type {
 import { placeCaretAtParagraphEdge as setParagraphCaret } from './naver-editor-selection.js';
 
 const STICKER_VERIFY_TIMEOUT_MS = 5_000;
+const STICKER_INSERT_TIMEOUT_MS = 10_000;
 const STICKER_VERIFY_INTERVAL_MS = 100;
 
 const paragraphSelectors = [
@@ -626,23 +627,6 @@ async function waitForFirstStickerItem(
   );
 }
 
-async function getVisibleStickerCount(page: Page): Promise<number> {
-  let total = 0;
-
-  for (const frame of page.frames()) {
-    const components = frame.locator(stickerComponentSelector);
-    const count = await components.count();
-
-    for (let index = 0; index < count; index += 1) {
-      if (await components.nth(index).isVisible().catch(() => false)) {
-        total += 1;
-      }
-    }
-  }
-
-  return total;
-}
-
 async function measureStickerPosition(
   anchor: Locator,
 ): Promise<PositionedComponentCounts> {
@@ -669,28 +653,69 @@ async function measureStickerPosition(
     );
   }, stickerComponentSelector);
 }
-async function waitForStickerCount(
+async function clickAndVerifySticker(
   page: Page,
-  expectedCount: number,
+  anchor: Locator,
+  item: Locator,
   signal?: AbortSignal,
 ): Promise<number> {
-  const maxAttempts = Math.ceil(
-    STICKER_VERIFY_TIMEOUT_MS / STICKER_VERIFY_INTERVAL_MS,
+  throwIfStickerInterrupted(signal);
+  // Keep the actual components, not a visibility-dependent count. Moving to
+  // another paragraph or loading an image can change visibility without insertion.
+  const previous = await anchor.evaluateHandle(
+    (element, selector) => Array.from(element.ownerDocument.querySelectorAll(selector))
+      .map(component => ({ component, id: component.id })),
+    stickerComponentSelector,
   );
-  let actualCount = await getVisibleStickerCount(page);
+  try {
+    throwIfStickerInterrupted(signal);
+    await item.click(); // Never re-click on an uncertain result: it may duplicate a sticker.
+    throwIfStickerInterrupted(signal);
+    const inspect = () => anchor.evaluate((element, { previous, selector }) => {
+      const components = Array.from(element.ownerDocument.querySelectorAll(selector));
+      // Naver can redraw an existing component while keeping its editor ID.
+      const added = components.filter(component => !previous.some(old =>
+        old.component === component || Boolean(old.id) && old.id === component.id));
+      const retained = previous.filter(old => components.some(component =>
+        old.component === component || Boolean(old.id) && old.id === component.id));
+      const newComponent = added.length === 1 ? added[0] : undefined;
+      const bounds = newComponent?.getBoundingClientRect();
+      const style = newComponent && element.ownerDocument.defaultView?.getComputedStyle(newComponent);
+      const visible = Boolean(bounds && bounds.width > 0 && bounds.height > 0 &&
+        style && style.visibility !== 'hidden' && style.visibility !== 'collapse');
+      const imagesReady = Boolean(newComponent &&
+        Array.from(newComponent.querySelectorAll('img')).every(image => image.complete && image.naturalWidth > 0));
+      return {
+        beforeCount: previous.length,
+        count: components.length,
+        addedCount: added.length,
+        retainedCount: retained.length,
+        ready: visible && imagesReady,
+      };
+    }, { previous, selector: stickerComponentSelector });
+    const maxAttempts = Math.ceil(STICKER_INSERT_TIMEOUT_MS / STICKER_VERIFY_INTERVAL_MS);
+    let snapshot = await inspect();
+    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+      throwIfStickerInterrupted(signal);
+      if (snapshot.count === snapshot.beforeCount + 1 && snapshot.addedCount === 1 &&
+          snapshot.retainedCount === snapshot.beforeCount && snapshot.ready) {
+        return snapshot.count;
+      }
+      if (snapshot.count > snapshot.beforeCount + 1 || attempt === maxAttempts) break;
+      await page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
+      throwIfStickerInterrupted(signal);
+      snapshot = await inspect();
+    }
 
-  for (
-    let attempt = 0;
-    actualCount !== expectedCount && attempt < maxAttempts;
-    attempt += 1
-  ) {
-    throwIfStickerInterrupted(signal);
-    await page.waitForTimeout(STICKER_VERIFY_INTERVAL_MS);
-    throwIfStickerInterrupted(signal);
-    actualCount = await getVisibleStickerCount(page);
+    throw new NaverStickerError(
+      'STICKER_INSERT_UNCONFIRMED',
+      `스티커 삽입을 확인하지 못했습니다. 삽입 전 ${snapshot.beforeCount}개, 현재 감지 ${snapshot.count}개, 기대 ${snapshot.beforeCount + 1}개입니다. ` +
+        (snapshot.count === snapshot.beforeCount + 1 ? '새 스티커의 표시 완료 또는 기존 스티커 보존을 확인하지 못했습니다. ' : '') +
+        '중복 삽입을 막기 위해 자동으로 다시 누르지 않았습니다. Chrome에서 현재 글을 확인해 주세요.',
+    );
+  } finally {
+    await previous.dispose();
   }
-
-  return actualCount;
 }
 
 export class NaverStickerAdapter {
@@ -796,8 +821,6 @@ export class NaverStickerAdapter {
       );
       throwIfStickerInterrupted(signal);
       const anchor = paragraphs[request.paragraphNumber - 1]!;
-      const beforeCount = await getVisibleStickerCount(this.page);
-      throwIfStickerInterrupted(signal);
       const beforePosition = await measureStickerPosition(anchor);
       throwIfStickerInterrupted(signal);
 
@@ -858,22 +881,13 @@ export class NaverStickerAdapter {
       ]!;
 
       throwIfStickerInterrupted(signal);
-      await stickerItem.locator.click();
-      throwIfStickerInterrupted(signal);
-
-      const afterCount = await waitForStickerCount(
+      const afterCount = await clickAndVerifySticker(
         this.page,
-        beforeCount + 1,
+        anchor,
+        stickerItem.locator,
         signal,
       );
       throwIfStickerInterrupted(signal);
-
-      if (afterCount !== beforeCount + 1) {
-        throw new NaverStickerError(
-          'STICKER_INSERT_UNCONFIRMED',
-          '스티커 삽입을 끝까지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
-        );
-      }
 
       const paragraphsAfterInsertion = await requireMatchingParagraphs(
         this.page,
@@ -938,7 +952,6 @@ export class NaverStickerAdapter {
         request.expectedParagraphs,
       );
       const anchor = paragraphs[request.paragraphNumber - 1]!;
-      const beforeCount = await getVisibleStickerCount(this.page);
       const beforePosition = await measureStickerPosition(anchor);
 
       await placeCaretAtParagraphEdge(this.page, anchor, request.position);
@@ -946,19 +959,11 @@ export class NaverStickerAdapter {
       const control = await requireUniqueStickerControl(this.page);
       await control.click();
       const stickerItem = await waitForFirstStickerItem(this.page);
-      await stickerItem.locator.click();
-
-      const afterCount = await waitForStickerCount(
+      const afterCount = await clickAndVerifySticker(
         this.page,
-        beforeCount + 1,
+        anchor,
+        stickerItem.locator,
       );
-
-      if (afterCount !== beforeCount + 1) {
-        throw new NaverStickerError(
-          'STICKER_INSERT_UNCONFIRMED',
-          '스티커 삽입을 끝까지 확인하지 못했습니다. 중복 삽입을 막기 위해 빈 새 글에서 다시 시작해 주세요.',
-        );
-      }
 
       const paragraphsAfterInsertion = await requireMatchingParagraphs(
         this.page,

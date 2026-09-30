@@ -393,7 +393,9 @@ async function enterParagraphs(
   const isEditable = await locator.isEditable().catch(() => false);
   throwIfInputInterrupted(signal);
 
-  if (isEditable) {
+  // Rich editors need real paragraph/Enter events; filling a contenteditable can flatten its model.
+  const plainField = isEditable && await locator.evaluate(element => ['INPUT', 'TEXTAREA'].includes(element.tagName));
+  if (plainField) {
     await locator.fill(paragraphs.join('\n\n'));
     throwIfInputInterrupted(signal);
     return;
@@ -583,4 +585,15 @@ export class NaverEditorAdapter {
       );
     }
   }
+}
+
+export async function requireMatchingBodyParagraphs(page: Page, expected: readonly string[]): Promise<readonly Locator[]> {
+  const locators = await findVisibleEditables(page, ['.se-component.se-text .se-text-paragraph', '.se-section-text .se-text-paragraph', '.se-component.se-text p']);
+  const normalize = (text: string): string => normalizeLineEndings(text).replace(/\s+/g, ' ').trim();
+  const entries = await Promise.all(locators.map(async locator => ({ locator, text: normalize(await locator.innerText()) })));
+  const paragraphs = entries.filter(entry => entry.text);
+  if (!paragraphs.length || paragraphs.length !== expected.length || paragraphs.some((entry, index) => entry.text !== normalize(expected[index]!))) {
+    throw new NaverEditorError('EDITOR_INPUT_MISMATCH', '이미지 위치의 기준이 되는 본문 문단이 원문과 다릅니다. 끝에 몰아서 넣지 않고 중단했습니다.');
+  }
+  return paragraphs.map(entry => entry.locator);
 }

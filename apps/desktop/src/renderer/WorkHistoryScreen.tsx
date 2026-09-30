@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import type { WorkHistoryEntry } from '../main/work-history.js';
+import { getBodyLengthReport } from '../shared/writing-options.js';
+import { ConfirmationDialog } from './ConfirmationDialog.js';
 
 function formatCreatedAt(value: string): string {
   return new Intl.DateTimeFormat('ko-KR', {
@@ -35,6 +37,7 @@ export function WorkHistoryScreen({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [removingEntry, setRemovingEntry] = useState<WorkHistoryEntry | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openNotice, setOpenNotice] = useState<string | null>(null);
 
@@ -60,21 +63,22 @@ export function WorkHistoryScreen({
   }, [userId]);
 
   const removeEntry = async (entry: WorkHistoryEntry): Promise<void> => {
-    if (!window.confirm(`‘${entry.title}’ 작업 내역을 이 PC에서 삭제할까요? 삭제 후 복구할 수 없습니다.`)) {
-      return;
-    }
-
+    setRemovingEntry(null);
     setDeletingId(entry.id);
     setErrorMessage(null);
-    const response = await window.blowWorkHistory.remove(userId, entry.id);
-
-    if (response.ok) {
-      setEntries(response.entries);
-      setExpandedId((current) => current === entry.id ? null : current);
-    } else {
-      setErrorMessage(response.error.message);
+    try {
+      const response = await window.blowWorkHistory.remove(userId, entry.id);
+      if (response.ok) {
+        setEntries(response.entries);
+        setExpandedId((current) => current === entry.id ? null : current);
+      } else {
+        setErrorMessage(response.error.message);
+      }
+    } catch {
+      setErrorMessage('작업 내역을 삭제하지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      setDeletingId(null);
     }
-    setDeletingId(null);
   };
 
   const openDraft = async (entry: WorkHistoryEntry): Promise<void> => {
@@ -100,6 +104,10 @@ export function WorkHistoryScreen({
 
   return (
     <>
+      <ConfirmationDialog open={removingEntry !== null} title="작업 내역을 삭제할까요?" confirmLabel="기록 삭제"
+        onCancel={() => setRemovingEntry(null)} onConfirm={() => { if (removingEntry) void removeEntry(removingEntry); }}>
+        <p>‘{removingEntry?.title}’의 기록을 이 PC에서 삭제합니다. 삭제 후 복구할 수 없습니다. 네이버에 저장된 글은 삭제하지 않습니다.</p>
+      </ConfirmationDialog>
       <header className="page-head">
         <div>
           <h1>작업 내역</h1>
@@ -169,7 +177,10 @@ export function WorkHistoryScreen({
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry) => (
+                {entries.map((entry) => {
+                  const lengthReport = getBodyLengthReport(entry.body, entry.settings.targetLength);
+                  const warnings = entry.warnings ?? (lengthReport.warning ? [lengthReport.warning] : []);
+                  return (
                   <Fragment key={entry.id}>
                     <tr>
                       <td>{formatCreatedAt(entry.createdAt)}</td>
@@ -211,8 +222,8 @@ export function WorkHistoryScreen({
                           <button
                             className="button danger"
                             type="button"
-                            disabled={deletingId === entry.id}
-                            onClick={() => void removeEntry(entry)}
+                            disabled={Boolean(deletingId || openingId)}
+                            onClick={() => setRemovingEntry(entry)}
                           >
                             {deletingId === entry.id ? (
                               <LoaderCircle className="is-spinning" aria-hidden="true" />
@@ -241,7 +252,12 @@ export function WorkHistoryScreen({
                                 <dt>목표 글자 수</dt>
                                 <dd>{entry.settings.targetLength.toLocaleString('ko-KR')}자</dd>
                               </div>
+                              <div>
+                                <dt>실제 본문 글자 수</dt>
+                                <dd>{lengthReport.bodyLength.toLocaleString('ko-KR')}자 (공백 제외)</dd>
+                              </div>
                             </dl>
+                            {warnings.length ? <div role="note" aria-label="작성 결과 안내"><strong>작성 결과 안내</strong><ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><p>네이버에 저장된 글을 확인해 주세요.</p></div> : null}
                             <h2 className="history-body-heading">저장한 본문</h2>
                             <div className="history-body">
                               {entry.body.split(/\r?\n[ \t]*\r?\n/u).map((paragraph, index) => (
@@ -253,7 +269,7 @@ export function WorkHistoryScreen({
                       </tr>
                     ) : null}
                   </Fragment>
-                ))}
+                ); })}
               </tbody>
             </table>
           </div>

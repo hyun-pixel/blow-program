@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runAutomaticWriting } from './automatic-writing.js';
+import { verifyGeneratedBlogDraft } from '../main/openai-generation.js';
 import { defaultPostDecorations } from './post-decoration.js';
-import { readWritingQueue, saveWritingQueue, validateWritingConfig, type WritingJob } from './writing-queue.js';
+import { createRetryJob, readWritingQueue, saveWritingQueue, validateWritingConfig, type WritingJob } from './writing-queue.js';
 
 function fixture() {
   const job: WritingJob = {
@@ -23,7 +24,7 @@ function fixture() {
     saveDraft: ok('save', { stage: 'DRAFT_SAVE_COMPLETED', currentUrl: 'https://blog.naver.com/example/postwrite' }),
   };
   const ai = {
-    generateDraft: vi.fn(async () => { order.push('generate'); return { ok: true, draft: { title: '카페 안내', body: '첫 번째 설명입니다.\n\n다음으로, 두 번째 설명입니다.\n\n마지막으로, 내용을 정리합니다.' }, verification: { valid: true, issues: [] as string[], blockingIssues: [] as string[] } }; }),
+    generateDraft: vi.fn(async () => { order.push('generate'); return { ok: true, draft: { title: '카페 안내', body: '첫 번째 설명입니다.\n\n다음으로, 두 번째 설명입니다.\n\n마지막으로, 내용을 정리합니다.' }, verification: { valid: true, issues: [] as string[], blockingIssues: [] as string[], warnings: [] as string[] } }; }),
     generateImages: vi.fn(async () => { order.push('images'); return { ok: true, images: [{ dataUrl: 'data:image/png;base64,dGVzdA==' }] }; }),
   };
   const history = { add: ok('history') };
@@ -55,6 +56,7 @@ describe('automatic writing: one post through confirmed Naver draft', () => {
       decorations: { quote: { enabled: true, count: 2, style: 'default' }, divider: { enabled: true, count: 1, style: 'random' }, sticker: { enabled: true, count: 1, categoryMode: 'manual', categoryLabel: '묶음' } } } });
     expect(f.order).toEqual(['writer','generate','images','input','prepare-images','attach-images','quote-list','quote','quote','sticker-list','sticker','divider-list','divider','save','history']);
     expect(f.naver.insertRandomSticker.mock.calls[0]?.[2]).toBe('pack1');
+    expect(f.naver.attachImages).toHaveBeenCalledWith(['image1'], 'individual', [2]);
   });
   it('reports reduced placement counts when boundaries are scarce', async () => {
     const f = fixture();
@@ -70,11 +72,59 @@ describe('automatic writing: one post through confirmed Naver draft', () => {
   it('stops on automatic verification failures before images, input or save', async () => {
     const f = fixture();
     const original = await f.ai.generateDraft();
-    f.ai.generateDraft.mockResolvedValue({ ...original, verification: { valid: false, issues: ['글 길이 부족'], blockingIssues: [] } });
-    await expect(f.run()).rejects.toThrow('글 길이 부족');
+    f.ai.generateDraft.mockResolvedValue({ ...original, verification: { valid: false, issues: ['제목이 최대 30자를 넘었습니다.'], blockingIssues: [], warnings: [] } });
+    await expect(f.run()).rejects.toThrow('최대 30자');
     expect(f.naver.enterContent).not.toHaveBeenCalled();
     expect(f.ai.generateImages).not.toHaveBeenCalled();
     expect(f.updates.at(-1)?.draft?.body).toBeTruthy();
+  });
+  it('saves length deviations unchanged, runs images and reports the warning without regeneration', async () => {
+    const f = fixture();
+    const original = f.ai.generateDraft.getMockImplementation()!;
+    f.ai.generateDraft.mockImplementation(async () => {
+      const response = await original();
+      return { ...response, verification: { ...response.verification, warnings: ['본문이 1,546자로 목표 범위를 벗어났습니다.'] } };
+    });
+    await f.run({ ...f.job, config: { ...f.job.config, images: { ...f.job.config.images, enabled: true } } });
+    expect(f.ai.generateDraft).toHaveBeenCalledTimes(1);
+    expect(f.ai.generateImages).toHaveBeenCalledTimes(1);
+    expect(f.naver.saveDraft).toHaveBeenCalledTimes(1);
+    expect(f.updates.at(-1)).toMatchObject({ status: 'saved', warnings: ['본문이 1,546자로 목표 범위를 벗어났습니다.'] });
+    expect(f.updates.at(-1)?.message).toContain('작성 결과 안내');
+    expect(f.history.add).toHaveBeenCalledTimes(1);
+  });
+  it('saves keyword mismatches, records counts and continues the next job without extra AI calls', async () => {
+    const f = fixture();
+    const original = f.ai.generateDraft.getMockImplementation()!;
+    f.ai.generateDraft.mockImplementation(async () => {
+      const response = await original();
+      const draft = { title: '카페 안내', body: '카페 안내입니다.\n\n카페 이용 방법입니다.' };
+      const verification = verifyGeneratedBlogDraft(draft, f.job.config.request);
+      return { ...response, draft, verification: { ...verification, issues: [...verification.issues], blockingIssues: [...verification.blockingIssues], warnings: [...verification.warnings ?? []] } };
+    });
+    await f.run();
+    await f.run({ ...f.job, id: 'second' });
+    expect(f.order).toEqual(['writer','generate','input','save','history','writer','generate','input','save','history']);
+    expect(f.ai.generateDraft).toHaveBeenCalledTimes(2);
+    expect(f.naver.enterContent).toHaveBeenCalledWith({ title: '카페 안내', paragraphs: ['카페 안내입니다.', '카페 이용 방법입니다.'] });
+    const warning = '본문 키워드 ‘카페’: 설정 3회 / 실제 2회.';
+    expect(f.updates.at(-1)).toMatchObject({ status: 'saved', warnings: expect.arrayContaining([warning]) });
+    expect(f.history.add).toHaveBeenNthCalledWith(1, 'test-user', expect.objectContaining({ jobId: 'first', warnings: expect.arrayContaining([warning]) }));
+    expect(f.history.add).toHaveBeenNthCalledWith(2, 'test-user', expect.objectContaining({ jobId: 'second', warnings: expect.arrayContaining([warning]) }));
+  });
+  it('still stops on Naver input failure even with nonblocking warnings', async () => {
+    const f = fixture();
+    f.naver.enterContent.mockRejectedValue(new Error('입력 결과를 확인하지 못했습니다.'));
+    await expect(f.run()).rejects.toThrow('입력 결과');
+    expect(f.naver.saveDraft).not.toHaveBeenCalled();
+    expect(f.history.add).not.toHaveBeenCalled();
+  });
+  it('still rejects an empty body even if verification unexpectedly passes', async () => {
+    const f = fixture(), original = f.ai.generateDraft.getMockImplementation()!;
+    f.ai.generateDraft.mockImplementation(async () => ({ ...await original(), draft: { title: '안내', body: ' \n\t' } }));
+    await expect(f.run()).rejects.toThrow('본문이 비어');
+    expect(f.naver.enterContent).not.toHaveBeenCalled();
+    expect(f.naver.saveDraft).not.toHaveBeenCalled();
   });
   it('does not save a post missing an image', async () => {
     const f = fixture(); f.ai.generateImages.mockResolvedValue({ ok: true, images: [] });
@@ -124,6 +174,20 @@ describe('automatic writing: one post through confirmed Naver draft', () => {
     await expect(f.run()).rejects.toThrow('작업 내역');
     expect(f.updates.at(-1)?.status).toBe('saved');
     expect(f.naver.saveDraft).toHaveBeenCalledTimes(1);
+    expect(f.updates.at(-1)?.historyPending).toBe(true);
+    expect(f.updates.at(-1)?.savedUrl).toContain('blog.naver.com');
+  });
+  it('still records history if the post-save queue checkpoint cannot be persisted', async () => {
+    const f = fixture();
+    await expect(f.run(f.job, job => { f.updates.push(job); if (job.status === 'saved') throw new Error('queue disk full'); })).rejects.toThrow('진행 상태');
+    expect(f.history.add).toHaveBeenCalledTimes(1);
+    expect(f.updates.at(-1)).toMatchObject({ status: 'saved', historyPending: false });
+  });
+  it('never creates a successful history entry when saving is unconfirmed', async () => {
+    const f = fixture(); f.naver.saveDraft.mockRejectedValue(new Error('DRAFT_SAVE_UNCONFIRMED'));
+    await expect(f.run()).rejects.toThrow('DRAFT_SAVE_UNCONFIRMED');
+    expect(f.history.add).not.toHaveBeenCalled();
+    expect(f.updates.some(job => job.status === 'saved')).toBe(false);
   });
 });
 
@@ -155,5 +219,43 @@ describe('persistent writing queue', () => {
     const { job } = fixture(), s = storage();
     expect(() => saveWritingQueue(s, 'test-user', Array(21).fill(job))).toThrow('20');
     expect(() => saveWritingQueue({ setItem() { throw new Error(); } }, 'test-user', [job])).toThrow('멈춥니다');
+  });
+  it('preserves generated content and length warnings after reloading a saved job', () => {
+    const { job } = fixture(), s = storage();
+    const saved: WritingJob = { ...job, status: 'saved', draft: { title: '안내', body: '작성된 본문' }, warnings: ['목표 분량보다 짧습니다.'] };
+    saveWritingQueue(s, 'test-user', [saved]);
+    expect(readWritingQueue(s, 'test-user')).toEqual([saved]);
+  });
+  it('preserves all 25 keyword reports plus title and length warnings on reload', () => {
+    const { job } = fixture(), s = storage();
+    const keywords = Array.from({ length: 25 }, (_, index) => ({ value: `키워드${index}`, repetitions: 3 }));
+    const draft = { title: '안내', body: '작성된 본문' };
+    const config = { ...job.config, request: { ...job.config.request, keywords } };
+    const warnings = verifyGeneratedBlogDraft(draft, config.request).warnings ?? [];
+    expect(warnings).toHaveLength(27);
+    const saved: WritingJob = { ...job, config, status: 'saved', draft, warnings };
+    saveWritingQueue(s, 'test-user', [saved]);
+    expect(readWritingQueue(s, 'test-user')).toEqual([saved]);
+  });
+  it.each(['failed', 'interrupted'] as const)('creates an independent retry for %s while preserving the original draft', (status) => {
+    const { job } = fixture();
+    const failed: WritingJob = { ...job, status, draft: { title: '기존 제목', body: '보존할 본문' }, warnings: ['기존 분량 안내'] };
+    const snapshot = structuredClone(failed);
+    const retry = createRetryJob(failed, 'test-user');
+    expect(retry.id).not.toBe(failed.id);
+    expect(retry.config).toEqual(failed.config);
+    expect(retry.config).not.toBe(failed.config);
+    expect(retry.status).toBe('queued');
+    expect(retry.draft).toBeUndefined();
+    expect(retry.warnings).toBeUndefined();
+    expect(failed).toEqual(snapshot);
+  });
+  it.each(['queued', 'running', 'saved'] as const)('does not create retries for %s', (status) => {
+    const { job } = fixture();
+    expect(() => createRetryJob({ ...job, status }, 'test-user')).toThrow();
+  });
+  it('does not retry another account’s job', () => {
+    const { job } = fixture();
+    expect(() => createRetryJob({ ...job, status: 'failed' }, 'another-user')).toThrow('계정');
   });
 });

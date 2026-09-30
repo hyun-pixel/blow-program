@@ -1,5 +1,6 @@
 import { isDecorationStyleAvailable, resolveDecorationTargets } from './post-decoration.js';
-import { validateWritingConfig, type WritingJob } from './writing-queue.js';
+import { getSavedHistoryInput, validateWritingConfig, type WritingJob } from './writing-queue.js';
+import { formatMobileParagraphs, planInlineImages } from './mobile-post-layout.js';
 
 type Bridges = Pick<Window, 'blowNaver' | 'blowOpenAi' | 'blowWorkHistory'>;
 function requireSuccess<T extends { readonly ok: boolean }>(response: T): Extract<T, { ok: true }> {
@@ -40,11 +41,13 @@ export async function runAutomaticWriting(
 
   phase('AI가 제목과 본문을 작성하고 있습니다.');
   const generated = await call(() => bridges.blowOpenAi.generateDraft(request));
-  current = { ...current, draft: generated.draft };
+  current = { ...current, draft: generated.draft, warnings: generated.verification.warnings ?? [] };
   phase('글자 수와 키워드 등 작성 조건을 자동으로 검사하고 있습니다.');
   if (!generated.verification.valid) throw new Error(`자동 검사에서 멈췄습니다: ${generated.verification.issues.join(' ')} 추가 비용이 드는 재생성은 자동으로 하지 않습니다.`);
-  const paragraphs = generated.draft.body.replace(/\r\n?/g, '\n').split(/\n+/).map((value) => value.trim()).filter(Boolean);
+  const paragraphs = formatMobileParagraphs(generated.draft.body, request.keywords.map(keyword => keyword.value));
   if (!paragraphs.length) throw new Error('생성된 본문이 비어 있습니다.');
+  current = { ...current, draft: { ...generated.draft, body: paragraphs.join('\n\n') } };
+  const imagePositions = images.enabled ? planInlineImages(paragraphs, images.count) : [];
   const targets = {
     quote: resolveDecorationTargets(decorations.quote, paragraphs),
     sticker: resolveDecorationTargets(decorations.sticker, paragraphs),
@@ -66,10 +69,10 @@ export async function runAutomaticWriting(
   phase('네이버에 제목과 본문을 입력하고 있습니다.');
   await call(() => bridges.blowNaver.enterContent({ title: generated.draft.title, paragraphs }));
   if (dataUrls.length) {
-    phase('생성 이미지를 네이버에 넣고 있습니다.');
+    phase('생성 이미지를 본문 중간의 전환 지점에 나누어 넣고 있습니다.');
     const prepared = await call(() => bridges.blowNaver.prepareGeneratedImages(dataUrls));
     if (prepared.canceled || prepared.files.length !== dataUrls.length) throw new Error('이미지 준비를 완료하지 못했습니다.');
-    const attached = await call(() => bridges.blowNaver.attachImages(prepared.files.map(({ id }) => id), 'individual'));
+    const attached = await call(() => bridges.blowNaver.attachImages(prepared.files.map(({ id }) => id), 'individual', imagePositions));
     if (attached.result.insertedCount !== dataUrls.length) throw new Error('일부 이미지가 누락되어 저장을 중단했습니다.');
   }
   for (const kind of ['quote', 'sticker', 'divider'] as const) {
@@ -104,22 +107,17 @@ export async function runAutomaticWriting(
   // A successful save remains saved even if Stop was pressed while it was in flight.
   check();
   const saved = requireSuccess(await bridges.blowNaver.saveDraft());
+  if (saved.result.stage !== 'DRAFT_SAVE_COMPLETED') throw new Error('네이버 임시저장 완료 결과가 없어 작업 내역에 기록하지 않았습니다.');
   const counts = `이미지 ${dataUrls.length}장 · 인용구 ${targets.quote.length}회 · 스티커 ${targets.sticker.length}회 · 구분선 ${targets.divider.length}회`;
-  current = { ...current, status: 'saved', message: `네이버 임시저장 완료. ${counts}. 발행하지 않았습니다.` };
-  checkpoint(current);
+  current = { ...current, status: 'saved', savedUrl: saved.result.currentUrl, historyPending: true, message: `네이버 임시저장 완료. ${counts}. 발행하지 않았습니다.${current.warnings?.length ? ' 작성 결과 안내를 확인해 주세요.' : ''}` };
+  let checkpointWarning = '';
+  try { checkpoint(current); } catch { checkpointWarning = '네이버 저장은 완료됐지만 작성 목록의 진행 상태를 보관하지 못했습니다.'; }
   let historyWarning = '';
   try {
-    requireSuccess(await bridges.blowWorkHistory.add(request.userId, {
-      ...generated.draft, modelId: request.modelId, modelName: job.config.modelName,
-      reasoningEffort: request.reasoningEffort, reasoningLabel: job.config.reasoningLabel,
-      imageCount: dataUrls.length, naverUrl: saved.result.currentUrl,
-      settings: { articleType: request.articleType, targetLength: request.targetLength,
-        useGeneratedImages: images.enabled, imageCount: images.count, imageAspectRatio: images.aspectRatio,
-        imageQualityMode: images.qualityMode, imageStyle: images.style },
-    }));
-  } catch { historyWarning = ' 네이버 저장은 완료됐지만 BLOW 작업 내역을 기록하지 못했습니다. 네이버 임시저장 목록에서 직접 확인하세요.'; }
-  if (historyWarning) {
-    checkpoint({ ...current, message: current.message + historyWarning });
-    throw new Error(historyWarning);
-  }
+    requireSuccess(await bridges.blowWorkHistory.add(request.userId, getSavedHistoryInput(current)));
+    current = { ...current, historyPending: false };
+  } catch { historyWarning = ' 네이버 저장은 완료됐지만 BLOW 작업 내역을 기록하지 못했습니다. ‘작업 내역 다시 기록’을 누르면 글 재생성 없이 기록만 복구합니다.'; }
+  try { checkpoint({ ...current, message: current.message + historyWarning }); }
+  catch { checkpointWarning = '네이버 저장은 완료됐지만 작성 목록의 진행 상태를 보관하지 못했습니다.'; }
+  if (historyWarning || checkpointWarning) throw new Error(historyWarning || checkpointWarning);
 }

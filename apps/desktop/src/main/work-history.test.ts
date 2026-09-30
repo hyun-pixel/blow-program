@@ -45,6 +45,28 @@ async function createHistoryPath(): Promise<string> {
 }
 
 describe('work history storage', () => {
+  it('retains keyword and length reports after reload alongside legacy entries', async () => {
+    const filePath = await createHistoryPath();
+    const legacy = await addWorkHistoryEntry(filePath, validInput);
+    const warnings = ['본문 키워드 ‘실손보험’: 설정 3회 / 실제 2회.', '본문이 목표 분량보다 짧습니다.'];
+    const entry = await addWorkHistoryEntry(filePath, { ...validInput, warnings });
+    const entries = await readWorkHistory(filePath);
+    expect(entries.find(item => item.id === entry.id)?.warnings).toEqual(warnings);
+    expect(entries.find(item => item.id === legacy.id)?.warnings).toBeUndefined();
+  });
+  it.each(['invalid', [123], Array(33).fill('안내'), ['가'.repeat(1001)]])('rejects invalid report data before storing it', async (warnings) => {
+    const filePath = await createHistoryPath();
+    await expect(addWorkHistoryEntry(filePath, { ...validInput, warnings })).rejects.toThrow('작성 결과 안내');
+    expect(await readWorkHistory(filePath)).toEqual([]);
+  });
+  it('records a retried job only once and retains its original completion time', async () => {
+    const filePath = await createHistoryPath();
+    const input = { ...validInput, jobId: 'recovery-job' };
+    const original = await addWorkHistoryEntry(filePath, input, new Date('2026-09-28T00:00:00Z'));
+    const retried = await addWorkHistoryEntry(filePath, input, new Date('2026-09-29T00:00:00Z'));
+    expect(retried).toEqual(original);
+    expect(await readWorkHistory(filePath, new Date('2026-09-29T00:00:00Z'))).toEqual([original]);
+  });
   it('saves entries newest first without token or cost data', async () => {
     const filePath = await createHistoryPath();
     await addWorkHistoryEntry(filePath, validInput, new Date('2026-09-10T00:00:00.000Z'));

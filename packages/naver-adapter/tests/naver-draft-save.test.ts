@@ -8,11 +8,17 @@ import {
   expect,
   it,
   vi,
+  beforeEach,
+  afterEach,
 } from 'vitest';
 import {
   NaverDraftSaveAdapter,
   NaverDraftSaveError,
+  readNaverDraftCount,
 } from '../src/naver-draft-save.js';
+
+beforeEach(() => vi.useFakeTimers({ toFake: ['performance'] }));
+afterEach(() => vi.useRealTimers());
 
 interface ControlSnapshot {
   readonly label: string;
@@ -21,6 +27,8 @@ interface ControlSnapshot {
   readonly ariaDisabled?: boolean;
   readonly ariaBusy?: boolean;
   readonly state?: string;
+  readonly aliases?: readonly string[];
+  readonly nearSaveControl?: boolean;
 }
 
 interface ControlMock {
@@ -40,15 +48,20 @@ function createControl(
     click,
     evaluate: vi.fn(async () => {
       const snapshot = readSnapshot();
-      return {
+      return [{
         label: snapshot.label,
+        aliases: snapshot.aliases ?? [],
+        nearSaveControl: snapshot.nearSaveControl ?? false,
+        visible,
         identity: snapshot.identity ?? '',
         disabled: snapshot.disabled ?? false,
         ariaDisabled: snapshot.ariaDisabled ?? false,
         ariaBusy: snapshot.ariaBusy ?? false,
         state: snapshot.state ?? '',
-      };
+      }];
     }),
+    elementHandle: vi.fn(async () => locator),
+    dispose: vi.fn().mockResolvedValue(undefined),
     isVisible: vi.fn().mockResolvedValue(visible),
   } as unknown as Locator;
 
@@ -59,12 +72,14 @@ function createCollection(locators: readonly Locator[]) {
   return {
     count: vi.fn().mockResolvedValue(locators.length),
     nth: vi.fn((index: number) => locators[index]),
+    evaluateAll: vi.fn(async () => (await Promise.all(locators.map(locator => locator.evaluate(() => [])))).flat()),
   };
 }
 
 function createStatusCollection(readTexts: () => readonly string[]) {
   return {
     count: vi.fn(async () => readTexts().length),
+    evaluateAll: vi.fn(async () => readTexts()),
     nth: vi.fn((index: number) => ({
       innerText: vi.fn(async () => readTexts()[index] ?? ''),
       isVisible: vi.fn(async () => Boolean(readTexts()[index])),
@@ -134,7 +149,7 @@ function createSavePage(
     url: vi.fn().mockReturnValue(
       'https://blog.naver.com/green_fork?Redirect=Write&categoryNo=1',
     ),
-    waitForTimeout: vi.fn().mockResolvedValue(undefined),
+    waitForTimeout: vi.fn(async (ms: number) => { vi.advanceTimersByTime(ms); }),
   } as unknown as Page;
 
   return {
@@ -167,7 +182,7 @@ describe('네이버 임시저장', () => {
       () => ({ label: '저장' }),
       () => controller.abort(),
     );
-    const pageMock = createSavePage([control], () => []);
+    const pageMock = createSavePage([control], () => controller.signal.aborted ? ['임시저장이 완료되었습니다.'] : []);
 
     await expect(
       new NaverDraftSaveAdapter(pageMock.page).saveAndVerify(
@@ -175,7 +190,7 @@ describe('네이버 임시저장', () => {
       ),
     ).resolves.toMatchObject({
       stage: 'DRAFT_SAVE_COMPLETED',
-      signalCount: 1,
+      signalCount: 2,
     });
     expect(control.click).toHaveBeenCalledOnce();
   });
@@ -258,7 +273,7 @@ describe('네이버 임시저장', () => {
     ]);
   });
 
-  it('저장 버튼 조작과 상태 변화만으로 실행 완료 처리한다', async () => {
+  it('저장 버튼이 비활성화됐다 돌아온 것만으로는 완료 처리하지 않는다', async () => {
     let clicked = false;
     let readsAfterClick = 0;
     const control = createControl(() => {
@@ -284,14 +299,13 @@ describe('네이버 임시저장', () => {
 
     await expect(
       new NaverDraftSaveAdapter(pageMock.page).saveAndVerify(),
-    ).resolves.toMatchObject({
-      stage: 'DRAFT_SAVE_COMPLETED',
-      signalCount: 2,
+    ).rejects.toMatchObject({
+      code: 'DRAFT_SAVE_UNCONFIRMED',
     });
     expect(control.click).toHaveBeenCalledOnce();
   });
 
-  it('정확한 네이버 임시저장 응답 하나만으로 저장 완료를 확인한다', async () => {
+  it('HTTP 200만으로는 저장 완료를 단정하지 않는다', async () => {
     let pageMock: ReturnType<typeof createSavePage>;
     const control = createControl(
       () => ({ label: '저장' }),
@@ -302,9 +316,8 @@ describe('네이버 임시저장', () => {
     pageMock = createSavePage([control], () => []);
     const adapter = new NaverDraftSaveAdapter(pageMock.page);
 
-    await expect(adapter.saveAndVerify()).resolves.toMatchObject({
-      stage: 'DRAFT_SAVE_COMPLETED',
-      signalCount: 2,
+    await expect(adapter.saveAndVerify()).rejects.toMatchObject({
+      code: 'DRAFT_SAVE_UNCONFIRMED',
     });
     expect(control.click).toHaveBeenCalledOnce();
     expect(pageMock.off).toHaveBeenCalledOnce();
@@ -322,36 +335,49 @@ describe('네이버 임시저장', () => {
     );
     pageMock = createSavePage([control], () => []);
 
-    const result = await new NaverDraftSaveAdapter(
-      pageMock.page,
-    ).saveAndVerify();
-
-    expect(result).toMatchObject({
-      stage: 'DRAFT_SAVE_COMPLETED',
-      signalCount: 1,
-    });
-    expect(result.signals.map((signal) => signal.id)).toEqual([
-      'SAVE_CONTROL_CLICKED',
-    ]);
+    await expect(new NaverDraftSaveAdapter(pageMock.page).saveAndVerify()).rejects.toMatchObject({ code: 'DRAFT_SAVE_UNCONFIRMED' });
     expect(control.click).toHaveBeenCalledOnce();
   });
 
-  it('추가 완료 신호가 없어도 저장 버튼 조작이 끝나면 완료 처리한다', async () => {
+  it('저장 버튼 클릭만 성공하고 완료 신호가 없으면 확인 필요로 처리한다', async () => {
     const control = createControl(() => ({ label: '저장' }));
     const pageMock = createSavePage([control], () => []);
 
-    const result = await new NaverDraftSaveAdapter(
-      pageMock.page,
-    ).saveAndVerify();
-
-    expect(result).toMatchObject({
-      stage: 'DRAFT_SAVE_COMPLETED',
-      signalCount: 1,
-    });
-    expect(result.signals.map((signal) => signal.id)).toEqual([
-      'SAVE_CONTROL_CLICKED',
-    ]);
+    await expect(new NaverDraftSaveAdapter(pageMock.page).saveAndVerify()).rejects.toMatchObject({ code: 'DRAFT_SAVE_UNCONFIRMED' });
     expect(control.click).toHaveBeenCalledOnce();
+  });
+
+  it.each(['stale', 'failure', 'unsaved', 'count-decreased'])('완료가 아닌 상태를 성공으로 처리하지 않는다: %s', async scenario => {
+    let clicked = false;
+    const control = createControl(() => ({ label: '저장', state: clicked && scenario === 'unsaved' ? 'unsaved' : '' }), () => { clicked = true; });
+    const count = createControl(() => ({ label: `임시저장 ${clicked && scenario === 'count-decreased' ? 2 : 3}` }));
+    const pageMock = createSavePage([control, count], () => scenario === 'stale' ? ['임시저장 완료'] : clicked && scenario === 'failure' ? ['임시저장 완료 처리 중 오류가 발생했습니다.'] : []);
+    await expect(new NaverDraftSaveAdapter(pageMock.page).saveAndVerify()).rejects.toMatchObject({ code: 'DRAFT_SAVE_UNCONFIRMED' });
+    expect(control.click).toHaveBeenCalledOnce();
+    expect(count.click).not.toHaveBeenCalled();
+  });
+
+  it('확인 중 사라진 광고 프레임은 건너뛰고 본문 프레임의 저장 완료를 확인한다', async () => {
+    let clicked = false;
+    const control = createControl(() => ({ label: '저장' }), () => { clicked = true; });
+    const pageMock = createSavePage([control], () => clicked ? ['저장되었습니다.'] : []);
+    const original = pageMock.page.frames();
+    vi.mocked(pageMock.page.frames).mockReturnValue([
+      { isDetached: () => true, locator: () => ({ evaluateAll: async () => { throw new Error('Frame was detached'); } }) } as unknown as ReturnType<Page['frames']>[number],
+      ...original,
+    ]);
+    await expect(new NaverDraftSaveAdapter(pageMock.page).saveAndVerify()).resolves.toMatchObject({ stage: 'DRAFT_SAVE_COMPLETED' });
+    expect(control.click).toHaveBeenCalledOnce();
+  });
+
+  it('프레임이 살아 있으면 버튼 탐색 오류를 숨기지 않는다', async () => {
+    const control = createControl(() => ({ label: '저장' }));
+    const pageMock = createSavePage([control], () => []);
+    vi.mocked(pageMock.page.frames).mockReturnValue([
+      { isDetached: () => false, locator: () => ({ evaluateAll: async () => { throw new Error('Live frame failure'); } }) } as unknown as ReturnType<Page['frames']>[number],
+    ]);
+    await expect(new NaverDraftSaveAdapter(pageMock.page).saveAndVerify()).rejects.toThrow('Live frame failure');
+    expect(control.click).not.toHaveBeenCalled();
   });
 
   it('같은 우선순위의 임시저장 버튼이 여러 개면 아무것도 누르지 않는다', async () => {
@@ -433,4 +459,49 @@ describe('네이버 임시저장', () => {
     expect(exact.click).toHaveBeenCalledOnce();
     expect(identityOnly.click).not.toHaveBeenCalled();
   });
+});
+
+it.each([
+  [{ label: '임시저장 3', identity: '' }, 3],
+  [{ label: '저장 4', identity: '' }, 4],
+  [{ label: '임시저장 목록', identity: 'save-count', aliases: ['5'], nearSaveControl: true }, 5],
+  [{ label: '0', identity: 'save-count', nearSaveControl: true }, 0],
+  [{ label: '임시저장(6)', identity: '' }, 6],
+  [{ label: '5 임시저장 목록', identity: 'save-count' }, 5],
+  [{ label: '저장 5 임시저장 목록', identity: 'save-count' }, 5],
+  [{ label: '32', identity: 'font-size', nearSaveControl: false }, null],
+  [{ label: '임시저장 3', identity: '', aliases: ['임시저장 4'] }, null],
+] as const)('reads only an unambiguous draft count: %j', (snapshot, expected) => {
+  expect(readNaverDraftCount(snapshot)).toBe(expected);
+});
+
+it('recognizes the separate numeric draft button without a toast or network response', async () => {
+  let clicked = false;
+  const control = createControl(() => ({ label: '저장' }), () => { clicked = true; });
+  const count = createControl(() => ({ label: '임시저장 목록', aliases: [clicked ? '5' : '4'], nearSaveControl: true, identity: 'save-count' }));
+  const mock = createSavePage([control, count], () => []);
+  const result = await new NaverDraftSaveAdapter(mock.page).saveAndVerify();
+  expect(result.signals.map(signal => signal.id)).toEqual(['SAVE_CONTROL_CLICKED', 'SAVED_COUNT_CHANGED']);
+  expect(control.click).toHaveBeenCalledOnce();
+  expect(count.click).not.toHaveBeenCalled();
+});
+
+it('measures elapsed time including slow browser reads, rather than 100 extra scans', async () => {
+  let clicked = false;
+  const control = createControl(() => {
+    if (clicked) vi.advanceTimersByTime(2_000);
+    return { label: '저장' };
+  }, () => { clicked = true; });
+  const mock = createSavePage([control], () => []);
+  await expect(new NaverDraftSaveAdapter(mock.page).saveAndVerify()).rejects.toMatchObject({ code: 'DRAFT_SAVE_UNCONFIRMED' });
+  expect(mock.page.waitForTimeout).toHaveBeenCalledTimes(2);
+  expect(control.click).toHaveBeenCalledOnce();
+});
+
+it('rechecks the bound button before clicking so a changed index cannot publish', async () => {
+  let reads = 0;
+  const control = createControl(() => ({ label: ++reads === 1 ? '저장' : '발행' }));
+  const mock = createSavePage([control], () => []);
+  await expect(new NaverDraftSaveAdapter(mock.page).saveAndVerify()).rejects.toMatchObject({ code: 'DRAFT_SAVE_CONTROL_NOT_FOUND' });
+  expect(control.click).not.toHaveBeenCalled();
 });

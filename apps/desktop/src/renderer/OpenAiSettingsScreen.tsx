@@ -10,6 +10,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
+import { ConfirmationDialog } from './ConfirmationDialog.js';
 
 type CredentialState = 'loading' | 'saved' | 'missing' | 'error';
 type ConnectionState = 'pending' | 'checking' | 'connected' | 'failed';
@@ -24,6 +25,7 @@ export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonl
   const [apiKey, setApiKey] = useState('');
   const [isKeyVisible, setIsKeyVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [confirmRemoval, setConfirmRemoval] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('pending');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -73,27 +75,31 @@ export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonl
   };
 
   const removeCredential = async (): Promise<void> => {
-    if (!window.confirm('이 PC에 저장된 OpenAI API 키를 삭제할까요?')) return;
-
+    setConfirmRemoval(false);
     setIsSaving(true);
     setNotice(null);
     setErrorMessage(null);
 
-    const response = await window.blowOpenAi.remove();
+    try {
+      const response = await window.blowOpenAi.remove();
 
-    if (response.ok) {
-      setCredentialState('missing');
-      setConnectionState('pending');
-      setNotice({
-        title: '저장된 키 삭제 완료',
-        detail: '이 PC에 저장된 OpenAI API 키를 삭제했습니다.',
-      });
-    } else {
-      setCredentialState('error');
-      setErrorMessage(response.error.message);
+      if (response.ok) {
+        setCredentialState('missing');
+        setConnectionState('pending');
+        setNotice({
+          title: '저장된 키 삭제 완료',
+          detail: '이 PC에 저장된 OpenAI API 키를 삭제했습니다.',
+        });
+      } else {
+        setCredentialState('error');
+        setErrorMessage(response.error.message);
+      }
+
+    } catch {
+      setErrorMessage('저장된 키를 삭제하지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsSaving(false);
   };
 
   const testConnection = async (): Promise<void> => {
@@ -120,6 +126,10 @@ export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonl
 
   return (
     <>
+      <ConfirmationDialog open={confirmRemoval} title="저장된 API 키를 삭제할까요?" confirmLabel="저장된 키 삭제"
+        fallbackFocusId="openai-api-key" onCancel={() => setConfirmRemoval(false)} onConfirm={() => void removeCredential()}>
+        <p>이 PC에 저장된 OpenAI API 키를 삭제합니다. 다시 사용하려면 키를 입력해야 합니다.</p>
+      </ConfirmationDialog>
       <header className="page-head">
         <div>
           {embedded ? <h2 id="brand-ai-heading" tabIndex={-1}>AI 연결</h2> : <h1>AI 연결</h1>}
@@ -213,7 +223,7 @@ export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonl
                     {connectionState === 'checking' ? <LoaderCircle className="is-spinning" aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}
                     {connectionState === 'checking' ? '확인 중…' : '연결 확인'}
                   </button>
-                  <button className="button danger" type="button" disabled={isBusy} onClick={() => void removeCredential()}>
+                  <button className="button danger" type="button" disabled={isBusy} onClick={() => setConfirmRemoval(true)}>
                     <Trash2 aria-hidden="true" />
                     저장된 키 삭제
                   </button>

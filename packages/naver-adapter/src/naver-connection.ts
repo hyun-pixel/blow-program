@@ -12,6 +12,7 @@ import {
 import {
   NaverDraftSaveAdapter,
   NaverDraftSaveError,
+  readNaverDraftCount,
   type NaverDraftSaveResult,
 } from './naver-draft-save.js';
 import {
@@ -23,6 +24,7 @@ import {
 } from './naver-divider.js';
 import {
   NaverImageAdapter,
+  NaverImageError,
   type NaverImageAttachmentResult,
   type NaverImageLayout,
 } from './naver-image.js';
@@ -86,6 +88,8 @@ export interface LoginWaitOptions {
   readonly timeoutMs?: number;
   readonly pollIntervalMs?: number;
   readonly settleDelayMs?: number;
+  readonly waitForLogin?: boolean;
+  readonly allowPageReplacement?: boolean;
 }
 
 export interface NaverConnectionStatus {
@@ -444,11 +448,7 @@ function isSavedDraftListControl(snapshot: DraftListControlSnapshot): boolean {
   const labels = (snapshot.aliases ?? [snapshot.label]).map(compactControlText);
 
   return (
-    labels.some((label) => (
-      /^임시저장(?:글)?\d+(?:개)?$/.test(label)
-      || /^저장\d+(?:개)?$/.test(label)
-      || (/^\d+$/.test(label) && snapshot.nearSaveControl === true)
-    ))
+    readNaverDraftCount(snapshot) !== null
     || (
       labels.some((label) => label.startsWith('임시저장'))
       && /(temporary|temp|draft)/i.test(snapshot.identity)
@@ -575,21 +575,29 @@ async function getWriterCandidates(page: Page): Promise<WriterCandidate[]> {
   const candidates: WriterCandidate[] = [];
 
   for (const frame of page.frames()) {
-    const links = frame.locator('a[href*="GoBlogWrite.naver"]');
-    const count = await links.count();
+    try {
+      const frameCandidates: WriterCandidate[] = [];
+      const links = frame.locator('a[href*="GoBlogWrite.naver"]');
+      const count = await links.count();
 
-    for (let index = 0; index < count; index += 1) {
-      const locator = links.nth(index);
-      const [visible, href, label] = await Promise.all([
-        locator.isVisible().catch(() => false),
-        locator.getAttribute('href'),
-        locator.innerText().catch(() => ''),
-      ]);
-      const normalizedHref = href ? normalizeWriterHref(href) : null;
+      for (let index = 0; index < count; index += 1) {
+        const locator = links.nth(index);
+        const [visible, href, label] = await Promise.all([
+          locator.isVisible().catch(() => false),
+          locator.getAttribute('href'),
+          locator.innerText().catch(() => ''),
+        ]);
+        const normalizedHref = href ? normalizeWriterHref(href) : null;
 
-      if (visible && normalizedHref && label.trim() === '글쓰기') {
-        candidates.push({ locator, href: normalizedHref });
+        if (visible && normalizedHref && label.trim() === '글쓰기') {
+          frameCandidates.push({ locator, href: normalizedHref });
+        }
       }
+      candidates.push(...frameCandidates);
+    } catch (error) {
+      // Home-page subframes can disappear during discovery. Discard their
+      // partial results, but never suppress errors from a still-attached frame.
+      if (!frame.isDetached()) throw error;
     }
   }
 
@@ -658,7 +666,8 @@ export class NaverConnectionAdapter {
     const settleDelayMs = options.settleDelayMs ?? 1_200;
     const stableDelayMs = Math.max(settleDelayMs, pollIntervalMs);
     const deadline = Date.now() + timeoutMs;
-    this.adoptReplacementPage();
+    const allowPageReplacement = options.allowPageReplacement ?? true;
+    if (allowPageReplacement) this.adoptReplacementPage();
     let verificationRequested = isNaverLoginUrl(this.page.url());
     let lastNonLoginUrl = '';
     let nonLoginUrlStableSince = 0;
@@ -667,7 +676,7 @@ export class NaverConnectionAdapter {
     await waitForDelay(settleDelayMs);
 
     while (Date.now() < deadline) {
-      this.adoptReplacementPage();
+      if (allowPageReplacement) this.adoptReplacementPage();
       const currentUrl = this.page.url();
       let shouldVerify = !verificationRequested;
 
@@ -692,12 +701,12 @@ export class NaverConnectionAdapter {
           const status = await this.verifyRegisteredBlog(profile);
           transientFailureCount = 0;
 
-          if (status.stage !== 'LOGIN_REQUIRED') {
+          if (status.stage !== 'LOGIN_REQUIRED' || options.waitForLogin === false) {
             return status;
           }
         } catch (error) {
           transientFailureCount += 1;
-          const replacementAdopted = this.adoptReplacementPage();
+          const replacementAdopted = allowPageReplacement && this.adoptReplacementPage();
 
           if (
             (this.page.isClosed() && !replacementAdopted) ||
@@ -1323,6 +1332,7 @@ export class NaverConnectionAdapter {
     imagePaths: readonly string[],
     layout: NaverImageLayout,
     signal?: AbortSignal,
+    placement?: { readonly paragraphs: readonly string[]; readonly paragraphNumbers: readonly number[] },
   ): Promise<NaverImageAttachmentResult> {
     await requireNaverWriterAccess(
       this.page,
@@ -1331,6 +1341,10 @@ export class NaverConnectionAdapter {
     );
 
     const imageAdapter = new NaverImageAdapter(this.page);
+    if (placement) {
+      if (layout !== 'individual') throw new NaverImageError('INVALID_IMAGE_SELECTION', '본문 중간 배치는 개별 사진만 지원합니다.');
+      return imageAdapter.attachAtParagraphs(imagePaths, placement.paragraphs, placement.paragraphNumbers, signal);
+    }
     return imageAdapter.attachImages(imagePaths, layout, signal);
   }
 
