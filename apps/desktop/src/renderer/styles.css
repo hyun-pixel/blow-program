@@ -21,18 +21,18 @@
   --space-field: 32px;
   --space-paragraph: 16px;
   --panel-padding: 32px;
-  --canvas: #f5f6f8;
+  --canvas: #f4f8f5;
   --surface: #ffffff;
-  --surface-soft: #fafbfc;
-  --surface-active: #edf2ff;
-  --text: #20242c;
-  --text-muted: #59616f;
-  --text-faint: #657080;
-  --line: #d9dde3;
-  --line-strong: #b7bec8;
-  --control: #727b88;
-  --primary: #2449c8;
-  --primary-hover: #1939a8;
+  --surface-soft: #f8fbf9;
+  --surface-active: #e8f5ec;
+  --text: #20382a;
+  --text-muted: #52685a;
+  --text-faint: #5f7065;
+  --line: #d4e2d8;
+  --line-strong: #a4bcad;
+  --control: #718a79;
+  --primary: #087c3c;
+  --primary-hover: #056631;
   --primary-ink: #ffffff;
   --success: #16704a;
   --success-soft: #edf8f2;
@@ -40,7 +40,7 @@
   --danger-soft: #fff1ef;
   --warning: #b45309;
   --warning-soft: #fffbeb;
-  --focus: #1d4ed8;
+  --focus: #056631;
   --shadow-popover: 0 20px 48px rgb(23 26 31 / 0.18);
   font-family:
     "Cafe24 Supermagic",
@@ -268,8 +268,18 @@ svg {
   color: var(--primary);
 }
 
-.wordmark-dot {
-  color: var(--primary);
+.brand-logo {
+  display: block;
+  width: 128px;
+  height: 42px;
+  /* Keep the approved square PNG unchanged; show its centered wordmark. */
+  object-fit: cover;
+  object-position: center;
+}
+
+.auth-brand .brand-logo {
+  width: 160px;
+  height: 52px;
 }
 
 .beta-label {

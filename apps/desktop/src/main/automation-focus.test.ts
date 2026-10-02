@@ -13,6 +13,7 @@ const fixture = vi.hoisted(() => {
     webContents: { setWindowOpenHandler: vi.fn(), on: vi.fn() },
   };
   const session = {
+    isConnected: () => true, onDisconnected: vi.fn(),
     profile: { blogId: 'example' }, close: vi.fn(),
     prepareAutomaticWriter: vi.fn(), enterContent: vi.fn(), listDividerStyles: vi.fn(), insertDivider: vi.fn(),
     listStickerCategories: vi.fn(), insertRandomSticker: vi.fn(), listQuoteStyles: vi.fn(), insertQuote: vi.fn(), saveDraft: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('electron', () => ({
 }));
 vi.mock('./generated-image-storage.js', () => ({ completePendingGeneratedImages: vi.fn(async () => {}), discardPendingGeneratedImages: vi.fn(async () => {}), pruneGeneratedImages: vi.fn(async () => {}) }));
 vi.mock('./naver-connection.js', () => ({
+  classifyNaverFailure: () => ({ code: 'BROWSER_CLOSED', message: '전용 Chrome 연결을 다시 확인해 주세요. [BROWSER_CLOSED]' }),
   NaverConnectionSession: { create: async () => ({ session: fixture.session, status: { stage: 'WRITER_READY' } }) },
   NaverConnectionRunnerError: class extends Error {},
 }));
@@ -57,6 +59,15 @@ beforeEach(async () => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('automation focus preparation through real IPC handlers (no browser/network)', () => {
+  it('invalidates a disconnected session and broadcasts recovery before any new writer call', async () => {
+    fixture.session.onDisconnected.mock.calls.at(-1)![0]();
+    expect(event.sender.send).toHaveBeenCalledWith('naver:state', {
+      ok: false, error: expect.objectContaining({ code: 'BROWSER_CLOSED' }),
+    });
+    const result = await invoke('naver:prepare-automatic-writer', 'example');
+    expect(result).toMatchObject({ ok: false, error: { code: 'BROWSER_CLOSED' } });
+    expect(fixture.session.prepareAutomaticWriter).not.toHaveBeenCalled();
+  });
   it.each(operations)('%s waits for delayed focus before invoking the browser', async (channel, method, input?: unknown) => {
     const result = invoke(channel, input ?? location);
     await vi.advanceTimersByTimeAsync(250);

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 import { ConfirmationDialog } from './ConfirmationDialog.js';
+import { checkWithTimeout, connectionCheckMessage } from './connection-check.js';
 
 type CredentialState = 'loading' | 'saved' | 'missing' | 'error';
 type ConnectionState = 'pending' | 'checking' | 'connected' | 'failed';
@@ -33,7 +34,7 @@ export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonl
   useEffect(() => {
     let active = true;
 
-    void window.blowOpenAi.getStatus().then((response) => {
+    void checkWithTimeout(() => window.blowOpenAi.getStatus()).then((response) => {
       if (!active) return;
 
       if (response.ok) {
@@ -42,6 +43,10 @@ export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonl
         setCredentialState('error');
         setErrorMessage(response.error.message);
       }
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setCredentialState('error');
+      setErrorMessage(connectionCheckMessage(error));
     });
 
     return () => {
@@ -55,23 +60,26 @@ export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonl
     setNotice(null);
     setErrorMessage(null);
 
-    const response = await window.blowOpenAi.save(apiKey);
-    setApiKey('');
-    setIsKeyVisible(false);
-
-    if (response.ok) {
-      setCredentialState('saved');
-      setConnectionState('pending');
-      setNotice({
-        title: '보안 저장 완료',
-        detail: 'OpenAI API 키를 Windows 보안 저장소에 암호화해 저장했습니다.',
-      });
-    } else {
-      setCredentialState('error');
-      setErrorMessage(response.error.message);
+    try {
+      const response = await window.blowOpenAi.save(apiKey);
+      if (response.ok) {
+        setCredentialState('saved');
+        setConnectionState('pending');
+        setNotice({
+          title: '보안 저장 완료',
+          detail: 'OpenAI API 키를 Windows 보안 저장소에 암호화해 저장했습니다.',
+        });
+      } else {
+        setCredentialState('error');
+        setErrorMessage(response.error.message);
+      }
+    } catch {
+      setErrorMessage('API 키 저장 응답을 받지 못했습니다. 저장 상태를 확인해 주세요. [CREDENTIAL_SAVE_FAILED]');
+    } finally {
+      setApiKey('');
+      setIsKeyVisible(false);
+      setIsSaving(false);
     }
-
-    setIsSaving(false);
   };
 
   const removeCredential = async (): Promise<void> => {
@@ -107,17 +115,21 @@ export function OpenAiSettingsScreen({ onContinue, embedded = false }: { readonl
     setNotice(null);
     setErrorMessage(null);
 
-    const response = await window.blowOpenAi.testConnection();
-
-    if (response.ok) {
-      setConnectionState('connected');
-      setNotice({
-        title: 'OpenAI 연결 확인 완료',
-        detail: '저장된 API 키의 인증과 모델 조회 권한을 확인했습니다.',
-      });
-    } else {
+    try {
+      const response = await checkWithTimeout(() => window.blowOpenAi.testConnection());
+      if (response.ok) {
+        setConnectionState('connected');
+        setNotice({
+          title: 'OpenAI 연결 확인 완료',
+          detail: '저장된 API 키의 인증과 모델 조회 권한을 확인했습니다.',
+        });
+      } else {
+        setConnectionState('failed');
+        setErrorMessage(response.error.message);
+      }
+    } catch (error: unknown) {
       setConnectionState('failed');
-      setErrorMessage(response.error.message);
+      setErrorMessage(connectionCheckMessage(error));
     }
   };
 

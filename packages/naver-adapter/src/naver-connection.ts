@@ -611,6 +611,15 @@ export class NaverConnectionAdapter {
     this.stickerAdapter = new NaverStickerAdapter(page);
   }
 
+  private loginRequiredStatus(profile: NaverBlogProfile): NaverConnectionStatus {
+    return {
+      stage: 'LOGIN_REQUIRED',
+      message: '전용 Chrome에서 네이버 로그인·보안 확인을 완료해 주세요. 영수증 문제가 반복되면 로그인을 계속 시도하지 말고 네이버 계정 상태를 확인해 주세요.',
+      registeredBlogId: profile.blogId,
+      currentUrl: this.page.url(),
+    };
+  }
+
   private adoptReplacementPage(): boolean {
     if (!this.page.isClosed()) return false;
 
@@ -641,12 +650,7 @@ export class NaverConnectionAdapter {
       isNaverLoginUrl(this.page.url()) ||
       (await hasVisibleLoginLink(this.page))
     ) {
-      return {
-        stage: 'LOGIN_REQUIRED',
-        message: '전용 Chrome에서 로그인을 완료하면 BLOW가 자동으로 블로그를 확인합니다.',
-        registeredBlogId: profile.blogId,
-        currentUrl: this.page.url(),
-      };
+      return this.loginRequiredStatus(profile);
     }
 
     return {
@@ -677,10 +681,16 @@ export class NaverConnectionAdapter {
 
     while (Date.now() < deadline) {
       if (allowPageReplacement) this.adoptReplacementPage();
+      if (this.page.isClosed()) throw new Error('Target page has been closed');
       const currentUrl = this.page.url();
       let shouldVerify = !verificationRequested;
 
-      if (verificationRequested && isNaverLoginUrl(currentUrl)) {
+      // The user may enter login during the initial delay or a retry. Always
+      // observe the current URL before navigating; never reset an auth challenge.
+      if (isNaverLoginUrl(currentUrl)) {
+        if (options.waitForLogin === false) return this.loginRequiredStatus(profile);
+        verificationRequested = true;
+        shouldVerify = false;
         lastNonLoginUrl = '';
         nonLoginUrlStableSince = 0;
         transientFailureCount = 0;
@@ -727,25 +737,24 @@ export class NaverConnectionAdapter {
 
     throw new NaverConnectionError(
       'LOGIN_WAIT_TIMEOUT',
-      '로그인 자동 확인 시간이 지났습니다. 로그인 상태를 확인한 뒤 다시 시도해 주세요.',
+      '네이버 로그인·보안 확인 대기 시간이 지났습니다. Chrome 화면은 유지됩니다. 영수증 문제가 반복되면 추가 시도를 멈추고 네이버 계정 상태를 확인해 주세요. [LOGIN_WAIT_TIMEOUT]',
     );
   }
 
   async verifyRegisteredBlog(
     profile: NaverBlogProfile,
   ): Promise<NaverConnectionStatus> {
+    // This method is also called directly. Preserve login, CAPTCHA and account
+    // protection pages even if the caller did not use the bounded login wait.
+    if (isNaverLoginUrl(this.page.url())) return this.loginRequiredStatus(profile);
+
     await this.page.goto(MY_BLOG_URL, {
       waitUntil: 'domcontentloaded',
       timeout: 30_000,
     });
 
     if (isNaverLoginUrl(this.page.url())) {
-      return {
-        stage: 'LOGIN_REQUIRED',
-        message: '네이버 로그인 완료를 기다리고 있습니다. 완료되면 BLOW가 자동으로 확인합니다.',
-        registeredBlogId: profile.blogId,
-        currentUrl: this.page.url(),
-      };
+      return this.loginRequiredStatus(profile);
     }
 
     const actualBlogId = getBlogIdFromNaverUrl(this.page.url());

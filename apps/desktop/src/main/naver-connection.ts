@@ -54,6 +54,7 @@ export interface NaverConnectionOptions {
 
 export type NaverRunnerFailureCode =
   | 'BROWSER_CLOSED'
+  | 'NAVER_TAB_CLOSED'
   | 'CHROME_NOT_FOUND'
   | 'PROFILE_IN_USE'
   | 'INVALID_BLOG_URL'
@@ -159,7 +160,7 @@ export class NaverConnectionRunnerError extends Error {
   }
 }
 
-function classifyFailure(error: unknown): NaverRunnerFailure {
+export function classifyNaverFailure(error: unknown, browserConnected = false): NaverRunnerFailure {
   if (
     error instanceof NaverConnectionError ||
     error instanceof NaverDividerError ||
@@ -179,8 +180,10 @@ function classifyFailure(error: unknown): NaverRunnerFailure {
 
   if (/target page.*closed|context.*closed|browser.*closed/i.test(detail)) {
     return {
-      code: 'BROWSER_CLOSED',
-      message: '전용 Chrome이 닫혔습니다. 다시 열어 주세요.',
+      code: browserConnected ? 'NAVER_TAB_CLOSED' : 'BROWSER_CLOSED',
+      message: browserConnected
+        ? '작업하던 네이버 탭을 사용할 수 없습니다. 다른 글은 닫지 말고 블로그 세팅에서 연결을 다시 확인해 주세요. [NAVER_TAB_CLOSED]'
+        : 'BLOW 전용 Chrome과의 연결이 끊겼습니다. 다른 Chrome 창이 열려 있어도 블로그 세팅에서 전용 Chrome을 다시 연결해 주세요. [BROWSER_CLOSED]',
     };
   }
 
@@ -217,13 +220,30 @@ function classifyFailure(error: unknown): NaverRunnerFailure {
 
 export class NaverConnectionSession {
   private enteredContent: DraftContent | null = null;
+  private disconnected = false;
+  private disconnectListener?: () => void;
+  private verification: Promise<NaverConnectionStatus> | undefined;
 
   private constructor(
     private context: BrowserContext | undefined,
     readonly profile: NaverBlogProfile,
     private adapter: NaverConnectionAdapter,
     private writerHref?: string,
-  ) {}
+  ) {
+    context?.once('close', () => {
+      this.disconnected = true;
+      this.disconnectListener?.();
+    });
+  }
+
+  isConnected(): boolean {
+    return Boolean(this.context && !this.disconnected);
+  }
+
+  onDisconnected(listener: () => void): void {
+    this.disconnectListener = listener;
+    if (!this.isConnected()) listener();
+  }
 
   static async create(
     options: NaverConnectionOptions,
@@ -245,47 +265,46 @@ export class NaverConnectionSession {
 
       const page = context.pages()[0] ?? (await context.newPage());
       const adapter = new NaverConnectionAdapter(page);
-      const status = await adapter.openHome(profile);
       const session = new NaverConnectionSession(
         context,
         profile,
         adapter,
       );
+      const status = await adapter.openHome(profile);
 
       return { session, status };
     } catch (error) {
       await context?.close().catch(() => undefined);
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error), {
         cause: error,
       });
     }
   }
 
   async waitForLoginAndVerify(): Promise<NaverConnectionStatus> {
-    try {
-      const status = await this.adapter.waitForLoginAndVerify(this.profile);
-      this.writerHref = status.writerHref;
-      return status;
-    } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
-        cause: error,
-      });
-    }
+    // Auto-check and an explicit recheck must not navigate the same login tab twice.
+    this.verification ??= (async () => {
+      try {
+        const status = await this.adapter.waitForLoginAndVerify(this.profile);
+        this.writerHref = status.writerHref;
+        return status;
+      } catch (error) {
+        throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), { cause: error });
+      } finally {
+        this.verification = undefined;
+      }
+    })();
+    return this.verification;
   }
 
   async verify(): Promise<NaverConnectionStatus> {
-    try {
-      const status = await this.adapter.waitForLoginAndVerify(this.profile);
-      this.writerHref = status.writerHref;
-      return status;
-    } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
-        cause: error,
-      });
-    }
+    return this.waitForLoginAndVerify();
   }
 
   async prepareAutomaticWriter(blogId: string): Promise<NaverConnectionStatus> {
+    if (!this.isConnected()) {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(new Error('Browser closed')));
+    }
     if (!this.context || blogId !== this.profile.blogId) {
       throw new NaverConnectionRunnerError({
         code: 'WRITER_NOT_READY',
@@ -309,7 +328,10 @@ export class NaverConnectionSession {
         allowPageReplacement: false,
       });
       if (status.stage !== 'WRITER_LINK_READY' || !status.writerHref) {
-        await page.close();
+        // Keep the login tab visible so an explicit connection recheck can recover.
+        this.adapter = adapter;
+        this.writerHref = undefined;
+        this.enteredContent = null;
         return status;
       }
       step = '글쓰기 화면 열기';
@@ -319,7 +341,13 @@ export class NaverConnectionSession {
       this.enteredContent = null;
       return writer;
     } catch (error) {
-      const failure = classifyFailure(error);
+      // newPage has no existing tab: a closed-target failure here is a lost context,
+      // even if Playwright's close event has not reached us yet.
+      const failure = classifyNaverFailure(error, step !== '새 탭 열기' && this.isConnected());
+      if (failure.code === 'BROWSER_CLOSED') {
+        this.disconnected = true;
+        this.disconnectListener?.();
+      }
       // Display only our fixed step label, never raw browser errors or account URLs.
       throw new NaverConnectionRunnerError({
         ...failure,
@@ -339,7 +367,7 @@ export class NaverConnectionSession {
     try {
       return await this.adapter.openWriter(this.profile, this.writerHref);
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -356,7 +384,7 @@ export class NaverConnectionSession {
         validateDraftContent(content),
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -376,7 +404,7 @@ export class NaverConnectionSession {
       this.enteredContent = normalizedContent;
       return result;
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -405,7 +433,7 @@ export class NaverConnectionSession {
         signal,
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -436,7 +464,7 @@ export class NaverConnectionSession {
         signal,
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -465,7 +493,7 @@ export class NaverConnectionSession {
         signal,
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -496,7 +524,7 @@ export class NaverConnectionSession {
         signal,
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -523,7 +551,7 @@ export class NaverConnectionSession {
         position,
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -552,7 +580,7 @@ export class NaverConnectionSession {
         signal,
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -583,7 +611,7 @@ export class NaverConnectionSession {
         signal,
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -602,7 +630,7 @@ export class NaverConnectionSession {
     try {
       return await this.adapter.saveDraft(this.profile, content, signal);
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -630,7 +658,7 @@ export class NaverConnectionSession {
         paragraphNumbers ? { paragraphs: this.enteredContent.paragraphs, paragraphNumbers } : undefined,
       );
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -663,7 +691,7 @@ export class NaverConnectionSession {
     } catch (error) {
       testFailure = error instanceof NaverConnectionRunnerError
         ? error
-        : new NaverConnectionRunnerError(classifyFailure(error), {
+        : new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
             cause: error,
           });
     }
@@ -705,7 +733,7 @@ export class NaverConnectionSession {
     try {
       return await this.adapter.testStructureChangeSafety(this.profile);
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
@@ -787,7 +815,7 @@ export class NaverConnectionSession {
         } catch (error) {
           const failure = error instanceof NaverConnectionRunnerError
             ? error.failure
-            : classifyFailure(error);
+            : classifyNaverFailure(error, this.isConnected());
 
           throw new NaverConnectionRunnerError(
             {
@@ -932,7 +960,7 @@ export class NaverConnectionSession {
         throw error;
       }
 
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     } finally {
@@ -975,14 +1003,18 @@ export class NaverConnectionSession {
     try {
       return await this.adapter.waitForUserInteraction({ timeoutMs });
     } catch (error) {
-      throw new NaverConnectionRunnerError(classifyFailure(error), {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), {
         cause: error,
       });
     }
   }
 
   async bringToFront(): Promise<void> {
-    await this.adapter.bringToFront();
+    try {
+      await this.adapter.bringToFront();
+    } catch (error) {
+      throw new NaverConnectionRunnerError(classifyNaverFailure(error, this.isConnected()), { cause: error });
+    }
   }
 
   async close(): Promise<void> {

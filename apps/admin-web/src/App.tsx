@@ -20,7 +20,8 @@ import { decideAdminAccess, type AdminAccessStage } from './admin-access.js';
 import { AuditLogsScreen } from './AuditLogsScreen.js';
 import { MembersScreen } from './MembersScreen.js';
 import { OperationsScreen } from './OperationsScreen.js';
-import { supabase } from './supabase.js';
+import { supabase, createPasswordRecoveryClient } from './supabase.js';
+import { PasswordRecovery } from '../../shared/PasswordRecovery.js';
 
 type AccessView = 'loading' | AdminAccessStage | 'error';
 
@@ -69,6 +70,7 @@ function LoadingCard({ label }: { readonly label: string }) {
 }
 
 function LoginScreen() {
+  const [recovering, setRecovering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -100,12 +102,15 @@ function LoginScreen() {
 
   return (
     <main id="main-content" className="login-page">
-      <section className="login-card" aria-labelledby="login-heading">
+      <section className="login-card" aria-labelledby={recovering ? 'password-recovery-heading' : 'login-heading'}>
         <div className="brand" aria-label="BLOW 관리자">
           <span className="brand-sign" aria-hidden="true">B</span>
           <span><strong>BLOW</strong><small>관리자</small></span>
         </div>
 
+        {recovering ? (
+          <PasswordRecovery createClient={createPasswordRecoveryClient} initialEmail={email} onBack={(address) => { setEmail(address); setErrorMessage(null); setRecovering(false); }} />
+        ) : <>
         <header className="card-heading">
           <h1 id="login-heading">관리자 로그인</h1>
           <p>관리자 권한이 등록된 BLOW 계정으로 로그인해 주세요.</p>
@@ -160,6 +165,9 @@ function LoginScreen() {
             {isSubmitting ? '로그인 중…' : '로그인'}
           </button>
         </form>
+
+        <button className="button password-recovery-link" type="button" disabled={isSubmitting} onClick={() => { setPassword(''); setErrorMessage(null); setRecovering(true); }}>비밀번호 찾기</button>
+        </>}
 
         <div className="security-note">
           <ShieldCheck aria-hidden="true" />

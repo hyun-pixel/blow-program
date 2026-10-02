@@ -13,7 +13,9 @@ import {
   useState,
 } from 'react';
 import { getAuthErrorMessage } from './auth-errors.js';
-import { supabase } from './supabase.js';
+import { supabase, createPasswordRecoveryClient } from './supabase.js';
+import { PasswordRecovery } from '../../../shared/PasswordRecovery.js';
+import brandLogoUrl from './assets/blow-logo.png';
 
 type AuthMode = 'signIn' | 'signUp';
 
@@ -31,6 +33,7 @@ function getErrorCode(error: unknown): string | undefined {
 }
 
 export function AuthScreen() {
+  const [recovering, setRecovering] = useState(false);
   const [mode, setMode] = useState<AuthMode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -110,8 +113,8 @@ export function AuthScreen() {
     return (
       <main className="auth-page">
         <section className="auth-card" aria-labelledby="auth-heading">
-          <div className="auth-brand" aria-label="BLOW">
-            <span>blow</span><span className="wordmark-dot">.</span>
+          <div className="auth-brand">
+            <img className="brand-logo" src={brandLogoUrl} width="128" height="42" alt="BLOW" />
           </div>
           <header className="auth-heading">
             <h1 id="auth-heading">앱 연결 설정이 필요합니다</h1>
@@ -124,11 +127,14 @@ export function AuthScreen() {
 
   return (
     <main className="auth-page">
-      <section className="auth-card" aria-labelledby="auth-heading">
-        <div className="auth-brand" aria-label="BLOW">
-          <span>blow</span><span className="wordmark-dot">.</span>
+      <section className="auth-card" aria-labelledby={recovering ? 'password-recovery-heading' : 'auth-heading'}>
+        <div className="auth-brand">
+          <img className="brand-logo" src={brandLogoUrl} width="128" height="42" alt="BLOW" />
         </div>
 
+        {recovering ? (
+          <PasswordRecovery createClient={createPasswordRecoveryClient} initialEmail={email} onBack={(address) => { setEmail(address); changeMode('signIn'); setRecovering(false); }} />
+        ) : <>
         <header className="auth-heading">
           <h1 id="auth-heading">
             {mode === 'signIn' ? '계정에 로그인' : '새 계정 만들기'}
@@ -267,6 +273,9 @@ export function AuthScreen() {
                 : '회원가입'}
           </button>
         </form>
+
+        {mode === 'signIn' ? <button className="button password-recovery-link" type="button" disabled={isSubmitting} onClick={() => { setPassword(''); setErrorMessage(null); setNotice(null); setRecovering(true); }}>비밀번호 찾기</button> : null}
+        </>}
 
         <div className="auth-security-note">
           <ShieldCheck aria-hidden="true" />

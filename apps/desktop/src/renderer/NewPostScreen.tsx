@@ -33,6 +33,7 @@ import { PostDecorationFields } from './PostDecorationFields.js';
 import { defaultPostDecorations, type PostDecorations } from './post-decoration.js';
 import { WritingSteps } from './WritingSteps.js';
 import { TopicRecommendations } from './TopicRecommendations.js';
+import { checkWithTimeout, connectionCheckMessage } from './connection-check.js';
 import { WritingQueuePanel } from './WritingQueuePanel.js';
 import { useWritingQueue } from './useWritingQueue.js';
 import type { WritingConfig, WritingJob } from './writing-queue.js';
@@ -123,7 +124,7 @@ export function NewPostScreen({
     setProfileError(null);
     let current = true;
 
-    void window.blowBrandProfile.get(userId).then((response) => {
+    void checkWithTimeout(() => window.blowBrandProfile.get(userId)).then((response) => {
       if (!current) return;
 
       if (response.ok && response.profile) {
@@ -135,14 +136,19 @@ export function NewPostScreen({
         setCta(response.profile.defaultCta);
       } else if (!response.ok) {
         setProfileError(response.error.message);
+      } else {
+        setBrandName('');
       }
-      setIsProfileLoading(false);
+    }).catch((error: unknown) => {
+      if (current) setProfileError(connectionCheckMessage(error));
+    }).finally(() => {
+      if (current) setIsProfileLoading(false);
     });
 
     return () => {
       current = false;
     };
-  }, [active, userId]);
+  }, [active, modelReloadToken, userId]);
 
   useEffect(() => {
     if (!active) return;
@@ -152,7 +158,8 @@ export function NewPostScreen({
       setModelStatus('loading');
       setModelError(null);
 
-      if (!supabase) {
+      const client = supabase;
+      if (!client) {
         if (current) {
           setModelStatus('error');
           setModelError('Supabase 연결 설정을 확인해 주세요.');
@@ -160,8 +167,8 @@ export function NewPostScreen({
         return;
       }
 
-      const [allowedResult, availableResult] = await Promise.all([
-        supabase
+      const [allowedResult, availableResult] = await checkWithTimeout(() => Promise.all([
+        client
           .from('allowed_models')
           .select([
             'model_id',
@@ -175,19 +182,19 @@ export function NewPostScreen({
           .eq('is_active', true)
           .order('sort_order', { ascending: false }),
         window.blowOpenAi.listModels(),
-      ]);
+      ]));
 
       if (!current) return;
 
       if (allowedResult.error) {
         setModelStatus('error');
-        setModelError('허용 모델 설정을 불러오지 못했습니다. Supabase 모델 설정 SQL을 적용해 주세요.');
+        setModelError('BLOW의 허용 모델 목록을 불러오지 못했습니다. 잠시 후 다시 확인해 주세요. API 키를 삭제할 필요는 없습니다. [ALLOWED_MODELS_UNAVAILABLE]');
         return;
       }
 
       if (!availableResult.ok) {
         setModelStatus('error');
-        setModelError(availableResult.error.message);
+        setModelError(`${availableResult.error.message} [${availableResult.error.code}]`);
         return;
       }
 
@@ -230,7 +237,11 @@ export function NewPostScreen({
       setModelStatus('ready');
     };
 
-    void loadModels();
+    void loadModels().catch((error: unknown) => {
+      if (!current) return;
+      setModelStatus('error');
+      setModelError(connectionCheckMessage(error));
+    });
 
     return () => {
       current = false;
@@ -442,7 +453,7 @@ export function NewPostScreen({
       ) : null}
 
 
-          {!isProfileLoading && !brandName ? (
+          {!isProfileLoading && !profileError && !brandName ? (
             <div className="new-post-profile-warning">
               <CircleAlert aria-hidden="true" />
               <div>
@@ -504,6 +515,7 @@ export function NewPostScreen({
               model={recommendationModel}
               reasoningEffort={selectedModel ? reasoningEffort : ''}
               unavailableReason={isProfileLoading ? '블로그 세팅을 불러오는 중입니다.'
+                : profileError ? profileError
                 : !brandName ? '블로그 세팅을 먼저 저장해 주세요.'
                 : modelStatus === 'loading' ? '사용 가능한 AI를 확인하는 중입니다.'
                 : modelStatus === 'error' ? modelError ?? '블로그 세팅의 AI 연결을 확인해 주세요.'
@@ -513,6 +525,17 @@ export function NewPostScreen({
               onSelect={(content) => { setTopic(content); clearError('topic'); }}
               onBusyChange={setIsTopicRecommending}
             />
+            {(profileError || modelStatus === 'error') ? (
+              <div className="credential-actions">
+                <button className="button secondary" type="button"
+                  disabled={isGenerating || isTopicRecommending || isProfileLoading || modelStatus === 'loading'}
+                  onClick={() => setModelReloadToken((value) => value + 1)}>
+                  추천 준비 다시 확인
+                </button>
+                <button className="button secondary" type="button" onClick={onOpenBrandProfile}>블로그 세팅 열기</button>
+                <p className="field-help">설정과 모델 목록만 확인합니다. 글을 생성하거나 API 키를 삭제하지 않습니다.</p>
+              </div>
+            ) : null}
 
 </div></section>
 <section className="compose-section" aria-labelledby="compose-section-02">

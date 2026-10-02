@@ -15,7 +15,7 @@ describe('automatic writer prepares a fresh tab without touching existing drafts
       url: vi.fn(() => 'https://section.blog.naver.com/BlogHome.naver'),
       context: vi.fn(),
     };
-    const context = { pages: () => [originalPage], newPage: vi.fn(async () => newPage), close: vi.fn() };
+    const context = { once: vi.fn(), pages: () => [originalPage], newPage: vi.fn(async () => newPage), close: vi.fn(async () => {}) };
     newPage.context.mockReturnValue(context);
     vi.spyOn(chromium, 'launchPersistentContext').mockResolvedValue(context as unknown as BrowserContext);
     const base = { message: '', registeredBlogId: 'example', actualBlogId: 'example', currentUrl: 'https://blog.naver.com/example' };
@@ -45,7 +45,7 @@ describe('automatic writer prepares a fresh tab without touching existing drafts
     f.verify.mockResolvedValue({ ...f.base, stage });
     expect((await f.session.prepareAutomaticWriter('example')).stage).toBe(stage);
     expect(f.open).not.toHaveBeenCalled();
-    expect(f.newPage.close).toHaveBeenCalledTimes(1);
+    expect(f.newPage.close).not.toHaveBeenCalled();
     expect(f.originalPage.close).not.toHaveBeenCalled();
   });
   it('recovers from a transient home navigation failure before opening the writer', async () => {
@@ -64,10 +64,10 @@ describe('automatic writer prepares a fresh tab without touching existing drafts
     f.newPage.isClosed.mockReturnValue(true);
     f.verify.mockRejectedValue(new Error('Target page has been closed'));
     await expect(f.session.prepareAutomaticWriter('example')).rejects.toMatchObject({
-      failure: { code: 'BROWSER_CLOSED' },
+      failure: { code: 'NAVER_TAB_CLOSED' },
     });
     expect(f.newPage.context).not.toHaveBeenCalled();
-    expect(f.verify).toHaveBeenCalledOnce();
+    expect(f.verify).not.toHaveBeenCalled();
     expect(f.open).not.toHaveBeenCalled();
   });
   it('never retries a safety rejection', async () => {

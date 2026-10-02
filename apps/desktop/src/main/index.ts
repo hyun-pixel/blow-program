@@ -30,6 +30,7 @@ import {
   type MockPocResult,
 } from './mock-poc.js';
 import {
+  classifyNaverFailure,
   NaverConnectionRunnerError,
   NaverConnectionSession,
 } from './naver-connection.js';
@@ -636,6 +637,20 @@ function registerMockIpc(): void {
   });
 }
 
+function trackNaverSession(session: NaverConnectionSession, sender: WebContents): void {
+  activeNaverSession = session;
+  session.onDisconnected(() => {
+    if (activeNaverSession !== session) return;
+    activeNaverSession = null;
+    naverWatchVersion += 1;
+    selectedNaverImages.clear();
+    if (!sender.isDestroyed()) sender.send(ipcChannels.naverState, {
+      ok: false, error: classifyNaverFailure(new Error('Browser closed')),
+    });
+  });
+  if (!session.isConnected()) throw new NaverConnectionRunnerError(classifyNaverFailure(new Error('Browser closed')));
+}
+
 function startNaverAutoVerify(
   session: NaverConnectionSession,
   sender: WebContents,
@@ -724,7 +739,7 @@ function registerNaverIpc(): void {
         };
       }
 
-      activeNaverSession = result.session;
+      trackNaverSession(result.session, event.sender);
 
       if (
         result.status.stage === 'LOGIN_REQUIRED' ||
@@ -817,7 +832,12 @@ function registerNaverIpc(): void {
     if (activeRun) return busyResponse();
     const session = activeNaverSession;
     const appWindow = BrowserWindow.fromWebContents(event.sender);
-    if (!session || typeof blogId !== 'string' || blogId !== session.profile.blogId) {
+    if (!session || !session.isConnected()) {
+      const error = classifyNaverFailure(new Error('Browser closed'));
+      event.sender.send(ipcChannels.naverState, { ok: false, error });
+      return { ok: false, error };
+    }
+    if (typeof blogId !== 'string' || blogId !== session.profile.blogId) {
       return { ok: false, error: { code: 'WRITER_NOT_READY', message: '블로그 세팅에서 저장할 네이버 블로그를 다시 연결해 주세요.' } };
     }
     if (!appWindow || appWindow.isDestroyed() || !appWindow.isFocused()) {
@@ -827,12 +847,21 @@ function registerNaverIpc(): void {
     activeRun = true;
     try {
       const status = await session.prepareAutomaticWriter(blogId);
+      if (status.stage !== 'WRITER_READY') {
+        event.sender.send(ipcChannels.naverState, { ok: true, status });
+        if (status.stage === 'LOGIN_REQUIRED') startNaverAutoVerify(session, event.sender);
+        return { ok: true, status };
+      }
       // Confirm focus before reporting ready, so generation does not start after a refused focus change.
       if (!await prepareAutomationFocus(appWindow)) return { ok: false, error: { code: 'USER_INTERACTION_DETECTED', message: 'BLOW 창을 맨 앞으로 두고 다시 시작해 주세요.' } };
       return { ok: true, status };
     } catch (error) {
-      return { ok: false, error: error instanceof NaverConnectionRunnerError
-        ? error.failure : { code: 'WRITER_NOT_READY', message: '새 글쓰기 화면을 준비하지 못했습니다. 네이버 연결을 확인해 주세요.' } };
+      const failure = error instanceof NaverConnectionRunnerError
+        ? error.failure : { code: 'WRITER_NOT_READY', message: '새 글쓰기 화면을 준비하지 못했습니다. 네이버 연결을 확인해 주세요. [WRITER_NOT_READY]' };
+      if (['BROWSER_CLOSED', 'NAVER_TAB_CLOSED', 'NAVER_AUTH_REQUIRED'].includes(failure.code)) {
+        event.sender.send(ipcChannels.naverState, { ok: false, error: failure });
+      }
+      return { ok: false, error: failure };
     } finally {
       activeRun = false;
     }
@@ -3037,7 +3066,7 @@ function registerIpc(): void {
           };
         }
 
-        activeNaverSession = created.session;
+        trackNaverSession(created.session, event.sender);
         if (stopVersion !== naverStopVersion) {
           return {
             ok: false,
@@ -3100,7 +3129,7 @@ function createMainWindow(): BrowserWindow {
     minWidth: 760,
     minHeight: 620,
     show: false,
-    backgroundColor: '#f4f5f7',
+    backgroundColor: '#f4f8f5',
     title: 'BLOW',
     autoHideMenuBar: true,
     webPreferences: {

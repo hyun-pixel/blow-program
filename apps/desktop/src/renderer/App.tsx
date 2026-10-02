@@ -31,6 +31,7 @@ import {
 } from '@blow/automation-core';
 import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './AuthScreen.js';
+import brandLogoUrl from './assets/blow-logo.png';
 import { BrandProfileScreen } from './BrandProfileScreen.js';
 import { ConnectionScreen } from './ConnectionScreen.js';
 import { WritingSteps } from './WritingSteps.js';
@@ -523,7 +524,7 @@ function Workspace({
 
       <header className="titlebar">
         <button className="wordmark" type="button" disabled={navigationBusy} onClick={() => setScreen('brand')} aria-label="BLOW 블로그 세팅">
-          <span>blow</span><span className="wordmark-dot">.</span>
+          <img className="brand-logo" src={brandLogoUrl} width="128" height="42" alt="" />
         </button>
         <div className="titlebar-meta">
           <span className="beta-label">비공개 베타</span>
@@ -738,8 +739,8 @@ function AccountStatusScreen({
   return (
     <main className="auth-page">
       <section className="auth-card" aria-labelledby="account-status-heading">
-        <div className="auth-brand" aria-label="BLOW">
-          <span>blow</span><span className="wordmark-dot">.</span>
+        <div className="auth-brand">
+          <img className="brand-logo" src={brandLogoUrl} width="128" height="42" alt="BLOW" />
         </div>
         <header className="auth-heading">
           <h1 id="account-status-heading">{content.title}</h1>
