@@ -22,7 +22,7 @@ describe('BLOW green theme', () => {
   });
 
   it('keeps normal text and primary actions readable across theme surfaces', () => {
-    for (const background of ['canvas', 'surface', 'surface-soft', 'surface-active']) {
+    for (const background of ['canvas', 'canvas-shade', 'surface', 'surface-soft', 'surface-active', 'surface-mint']) {
       for (const foreground of ['text', 'text-muted', 'text-faint', 'primary']) {
         expect(contrast(foreground, background), `${foreground} on ${background}`).toBeGreaterThanOrEqual(4.5);
       }

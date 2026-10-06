@@ -1,7 +1,11 @@
 import {
+  ArrowUpRight,
+  Building2,
   CheckCircle2,
   Circle,
   HardDrive,
+  KeyRound,
+  Link2,
   LoaderCircle,
   Save,
   ShieldCheck,
@@ -412,14 +416,33 @@ export function BrandProfileScreen({ userId, onContinue, onBusyChange }: {
 
   return (
     <>
-      <header className="page-head">
+      <header className="page-head brand-page-head">
         <div>
           <h1>블로그 세팅</h1>
           <p>
             브랜드 정보를 저장하고 AI와 네이버를 연결하세요. 준비가 끝나면 새 글을 작성할 수 있습니다.
           </p>
         </div>
+        <span className="workspace-paper" aria-hidden="true"><span /></span>
       </header>
+
+      <nav className="setup-shortcuts" aria-label="블로그 세팅 바로가기">
+        <a href="#brand-profile-heading">
+          <Building2 aria-hidden="true" />
+          <span><strong>브랜드 정보</strong><small>글에 반영할 기본 정보</small></span>
+          <ArrowUpRight aria-hidden="true" />
+        </a>
+        <a href="#brand-ai-heading">
+          <KeyRound aria-hidden="true" />
+          <span><strong>AI 연결</strong><small>OpenAI API 키 설정</small></span>
+          <ArrowUpRight aria-hidden="true" />
+        </a>
+        <a href="#brand-naver-heading">
+          <Link2 aria-hidden="true" />
+          <span><strong>네이버 연결</strong><small>글을 저장할 블로그</small></span>
+          <ArrowUpRight aria-hidden="true" />
+        </a>
+      </nav>
 
       {errorMessage ? (
         <div className="message error-message" role="alert">
@@ -602,28 +625,26 @@ export function BrandProfileScreen({ userId, onContinue, onBusyChange }: {
                     onChange={(event) => updateField('activityRegion', event.target.value)}
                   />
                 </div>
-
-              </div>
-
-              <div className="field-group">
-                <label htmlFor="brand-defaultCta">
-                  글 마지막 안내 문구
-                  <span>선택</span>
-                </label>
-                <textarea
-                  id="brand-defaultCta"
-                  form="brand-profile-form"
-                  className="brand-textarea"
-                  value={form.defaultCta}
-                  maxLength={300}
-                  disabled={isLoading || isSaving || isProductsSaving}
-                  aria-describedby="brand-cta-help"
-                  placeholder="예: 자세한 일정은 상담으로 확인해 주세요."
-                  onChange={(event) => updateField('defaultCta', event.target.value)}
-                />
-                <p id="brand-cta-help" className="field-help">
-                  글 마지막에 독자에게 안내할 다음 행동입니다. 비워 두어도 됩니다.
-                </p>
+                <div className="field-group">
+                  <label htmlFor="brand-defaultCta">
+                    글 마지막 안내 문구
+                    <span>선택</span>
+                  </label>
+                  <textarea
+                    id="brand-defaultCta"
+                    form="brand-profile-form"
+                    className="brand-textarea"
+                    value={form.defaultCta}
+                    maxLength={300}
+                    disabled={isLoading || isSaving || isProductsSaving}
+                    aria-describedby="brand-cta-help"
+                    placeholder="예: 자세한 일정은 상담으로 확인해 주세요."
+                    onChange={(event) => updateField('defaultCta', event.target.value)}
+                  />
+                  <p id="brand-cta-help" className="field-help">
+                    글 마지막에 독자에게 안내할 다음 행동입니다. 비워 두어도 됩니다.
+                  </p>
+                </div>
               </div>
 
               {optionalSections.map((section) => {

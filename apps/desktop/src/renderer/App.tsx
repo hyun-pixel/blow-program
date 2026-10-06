@@ -526,10 +526,6 @@ function Workspace({
         <button className="wordmark" type="button" disabled={navigationBusy} onClick={() => setScreen('brand')} aria-label="BLOW 블로그 세팅">
           <img className="brand-logo" src={brandLogoUrl} width="128" height="42" alt="" />
         </button>
-        <div className="titlebar-meta">
-          <span className="beta-label">비공개 베타</span>
-          <strong>블로그 글쓰기 도구</strong>
-        </div>
       </header>
 
       <div className="shell">
