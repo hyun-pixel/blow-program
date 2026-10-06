@@ -68,6 +68,7 @@ samp {
 
 .compose-fields {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-section);
   min-width: 0;
   margin: 0;
@@ -3782,9 +3783,14 @@ summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
   .setup-state { font-size: 0.78rem; }
 }
 
-/* Sequential authoring: each choice gets its own titled, full-width section. */
-.compose-page { width: min(100%, 880px); margin-inline: auto; }
-.compose-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-section); margin-top: 32px; }
+/* The topic leads at full width; supporting settings share two columns when space allows. */
+.compose-page { width: min(100%, 1120px); margin-inline: auto; }
+.compose-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-section); margin-top: 32px; container: compose / inline-size; }
+.compose-fields > :not(.compose-section),
+.compose-fields > .compose-section-topic { grid-column: 1 / -1; }
+@container compose (min-width: 52rem) {
+  .compose-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--space-field); align-items: start; }
+}
 .compose-section { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 .compose-section-heading { display: flex; align-items: flex-start; gap: 16px; padding: 28px var(--panel-padding); border-bottom: 1px solid var(--line); }
 .compose-section-heading h2 { margin: 0; font-size: var(--type-section); line-height: 1.4;

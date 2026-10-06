@@ -9,7 +9,7 @@ const output = '.local/workspace-design';
 await mkdir(output, { recursive: true });
 const results = [];
 const errors = [];
-const widths = [1440, 1366, 1280, 1181, 1077, 1024, 760, 375];
+const widths = [1920, 1440, 1366, 1280, 1181, 1077, 1024, 760, 375];
 try {
   const page = await browser.newPage({ reducedMotion: 'reduce' });
   page.setDefaultTimeout(10000);
@@ -80,6 +80,45 @@ try {
     results.push(`profile-equal-control-sizes-${name}`);
   };
 
+  const checkComposeColumns = async name => {
+    const layout = await page.locator('.compose-fields').evaluate(form => {
+      const bounds = el => {
+        const { x, y, width, bottom } = el.getBoundingClientRect();
+        return { x, y, width, bottom };
+      };
+      return {
+        width: form.clientWidth,
+        columns: form.clientWidth >= 52 * parseFloat(getComputedStyle(document.documentElement).fontSize) ? 2 : 1,
+        sections: [...form.querySelectorAll(':scope > .compose-section')].map(bounds),
+        fullWidth: [...form.querySelectorAll(':scope > .summary-disclosure, :scope > .compose-footer, :scope > button')].map(bounds),
+      };
+    });
+    assert.equal(layout.sections.length, 10);
+    const [topic, ...settings] = layout.sections;
+    for (const block of [topic, ...layout.fullWidth]) {
+      assert.ok(Math.abs(block.width - layout.width) < 1, `${name}: topic and form actions must span the whole row`);
+      assert.ok(Math.abs(block.x - topic.x) < 1, `${name}: full-width blocks must align`);
+    }
+    for (let i = 0; i < settings.length; i++) {
+      const current = settings[i];
+      assert.ok(current.y >= topic.bottom, `${name}: settings must follow the topic`);
+      assert.ok(Math.abs(current.width - settings[0].width) < 1, `${name}: settings must have equal widths`);
+      if (layout.columns === 2 && i % 2 === 1) {
+        const previous = settings[i - 1];
+        assert.ok(Math.abs(current.y - previous.y) < 1, `${name}: settings must share a row`);
+        assert.ok(current.x >= previous.x + previous.width, `${name}: columns must not overlap`);
+      } else {
+        assert.ok(Math.abs(current.x - topic.x) < 1, `${name}: rows must start at the left`);
+        if (i > 0) {
+          for (const previous of settings.slice(Math.max(0, i - layout.columns), i)) {
+            assert.ok(current.y >= previous.bottom, `${name}: rows must not overlap`);
+          }
+        }
+      }
+    }
+    results.push(`composer-${layout.columns}-column-${name}`);
+  };
+
   const checkTextOrigin = async name => {
     const controls = await page.locator('.app .field-group input, .app .field-group textarea').evaluateAll(elements =>
       elements.filter(el => el.checkVisibility() && (el.tagName === 'TEXTAREA' ||
@@ -143,8 +182,35 @@ try {
     await page.locator('#new-post-model option[value="gpt-5.6-terra"]').waitFor({ state: 'attached' });
     await page.locator('#new-post-topic').scrollIntoViewIfNeeded();
     await fits(`composer-${width}`);
+    await checkComposeColumns(String(width));
     await checkTextOrigin(`composer-${width}`);
     await page.screenshot({ path: `${output}/composer-${width}.png` });
+    await page.locator('#new-post-article-type').focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'new-post-target-length');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'new-post-keyword-0');
+    await page.locator('#new-post-service').selectOption('__custom__');
+    await page.locator('#new-post-custom-service').fill('직접 입력한 상품 이름 '.repeat(10));
+    await page.getByRole('button', { name: '보조 키워드 추가', exact: true }).click();
+    await page.locator('#new-post-keyword-1').fill('긴 보조 키워드 테스트');
+    await page.getByRole('radio', { name: 'AI 이미지 사용', exact: false }).check();
+    for (const kind of ['quote', 'sticker', 'divider']) {
+      await page.locator(`#compose-${kind}-enabled`).selectOption('yes');
+    }
+    await fits(`composer-expanded-${width}`);
+    await checkComposeColumns(`expanded-${width}`);
+    assert.equal(await page.locator('#new-post-topic').inputValue(), '우리 브랜드를 처음 만나는 고객에게 전할 이야기');
+    if (width === 1366 || width === 375) {
+      await page.locator('[aria-labelledby="compose-section-02"]').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${output}/composer-paired-${width}.png` });
+    }
+    if (width === 1366) {
+      await page.evaluate(() => document.documentElement.style.fontSize = '200%');
+      await checkComposeColumns('text-200');
+      await fits('composer-text-200');
+      await page.evaluate(() => document.documentElement.style.fontSize = '');
+    }
     for (const [label, name] of [['작업 내역', 'history'], ['사용 가이드', 'guide']]) {
       await nav(label).click();
       await page.evaluate(() => scrollTo(0, 0));
@@ -211,7 +277,7 @@ try {
   results.push('profile-keyboard-validation-and-mock-save');
   assert.deepEqual(errors, []);
   await writeFile(`${output}/results.json`, JSON.stringify({ results, errors }, null, 2));
-  console.log(`PASS ${results.length} checks: ${widths.length} sizes, responsive profile columns, setting anchors, preserved input, composer, history, guide, error, 200% text, keyboard, validation, mock save. External traffic blocked.`);
+  console.log(`PASS ${results.length} checks: ${widths.length} sizes, responsive profile and composer columns, full-width topic, expanded settings, setting anchors, preserved input, history, guide, error, 200% text, keyboard, validation, mock save. External traffic blocked.`);
 } finally {
   await browser.close();
 }

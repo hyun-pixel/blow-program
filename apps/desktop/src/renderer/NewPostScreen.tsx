@@ -480,7 +480,7 @@ export function NewPostScreen({
 <fieldset className="compose-fields" disabled={isGenerating || !queue.ready}>
 <legend className="compose-editor-title">{editingId ? '목록의 글 설정 수정' : '글별 설정'}</legend>
 {editingId ? <button className="button secondary" type="button" onClick={() => { setEditingId(undefined); setNotice('목록의 기존 설정은 변경하지 않았습니다.'); }}>수정 취소</button> : null}
-<section className="compose-section" aria-labelledby="compose-section-01">
+<section className="compose-section compose-section-topic" aria-labelledby="compose-section-01">
 <header className="compose-section-heading"><span className="compose-section-number" aria-hidden="true">01</span><div><h2 id="compose-section-01">글 주제</h2><p>어떤 내용을 전하고 싶은지 적어 주세요.</p></div><span className="compose-section-kind">필수</span></header>
 <div className="compose-section-body">            <div className="field-group">
               <label htmlFor="new-post-topic">쓰고 싶은 내용 <span>필수</span></label>
