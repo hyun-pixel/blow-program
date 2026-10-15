@@ -79,4 +79,23 @@ describe('Naver connection lifecycle', () => {
     expect(classifyNaverFailure(error, false).code).toBe('BROWSER_CLOSED');
     expect(classifyNaverFailure(error, true).message).not.toContain('private URL');
   });
+  it.each([
+    'locator.click: Timeout 30000ms exceeded. private URL',
+    'locator.innerText: Timeout 30000ms exceeded. private URL',
+    'page.goto: Timeout 30000ms exceeded. private URL',
+  ])('does not report an operation timeout as an internet outage: %s', (detail) => {
+    const failure = classifyNaverFailure(new Error(detail), true);
+    expect(failure.code).toBe('NAVER_OPERATION_TIMEOUT');
+    expect(failure.message).toContain('시간');
+    expect(failure.message).not.toContain('인터넷');
+    expect(failure.message).not.toContain('private URL');
+  });
+  it('recognizes a named timeout without depending on its message', () => {
+    const error = new Error('private detail');
+    error.name = 'TimeoutError';
+    expect(classifyNaverFailure(error, true).code).toBe('NAVER_OPERATION_TIMEOUT');
+  });
+  it.each(['net::ERR_INTERNET_DISCONNECTED', 'net::ERR_NAME_NOT_RESOLVED'])('keeps explicit network errors separate: %s', (detail) => {
+    expect(classifyNaverFailure(new Error(detail), true).code).toBe('NAVER_NETWORK_ERROR');
+  });
 });

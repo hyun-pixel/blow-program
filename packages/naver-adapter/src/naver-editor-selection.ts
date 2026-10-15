@@ -12,14 +12,13 @@ export async function placeCaretAtParagraphEdge(
   if (bounds) {
     const horizontalInset = Math.min(2, bounds.width / 2);
     const verticalInset = Math.min(2, bounds.height / 2);
+    // Activate the paragraph from its left edge: Naver's library can cover the
+    // right edge. The requested caret boundary is set and verified below.
+    // Keep Playwright's normal hit testing; never click through an overlay.
     await anchor.click({
       position: {
-        x: edge === 'before'
-          ? horizontalInset
-          : Math.max(horizontalInset, bounds.width - horizontalInset),
-        y: edge === 'before'
-          ? verticalInset
-          : Math.max(verticalInset, bounds.height - verticalInset),
+        x: horizontalInset,
+        y: verticalInset,
       },
     });
   } else {

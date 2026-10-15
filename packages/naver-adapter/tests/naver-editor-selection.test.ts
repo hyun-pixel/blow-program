@@ -114,7 +114,7 @@ describe('네이버 문단 커서 경계 지정', () => {
     expect(harness.keyboardPress).toHaveBeenCalledWith('Home');
   });
 
-  it('문단 뒤는 보이지 않는 노드를 건너뛰고 마지막 글자의 끝에 둔다', async () => {
+  it('문단 뒤도 왼쪽에서 활성화한 뒤 마지막 글자로 이동해 오른쪽 패널을 피한다', async () => {
     const harness = createSelectionHarness(['\u200b', '첫 ', '문장', '  ']);
 
     await placeCaretAtParagraphEdge(harness.page, harness.anchor, 'after');
@@ -124,7 +124,7 @@ describe('네이버 문단 커서 경계 지정', () => {
       offset: 2,
     });
     expect(harness.anchor.click).toHaveBeenCalledWith({
-      position: { x: 198, y: 38 },
+      position: { x: 2, y: 2 },
     });
     expect(harness.keyboardPress).toHaveBeenCalledOnce();
     expect(harness.keyboardPress).toHaveBeenCalledWith('End');

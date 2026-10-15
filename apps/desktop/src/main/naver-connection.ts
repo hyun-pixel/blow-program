@@ -137,6 +137,7 @@ export type NaverRunnerFailureCode =
   | 'STICKER_POSITION_MISMATCH'
   | 'CONTENT_INPUT_REQUIRED'
   | 'NAVER_NETWORK_ERROR'
+  | 'NAVER_OPERATION_TIMEOUT'
   | 'NETWORK_TEST_UNCONFIRMED'
   | 'NETWORK_TEST_RESTORE_FAILED'
   | 'STRUCTURE_TEST_UNCONFIRMED'
@@ -205,7 +206,14 @@ export function classifyNaverFailure(error: unknown, browserConnected = false): 
     };
   }
 
-  if (/net::ERR_|timeout.*exceeded|network/i.test(detail)) {
+  if ((error instanceof Error && error.name === 'TimeoutError') || /timeout.*exceeded/i.test(detail)) {
+    return {
+      code: 'NAVER_OPERATION_TIMEOUT',
+      message: '네이버 화면의 작업 대기 시간이 초과되어 멈췄습니다. 열린 패널이나 팝업이 입력 위치를 가리는지 확인해 주세요. 이미 입력된 글·이미지를 확인하기 전에는 재생성하지 마세요. [NAVER_OPERATION_TIMEOUT]',
+    };
+  }
+
+  if (/net::ERR_|network/i.test(detail)) {
     return {
       code: 'NAVER_NETWORK_ERROR',
       message: '네이버 화면을 열 수 없습니다. 인터넷 연결을 확인해 주세요.',
