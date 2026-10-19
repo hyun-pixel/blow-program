@@ -234,20 +234,20 @@ describe('네이버 편집기 제목·본문 입력', () => {
     expect(body.locator.fill).not.toHaveBeenCalled();
     expect(title.read()).toBe('컨테이너 제목');
     expect(body.read()).toBe('첫 문단\n\n둘째 문단');
-    expect(page.keyboard.insertText).toHaveBeenCalledTimes(
-      Array.from('컨테이너 제목첫 문단둘째 문단').length,
-    );
-    expect(page.waitForTimeout).toHaveBeenCalledWith(12);
+    expect(page.keyboard.insertText).toHaveBeenCalledTimes(3);
+    expect(page.keyboard.insertText).toHaveBeenNthCalledWith(1, '컨테이너 제목');
+    expect(page.keyboard.insertText).toHaveBeenNthCalledWith(2, '첫 문단');
+    expect(page.keyboard.insertText).toHaveBeenNthCalledWith(3, '둘째 문단');
     expect(page.waitForTimeout).toHaveBeenCalledWith(120);
   });
 
-  it('중단 신호를 받으면 다음 글자를 입력하지 않는다', async () => {
+  it('중단 신호를 받으면 다음 입력 단위를 보내지 않는다', async () => {
     const title = createEditable('', false);
     const body = createEditable('', false);
     const page = createEditorPage([title], [body]);
     const controller = new AbortController();
     vi.mocked(page.waitForTimeout).mockImplementation(async (timeout) => {
-      if (timeout === 12) {
+      if (timeout === 120) {
         controller.abort();
       }
     });
@@ -264,7 +264,7 @@ describe('네이버 편집기 제목·본문 입력', () => {
     });
 
     expect(page.keyboard.insertText).toHaveBeenCalledTimes(1);
-    expect(title.read()).toBe('중');
+    expect(title.read()).toBe('중단 확인 제목');
     expect(body.locator.click).not.toHaveBeenCalled();
   });
 
@@ -291,6 +291,21 @@ describe('네이버 편집기 제목·본문 입력', () => {
     expect(body.read()).toBe(
       '첫 문단입니다.\n\n둘째 문단입니다.\n\n셋째 문단입니다. 🙂',
     );
+  });
+  it('문단 검증을 기다리는 중 중단되면 다음 문단이나 줄바꿈을 입력하지 않는다', async () => {
+    const title = createEditable();
+    const body = createEditable('', false);
+    const page = createEditorPage([title], [body]);
+    const controller = new AbortController();
+    vi.mocked(page.waitForTimeout).mockImplementation(async (timeout) => {
+      if (timeout === 100) controller.abort();
+    });
+    await expect(new NaverEditorAdapter(page).enterAndVerify({
+      title: '검증 중단', paragraphs: ['첫 문단', '다음 문단'],
+    }, controller.signal)).rejects.toMatchObject({ code: 'EDITOR_INPUT_INTERRUPTED' });
+    expect(body.read()).toBe('첫 문단');
+    expect(page.keyboard.insertText).toHaveBeenCalledExactlyOnceWith('첫 문단');
+    expect(page.keyboard.press).not.toHaveBeenCalled();
   });
   it('기존 내용이 있으면 아무 글자도 입력하지 않고 중단한다', async () => {
     const title = createEditable('기존 제목');

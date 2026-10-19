@@ -7,7 +7,6 @@ import type { DraftContent } from './contracts.js';
 const TITLE_MAX_LENGTH = 100;
 const BODY_MAX_LENGTH = 10_000;
 const PARAGRAPH_MAX_COUNT = 100;
-const TYPING_DELAY_MS = 12;
 const FIELD_SETTLE_DELAY_MS = 120;
 const VERIFY_TIMEOUT_MS = 3_000;
 const VERIFY_INTERVAL_MS = 100;
@@ -348,18 +347,18 @@ async function requireBlankDraft(fields: EditorFields): Promise<void> {
   }
 }
 
-async function insertTextSlowly(
+async function insertText(
   page: Page,
   value: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  for (const character of value) {
-    throwIfInputInterrupted(signal);
-    await page.keyboard.insertText(character);
-    throwIfInputInterrupted(signal);
-    await page.waitForTimeout(TYPING_DELAY_MS);
-    throwIfInputInterrupted(signal);
-  }
+  throwIfInputInterrupted(signal);
+  // One native input transaction, not thousands of character/model-update races.
+  // Keep Enter events below so the rich editor still owns its paragraph model.
+  await page.keyboard.insertText(value);
+  throwIfInputInterrupted(signal);
+  await page.waitForTimeout(FIELD_SETTLE_DELAY_MS);
+  throwIfInputInterrupted(signal);
 }
 
 async function enterTitle(
@@ -380,15 +379,17 @@ async function enterTitle(
 
   await locator.click();
   throwIfInputInterrupted(signal);
-  await insertTextSlowly(page, title, signal);
+  await insertText(page, title, signal);
 }
 
 async function enterParagraphs(
   page: Page,
-  locator: Locator,
-  paragraphs: readonly string[],
+  fields: EditorFields,
+  content: DraftContent,
   signal?: AbortSignal,
 ): Promise<void> {
+  const locator = fields.body;
+  const { paragraphs } = content;
   throwIfInputInterrupted(signal);
   const isEditable = await locator.isEditable().catch(() => false);
   throwIfInputInterrupted(signal);
@@ -404,8 +405,20 @@ async function enterParagraphs(
   await locator.click();
   throwIfInputInterrupted(signal);
 
+  let repaired = false;
   for (let index = 0; index < paragraphs.length; index += 1) {
-    await insertTextSlowly(page, paragraphs[index]!, signal);
+    await insertText(page, paragraphs[index]!, signal);
+    const checkpoint = { title: content.title, paragraphs: paragraphs.slice(0, index + 1) };
+    try {
+      await verifyEnteredContent(page, fields, checkpoint, signal);
+    } catch (error) {
+      // Only repair our current paragraph in this initially blank draft, once
+      // per post. Never regenerate AI content or overwrite a changed prefix.
+      if (!(error instanceof NaverEditorError) || error.code !== 'EDITOR_INPUT_MISMATCH'
+        || repaired || !await repairCurrentParagraph(page, fields, checkpoint, signal)) throw error;
+      repaired = true;
+      await verifyEnteredContent(page, fields, checkpoint, signal);
+    }
 
     if (index < paragraphs.length - 1) {
       throwIfInputInterrupted(signal);
@@ -436,6 +449,57 @@ async function readNormalizedContent(
   };
 }
 
+async function repairCurrentParagraph(
+  page: Page,
+  fields: EditorFields,
+  expected: DraftContent,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  throwIfInputInterrupted(signal);
+  const before = await readNormalizedContent(fields);
+  if (before.title !== expected.title) return false;
+  const nodes = fields.body.locator('.se-text-paragraph, p');
+  const count = await nodes.count();
+  if (!count) return false;
+  const texts: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const node = nodes.nth(index);
+    if (!await node.isVisible()) return false;
+    texts.push(normalizeEditorTitle(await readEditableText(node)));
+  }
+  const prefix = texts.slice(0, -1).filter(Boolean);
+  const wanted = expected.paragraphs.at(-1)!;
+  const actual = texts.at(-1)!;
+  if (prefix.length !== expected.paragraphs.length - 1
+    || prefix.some((text, index) => text !== expected.paragraphs[index])
+    || before.body !== texts.filter(Boolean).join('\n\n')
+    || actual === wanted) return false;
+  // Missing characters only. Substitutions, foreign text and reordered content
+  // remain failures; accepting a shorter string as a success is never allowed.
+  let offset = 0;
+  for (const character of actual) {
+    const next = wanted.indexOf(character, offset);
+    if (next < 0) return false;
+    offset = next + character.length;
+  }
+  const target = nodes.nth(count - 1);
+  throwIfInputInterrupted(signal);
+  await target.selectText();
+  throwIfInputInterrupted(signal);
+  const selected = await target.evaluate(element => {
+    const selection = element.ownerDocument.getSelection();
+    if (!selection?.anchorNode || !selection.focusNode
+      || !element.contains(selection.anchorNode) || !element.contains(selection.focusNode)) return null;
+    return selection.toString();
+  });
+  const current = await readNormalizedContent(fields);
+  throwIfInputInterrupted(signal);
+  if (selected === null || normalizeEditorTitle(selected) !== actual
+    || current.title !== before.title || current.body !== before.body) return false;
+  await insertText(page, wanted, signal);
+  return true;
+}
+
 async function verifyEnteredContent(
   page: Page,
   fields: EditorFields,
@@ -452,17 +516,22 @@ async function verifyEnteredContent(
   let actual = await readNormalizedContent(fields);
   throwIfInputInterrupted(signal);
 
-  while (!matchesExpected(actual) && Date.now() < deadline) {
+  let confirmed = false;
+  while (Date.now() < deadline) {
+    const matched = matchesExpected(actual);
     await page.waitForTimeout(VERIFY_INTERVAL_MS);
     throwIfInputInterrupted(signal);
     actual = await readNormalizedContent(fields);
     throwIfInputInterrupted(signal);
+    if (matched && matchesExpected(actual)) { confirmed = true; break; }
   }
 
-  if (!matchesExpected(actual)) {
+  if (!confirmed) {
+    const actualParagraphs = normalizeEditorParagraphs(actual.body);
+    const paragraph = expected.paragraphs.findIndex((text, index) => text !== actualParagraphs[index]);
     throw new NaverEditorError(
       'EDITOR_INPUT_MISMATCH',
-      '네이버 편집기 입력이 중간에 누락됐습니다. 제목 ' +
+      `네이버 편집기 입력이 원문과 다릅니다.${paragraph >= 0 ? ` ${paragraph + 1}번째 문단을 확인해 주세요.` : ''} 제목 ` +
         actual.title.length +
         '/' +
         expected.title.length +
@@ -470,7 +539,7 @@ async function verifyEnteredContent(
         actual.body.length +
         '/' +
         expectedBody.length +
-        '자입니다.',
+        '자입니다. 잘못된 내용이 저장되지 않도록 중단했습니다. [EDITOR_INPUT_MISMATCH]',
     );
   }
 }
@@ -558,7 +627,7 @@ export class NaverEditorAdapter {
       await enterTitle(this.page, fields.title, content.title, signal);
       await this.page.waitForTimeout(FIELD_SETTLE_DELAY_MS);
       throwIfInputInterrupted(signal);
-      await enterParagraphs(this.page, fields.body, content.paragraphs, signal);
+      await enterParagraphs(this.page, fields, content, signal);
       await this.page.waitForTimeout(FIELD_SETTLE_DELAY_MS);
       throwIfInputInterrupted(signal);
       await verifyEnteredContent(this.page, fields, content, signal);

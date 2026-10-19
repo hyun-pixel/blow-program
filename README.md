@@ -4,9 +4,9 @@ BLOW는 브랜드 블로그 실무자가 글과 이미지를 준비하고, 전�
 
 ## 현재 테스트 배포
 
-현재 데스크톱 버전은 **0.1.18**입니다. 네이버 라이브러리 패널이 문단 오른쪽을 가릴 때 이미지 배치가 중단되는 문제를 수정했습니다. 화면 작업 대기 시간 초과는 인터넷 연결 오류와 구분해 안내합니다. 로그인 방식과 사용자 조작 시 안전 중단은 유지합니다.
+현재 데스크톱 테스트 배포는 **0.1.19**입니다. 문단 단위 입력·검증과 글당 최대 1회의 제한된 입력 복구를 추가했습니다. 처음에 빈 편집기였고 제목·이전 문단이 그대로인 경우에만 현재 문단의 누락을 원문으로 복구합니다. 원문 불일치를 허용하거나 AI를 자동 재생성하지 않습니다. 0.1.18의 이미지 패널 충돌 수정과 로그인 방식·사용자 조작 시 안전 중단은 유지합니다.
 
-- [0.1.18 Windows x64 테스트 설치파일 및 배포 안내](https://github.com/hyun-pixel/blow-program/releases/tag/v0.1.18)
+- [0.1.19 Windows x64 테스트 설치파일 및 배포 안내](https://github.com/hyun-pixel/blow-program/releases/tag/v0.1.19)
 - 설치파일은 미서명이며 Windows 보안 경고가 표시될 수 있습니다. Windows 11 별도 PC 및 실제 네이버 연결 검수는 추가로 필요합니다.
 - 업데이트할 때 BLOW를 종료한 뒤 새 설치파일을 실행하세요. 기존 프로그램을 먼저 제거하면 로컬 설정과 작업 내역이 삭제될 수 있습니다.
 
@@ -66,9 +66,12 @@ Chrome이 설치된 개발 PC에서는 다음 명령으로 각 자동화 경계�
 npm run poc:mock
 npm run poc:naver:public
 node --import tsx apps/desktop/scripts/check-image-panel-placement.ts
+node --import tsx apps/desktop/scripts/check-writing-batch.ts
 ```
 
 `check-image-panel-placement.ts`는 외부 접속 없이 로컬 Chrome에서 라이브러리 패널·확대 화면·프레임 안의 이미지 2장 배치와 완전히 가려진 화면의 안전 중단을 검증합니다. 유료 API를 호출하지 않습니다.
+
+`check-writing-batch.ts`는 로컬 Chrome에서 20개 글의 실제 입력·검증·이미지 배치·저장 확인을 연속 실행합니다. AI와 작업 내역은 대역이며 외부 요청은 차단합니다. 일부 입력 누락·지연을 주입하고 원문 복구, 중복 생성/저장 방지, 기존 문단 변경·사용자 중단 시 안전 중단을 검사합니다. 실제 네이버와 Windows 11에서의 검증을 대신하지는 않습니다. `--safety-only`로 복구·중단 조건만 확인할 수 있습니다.
 
 `poc:naver:public`은 새 임시 Chrome 프로필로 네이버 공개 화면만 열고, 비로그인 상태를 안전하게 감지한 뒤 임시 프로필을 삭제합니다.
 
